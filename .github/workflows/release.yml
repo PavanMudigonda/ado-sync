@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: >
+          Version bump type (patch | minor | major) or explicit version (e.g. 1.2.3).
+          Current version is shown in package.json.
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Bump version & publish release
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write       # to push commits, tags, and publish the GitHub release
+      pull-requests: write  # release-drafter needs this to read PR labels
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+        with:
+          # Use a PAT so the pushed tag triggers downstream workflows (publish.yml).
+          # Falls back to GITHUB_TOKEN (which does NOT retrigger workflows) when
+          # RELEASE_TOKEN is not set — fine for repos that use workflow_dispatch publish.
+          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6.3.0
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check & build
+        run: npx tsc --noEmit && npm run build
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version in package.json
+        id: bump
+        run: |
+          NEW_VERSION=$(npm version "${{ github.event.inputs.version }}" --no-git-tag-version)
+          # npm version outputs  "v1.2.3"
+          echo "version=${NEW_VERSION#v}" >> "$GITHUB_OUTPUT"
+          echo "tag=${NEW_VERSION}"       >> "$GITHUB_OUTPUT"
+
+      - name: Commit, tag, and push
+        run: |
+          git add package.json package-lock.json
+          git commit -m "chore: release ${{ steps.bump.outputs.tag }}"
+          git tag "${{ steps.bump.outputs.tag }}"
+          git push origin HEAD --tags
+
+      - name: Publish GitHub release (from draft)
+        uses: release-drafter/release-drafter@v6
+        with:
+          publish: true
+          tag: ${{ steps.bump.outputs.tag }}
+          name: ${{ steps.bump.outputs.tag }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

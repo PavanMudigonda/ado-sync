@@ -1,0 +1,70 @@
+name-template: 'v$RESOLVED_VERSION'
+tag-template: 'v$RESOLVED_VERSION'
+
+categories:
+  - title: '🚀 Features'
+    labels:
+      - 'feature'
+      - 'enhancement'
+      - 'type: feature'
+  - title: '🐛 Bug Fixes'
+    labels:
+      - 'fix'
+      - 'bugfix'
+      - 'bug'
+      - 'type: bug'
+  - title: '📚 Documentation'
+    labels:
+      - 'documentation'
+      - 'docs'
+      - 'type: docs'
+  - title: '🧰 Maintenance'
+    labels:
+      - 'chore'
+      - 'dependencies'
+      - 'maintenance'
+      - 'type: chore'
+  - title: '⚡ Performance'
+    labels:
+      - 'performance'
+      - 'type: performance'
+
+version-resolver:
+  major:
+    labels:
+      - 'major'
+      - 'breaking-change'
+      - 'type: breaking'
+  minor:
+    labels:
+      - 'minor'
+      - 'feature'
+      - 'enhancement'
+      - 'type: feature'
+  patch:
+    labels:
+      - 'patch'
+      - 'fix'
+      - 'bugfix'
+      - 'bug'
+      - 'chore'
+      - 'dependencies'
+      - 'maintenance'
+      - 'documentation'
+      - 'docs'
+      - 'performance'
+  default: patch
+
+exclude-labels:
+  - 'skip-changelog'
+  - 'wip'
+
+change-template: '- $TITLE @$AUTHOR (#$NUMBER)'
+change-title-escapes: '\<*_&'
+
+template: |
+  ## What's Changed
+
+  $CHANGES
+
+  **Full Changelog**: $PREVIOUS_TAG...v$RESOLVED_VERSION
