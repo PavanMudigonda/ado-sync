@@ -1,0 +1,22 @@
+# Source — published package only needs dist/
+src/
+specs/
+
+# Reference / vendor directories
+playwright-bdd/
+
+# Config / tooling
+.github/
+.prettierrc
+eslint.config.js
+tsconfig.json
+*.config.ts
+
+# Dev / test artifacts
+node_modules/
+*.log
+.env
+.env.*
+
+# Misc
+.DS_Store
