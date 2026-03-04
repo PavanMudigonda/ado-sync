@@ -52,7 +52,7 @@ export interface SyncConfig {
   /** Local spec sources */
   local: {
     /** 'gherkin' for .feature files, 'markdown' for .md spec files */
-    type: 'gherkin' | 'markdown';
+    type: 'gherkin' | 'markdown' | 'csv' | 'excel';
     /** Glob pattern(s) relative to config file location */
     include: string | string[];
     /** Glob pattern(s) to exclude */

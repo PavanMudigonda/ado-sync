@@ -80,7 +80,9 @@ function validateConfig(cfg: SyncConfig, filePath: string): void {
   if (!cfg.testPlan?.id && !cfg.testPlans?.length) {
     err('"testPlan.id" or "testPlans" array is required');
   }
-  if (!cfg.local?.type) err('"local.type" is required (gherkin | markdown)');
+  if (!cfg.local?.type) err('"local.type" is required (gherkin | markdown | csv | excel)');
+  if (!['gherkin', 'markdown', 'csv', 'excel'].includes(cfg.local.type))
+    err(`"local.type" must be one of: gherkin, markdown, csv, excel (got "${cfg.local.type}")`);
   if (!cfg.local?.include) err('"local.include" is required');
 }
 
