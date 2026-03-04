@@ -18,8 +18,7 @@
 
 import * as fs from 'fs';
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const JSZip = require('jszip');
+import JSZip from 'jszip';
 
 import { LinkConfig, ParsedTest } from '../types';
 import { parseTabularRows, TabularRow } from './tabular';
@@ -131,7 +130,7 @@ export async function writebackExcel(filePath: string, title: string, id: number
 
   if (!sheetKey) throw new Error(`No worksheet found in ${filePath}`);
 
-  let xml: string = await zip.file(sheetKey).async('string');
+  let xml: string = await zip.file(sheetKey)!.async('string');
   const hasBom = xml.startsWith('\uFEFF');
   if (hasBom) xml = xml.slice(1);
 
