@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 
-import * as path from 'path';
-import * as fs from 'fs';
-import { Command } from 'commander';
-import chalk from 'chalk';
 import 'dotenv/config';
 
-import { loadConfig, resolveConfigPath, CONFIG_TEMPLATE_JSON } from './config';
-import { push, pull, status } from './sync/engine';
+import chalk from 'chalk';
+import { Command } from 'commander';
+import * as fs from 'fs';
+import * as path from 'path';
+
+import { CONFIG_TEMPLATE_JSON,loadConfig, resolveConfigPath } from './config';
+import { pull, push, status } from './sync/engine';
 import { SyncResult } from './types';
 
 // ─── CLI definition ───────────────────────────────────────────────────────────

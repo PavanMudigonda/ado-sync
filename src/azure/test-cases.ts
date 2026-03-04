@@ -15,8 +15,9 @@
  */
 
 import { XMLBuilder, XMLParser } from 'fast-xml-parser';
-import { AzureClient } from './client';
+
 import { AzureStep, AzureTestCase, ParsedTest, SyncConfig } from '../types';
+import { AzureClient } from './client';
 
 // ─── XML helpers ─────────────────────────────────────────────────────────────
 
@@ -95,10 +96,6 @@ function parseStepsXml(xml: string): AzureStep[] {
 }
 
 // ─── Tag helpers ─────────────────────────────────────────────────────────────
-
-function tagsToString(tags: string[]): string {
-  return tags.join('; ');
-}
 
 function tagsFromString(raw: string | undefined): string[] {
   if (!raw) return [];

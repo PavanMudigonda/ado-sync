@@ -1,6 +1,7 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import * as yaml from 'js-yaml';
+import * as path from 'path';
+
 import { SyncConfig } from './types';
 
 const CONFIG_FILENAMES = ['ado-sync.json', 'ado-sync.yml', 'ado-sync.yaml'];
