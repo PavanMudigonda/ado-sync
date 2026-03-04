@@ -436,14 +436,18 @@ export async function updateTestCase(
     expected: s.expected ?? '',
   }));
 
-  const filteredTags = test.tags
-    .filter((t) => !t.startsWith(syncCfg.tagPrefix + ':'))
-    .join('; ');
+  const localTags = test.tags.filter((t) => !t.startsWith(syncCfg.tagPrefix + ':'));
+
+  // Fetch existing Azure tags and merge: preserve any Azure-only tags, add new local tags
+  const wi = await wit.getWorkItem(id, ['System.Tags']);
+  const existingAzureTags = tagsFromString((wi?.fields?.['System.Tags'] as string | undefined) ?? '');
+  const mergedTags = [...new Set([...existingAzureTags, ...localTags])];
+  const mergedTagsValue = mergedTags.join('; ');
 
   const patchDoc: any[] = [
     { op: 'replace', path: `/fields/${titleField}`, value: test.title },
     { op: 'replace', path: '/fields/Microsoft.VSTS.TCM.Steps', value: buildStepsXml(steps) },
-    { op: 'replace', path: '/fields/System.Tags', value: filteredTags },
+    { op: 'replace', path: '/fields/System.Tags', value: mergedTagsValue },
   ];
 
   if (test.description !== undefined) {
