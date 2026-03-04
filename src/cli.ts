@@ -7,7 +7,7 @@ import { Command } from 'commander';
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { applyOverrides, CONFIG_TEMPLATE_JSON, loadConfig, resolveConfigPath } from './config';
+import { applyOverrides, CONFIG_TEMPLATE_JSON, CONFIG_TEMPLATE_YAML, loadConfig, resolveConfigPath } from './config';
 import { pull, push, status } from './sync/engine';
 import { SyncResult } from './types';
 
@@ -31,16 +31,18 @@ function collect(value: string, previous: string[]): string[] {
 // ─── init ─────────────────────────────────────────────────────────────────────
 
 program
-  .command('init')
-  .description('Generate a starter ado-sync.json config file')
-  .option('-o, --output <path>', 'Output path', 'ado-sync.json')
-  .action((opts) => {
-    const outPath = path.resolve(opts.output);
+  .command('init [output]')
+  .description('Generate a starter config file (default: ado-sync.json). Pass ado-sync.yml for YAML.')
+  .action((output: string | undefined) => {
+    const outFile = output ?? 'ado-sync.json';
+    const outPath = path.resolve(outFile);
     if (fs.existsSync(outPath)) {
       console.error(chalk.red(`File already exists: ${outPath}`));
       process.exit(1);
     }
-    fs.writeFileSync(outPath, CONFIG_TEMPLATE_JSON, 'utf8');
+    const ext = path.extname(outFile).toLowerCase();
+    const isYaml = ext === '.yml' || ext === '.yaml';
+    fs.writeFileSync(outPath, isYaml ? CONFIG_TEMPLATE_YAML : CONFIG_TEMPLATE_JSON, 'utf8');
     console.log(chalk.green(`Created ${outPath}`));
     console.log(chalk.dim('Edit the file with your Azure DevOps details, then run:'));
     console.log(chalk.dim('  ado-sync push   (to create test cases from local specs)'));
