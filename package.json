@@ -1,0 +1,52 @@
+{
+  "name": "ado-sync",
+  "version": "0.1.0",
+  "description": "Bidirectional sync between local test specs (Cucumber/Markdown) and Azure DevOps Test Cases",
+  "bin": {
+    "ado-sync": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "clean": "rm -rf dist",
+    "dev": "ts-node src/cli.ts",
+    "lint": "eslint src --ext .ts --quiet",
+    "lint:fix": "eslint src --ext .ts --fix --quiet",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "keywords": [
+    "azure-devops",
+    "test-sync",
+    "cucumber",
+    "gherkin",
+    "playwright",
+    "specsync"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@azure/identity": "^4.12.0",
+    "@cucumber/gherkin": "^29.0.0",
+    "@cucumber/messages": "^26.0.0",
+    "@cucumber/tag-expressions": "^6.2.0",
+    "azure-devops-node-api": "^15.1.1",
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.5",
+    "fast-xml-parser": "^4.4.1",
+    "glob": "^11.0.0",
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.16.5",
+    "@typescript-eslint/eslint-plugin": "^8.41.0",
+    "@typescript-eslint/parser": "^8.41.0",
+    "eslint": "^9.34.0",
+    "prettier": "^3.6.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2"
+  }
+}
