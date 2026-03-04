@@ -43,6 +43,7 @@ function buildStepsXml(steps: AzureStep[]): string {
   const builder = new XMLBuilder({
     ignoreAttributes: false,
     attributeNamePrefix: '@_',
+    suppressBooleanAttributes: false, // keep ="true" on isformatted attribute
     format: false,
   });
 
