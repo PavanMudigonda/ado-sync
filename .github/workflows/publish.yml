@@ -45,18 +45,16 @@ jobs:
       - name: Build
         run: npm run build
 
-      # Verify the package version matches the git tag
-      # Tag format: v1.2.3  →  package.json version: 1.2.3
-      - name: Verify version matches tag
+      # Stamp the exact release tag version into package.json before publishing.
+      # This ensures npm always publishes the version that matches the GitHub release,
+      # regardless of what was previously committed in package.json.
+      # Tag format: v1.2.3  →  npm version: 1.2.3
+      - name: Set version from release tag
         if: github.event_name == 'release'
         run: |
-          PKG_VERSION=$(node -p "require('./package.json').version")
           TAG_VERSION="${GITHUB_REF_NAME#v}"
-          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
-            echo "❌ package.json version ($PKG_VERSION) does not match git tag ($TAG_VERSION)"
-            exit 1
-          fi
-          echo "✓ Version $PKG_VERSION matches tag $GITHUB_REF_NAME"
+          npm version "$TAG_VERSION" --no-git-tag-version --allow-same-version
+          echo "✓ package.json version set to $TAG_VERSION (from tag $GITHUB_REF_NAME)"
 
       - name: Publish (dry run)
         if: github.event.inputs.dry_run == 'true'
