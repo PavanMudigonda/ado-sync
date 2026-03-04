@@ -62,7 +62,7 @@ Test data examples:
 Each scenario assumes a blank/fresh state unless noted. Steps are written so any tester can follow them manually or translate them to automated tests.
 
 ### 1. Login (happy path)
-<!-- tc: 32782 -->
+
 Assumption: Fresh browser session, user at `https://www.saucedemo.com/`.
 
 Steps:
@@ -76,7 +76,7 @@ Expected results:
 ---
 
 ### 2. Add a single item to cart and complete checkout (happy path)
-<!-- tc: 32806 -->
+
 Assumptions: Logged in as `standard_user`. Fresh session.
 
 Steps:
@@ -100,7 +100,6 @@ Expected results:
 ---
 
 ### 3. Add multiple items and verify totals (2 or more items)
-<!-- tc: 32807 -->
 
 Assumptions: Logged in as `standard_user`.
 
@@ -135,7 +134,6 @@ Expected results:
 ---
 
 ### 5. Checkout with missing required fields (negative)
-<!-- tc: 32787 -->
 
 Assumptions: Logged in and at least one item in cart.
 
@@ -154,7 +152,6 @@ Failure condition: Form submits with missing data or no error is shown.
 ---
 
 ### 6. Direct checkout URL access without items in cart (edge case)
-<!-- tc: 32788 -->
 
 Assumptions: Fresh session, logged in as `standard_user`, cart empty.
 
@@ -169,7 +166,6 @@ Failure conditions: The app allows a checkout flow to finish with no items or th
 ---
 
 ### 7. Locked out user (login negative test relevant to checkout)
-<!-- tc: 32789 -->
 
 Assumptions: Fresh session.
 
@@ -185,7 +181,6 @@ Success criteria: Proper error message and no redirect.
 ---
 
 ### 8. Problem user / visual anomalies (UI correctness)
-<!-- tc: 32790 -->
 
 Context: The `problem_user` account may show UI problems intentionally.
 
@@ -201,7 +196,6 @@ Success criteria: Any anomalies are captured as bugs with reproduction steps.
 ---
 
 ### 9. Performance glitch user (slow-loading) — robustness check
-<!-- tc: 32791 -->
 
 Context: `performance_glitch_user` is intended to simulate slow responses.
 
@@ -217,7 +211,6 @@ Failure conditions: Timeouts, JS errors, or broken UI navigation.
 ---
 
 ### 10. End-to-end persistence check (refresh during checkout)
-<!-- tc: 32808 -->
 
 Assumptions: Logged in, items in cart.
 

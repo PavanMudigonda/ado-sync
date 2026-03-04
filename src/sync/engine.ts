@@ -163,13 +163,21 @@ async function pushSingle(
         const remote = await getTestCase(client, test.azureId, titleField);
 
         if (!remote) {
-          results.push({
-            action: 'error',
-            filePath: test.filePath,
-            title: test.title,
-            azureId: test.azureId,
-            detail: `Test case #${test.azureId} not found in Azure DevOps`,
-          });
+          // TC was deleted from Azure — re-create it and write back the new ID.
+          let newId: number | undefined;
+          if (!opts.dryRun) {
+            const suiteIdOverride = byFolder
+              ? await getOrCreateSuiteForFile(client, config, test.filePath, configDir, suiteCache)
+              : undefined;
+            newId = await createTestCase(client, test, config, suiteIdOverride);
+            createdIds.add(newId);
+            if (!disableLocal) {
+              pendingWritebacks.push({ test, newId });
+            }
+            const created = await getTestCase(client, newId, titleField);
+            if (created) updateCacheEntry(cache, test, created);
+          }
+          results.push({ action: 'created', filePath: test.filePath, title: test.title, azureId: newId });
           continue;
         }
 
@@ -316,6 +324,7 @@ async function pullSingle(
   const tests = parseLocalFiles(files, config, opts.tags);
   const client = await AzureClient.create(config);
   const titleField = config.sync?.titleField ?? 'System.Title';
+  const tagPrefix = config.sync?.tagPrefix ?? 'tc';
   const disableLocal = config.sync?.disableLocalChanges ?? false;
   const results: SyncResult[] = [];
   const cache = loadCache(configDir);
@@ -327,12 +336,13 @@ async function pullSingle(
       const remote = await getTestCase(client, test.azureId!, titleField);
 
       if (!remote) {
+        // TC was deleted from Azure — skip on pull; run push to re-create it.
         results.push({
-          action: 'error',
+          action: 'skipped',
           filePath: test.filePath,
           title: test.title,
           azureId: test.azureId,
-          detail: `Test case #${test.azureId} not found in Azure DevOps`,
+          detail: `TC #${test.azureId} not found in Azure (run push to re-create)`,
         });
         continue;
       }
@@ -355,7 +365,8 @@ async function pullSingle(
             remote.title,
             remote.steps.map((s) => ({ keyword: 'Step', text: s.action, expected: s.expected })),
             remote.description,
-            config.local.type
+            config.local.type,
+            tagPrefix
           );
         }
         updateCacheEntry(cache, test, remote);
@@ -414,12 +425,13 @@ function applyRemoteToLocal(
   newTitle: string,
   newSteps: ParsedStep[],
   newDescription: string | undefined,
-  localType: 'gherkin' | 'markdown'
+  localType: 'gherkin' | 'markdown',
+  tagPrefix: string
 ): void {
   if (localType === 'gherkin') {
     applyRemoteToGherkin(test, newTitle, newSteps);
   } else {
-    applyRemoteToMarkdown(test, newTitle, newSteps, newDescription);
+    applyRemoteToMarkdown(test, newTitle, newSteps, newDescription, tagPrefix);
   }
 }
 
@@ -467,7 +479,8 @@ function applyRemoteToMarkdown(
   test: ParsedTest,
   newTitle: string,
   newSteps: ParsedStep[],
-  newDescription: string | undefined
+  newDescription: string | undefined,
+  tagPrefix: string
 ): void {
   const raw = fs.readFileSync(test.filePath, 'utf8');
   const lines = raw.split('\n');
@@ -483,7 +496,8 @@ function applyRemoteToMarkdown(
   const EXPECTED_RE = /^\*{0,2}expected\s+results?\s*:\*{0,2}$/i;
   const SEPARATOR_RE = /^---+\s*$/;
   const HEADING_RE = /^#{1,6}\s/;
-  const COMMENT_RE = /^<!--/;
+  // Matches HTML comment lines (legacy) and plain @tc:ID tag lines (new format)
+  const COMMENT_RE = new RegExp(`^<!--|^@${tagPrefix}:\\d+`);
 
   // Find boundaries: description block, steps block, expected block
   let descEnd = -1;   // line index where description content ends (exclusive)

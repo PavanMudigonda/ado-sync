@@ -47,8 +47,19 @@ function stripBold(s: string): string {
   return s.replace(/^\*+/, '').replace(/\*+$/, '');
 }
 const SEPARATOR_RE = /^---+\s*$/;
+// Matches the new plain-tag format "@tc:12345" on its own line,
+// and the legacy HTML comment "<!-- tc: 12345 -->" / "<!-- @tc:12345 -->" for backward compat.
+const mdTcTagRe = (prefix: string) => new RegExp(`^\\s*@${prefix}:(\\d+)\\s*$`);
 const mdTcCommentRe = (prefix: string) =>
   new RegExp(`<!--\\s*@?${prefix}\\s*:\\s*(\\d+)\\s*-->`, 'i');
+function findTcId(prefix: string, blockText: string): number | undefined {
+  const m = blockText.match(mdTcTagRe(prefix)) ?? blockText.match(new RegExp(`<!--\\s*@?${prefix}\\s*:\\s*(\\d+)\\s*-->`, 'im'));
+  return m ? parseInt(m[1], 10) : undefined;
+}
+function isTcLine(prefix: string, line: string): boolean {
+  const t = line.trim();
+  return mdTcTagRe(prefix).test(t) || mdTcCommentRe(prefix).test(t);
+}
 const TAGS_COMMENT_RE = /<!--\s*tags\s*:\s*([^>]+)-->/i;
 
 // ─── Parser ──────────────────────────────────────────────────────────────────
@@ -94,14 +105,8 @@ function parseScenarioBlock(
   const lines = block.lines;
   const blockText = lines.join('\n');
 
-  const tcRe = mdTcCommentRe(tagPrefix);
-
-  // Find ID comment
-  let azureId: number | undefined;
-  const tcComment = blockText.match(tcRe);
-  if (tcComment) {
-    azureId = parseInt(tcComment[1], 10);
-  }
+  // Find ID — plain "@tc:12345" line (new) or legacy HTML comment (backward compat)
+  const azureId = findTcId(tagPrefix, blockText);
 
   // Find <!-- tags: @smoke, @regression --> comment (Gap 5)
   const blockTags: string[] = [...pathTags];
@@ -123,7 +128,7 @@ function parseScenarioBlock(
   const expectedLines: string[] = [];
 
   for (const line of lines) {
-    if (tcRe.test(line)) continue;       // skip ID comment lines
+    if (isTcLine(tagPrefix, line)) continue;  // skip ID tag/comment lines
     if (TAGS_COMMENT_RE.test(line)) continue; // skip tags comment lines
 
     if (STEPS_HEADING_RE.test(stripBold(line.trim()))) {
