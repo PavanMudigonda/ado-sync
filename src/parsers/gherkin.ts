@@ -5,11 +5,11 @@
  * playwright-bdd). This produces both the GherkinDocument (AST) and Pickles
  * (compiled, example-substituted scenarios) in a single pass.
  *
- * Pickles are the canonical unit of work — they already have:
- *   - Example values substituted in titles and step text
- *   - Background steps merged into every scenario
- *   - Tags inherited from Feature + Scenario + Examples blocks
- *   - Step type (Context/Action/Outcome) instead of keyword
+ * For regular Scenarios:   uses Pickles (background-merged, already correct).
+ * For Scenario Outlines:   uses the AST directly to produce ONE ParsedTest
+ *                          with template steps and an outlineParameters table,
+ *                          so Azure gets a single parametrized TC instead of
+ *                          one TC per example row.
  *
  * ID tag convention:  @tc:12345  (prefix configurable via sync.tagPrefix)
  *
@@ -19,11 +19,23 @@
  */
 
 import { generateMessages } from '@cucumber/gherkin';
-import { GherkinDocument, IdGenerator, Pickle, PickleStep,SourceMediaType } from '@cucumber/messages';
+import {
+  GherkinDocument,
+  IdGenerator,
+  Pickle,
+  PickleStep,
+  Scenario,
+  SourceMediaType,
+  Step,
+  TableRow,
+} from '@cucumber/messages';
 import * as fs from 'fs';
-import * as path from 'path';
 
-import { ParsedStep, ParsedTest } from '../types';
+import { LinkConfig, ParsedStep, ParsedTest } from '../types';
+import { extractLinkRefs, extractPathTags } from './shared';
+
+// Re-export for backward-compatibility
+export { extractPathTags };
 
 // ─── Step type → keyword mapping ─────────────────────────────────────────────
 
@@ -54,27 +66,6 @@ export function extractAzureId(tags: string[], tagPrefix: string): number | unde
 }
 
 /**
- * Extract auto-tags from directory segments that start with '@'.
- *
- * Given  /project/specs/@smoke/@regression/login.feature
- * returns ['smoke', 'regression']
- */
-export function extractPathTags(filePath: string): string[] {
-  const segments = filePath.split(path.sep);
-  const tags: string[] = [];
-  // Walk directory segments (not the filename itself)
-  for (let i = 0; i < segments.length - 1; i++) {
-    const seg = segments[i];
-    // A segment may contain multiple @tags separated by spaces or be just one tag
-    const matches = seg.match(/@[^\s@/\\]+/g);
-    if (matches) {
-      tags.push(...matches.map(stripAt));
-    }
-  }
-  return tags;
-}
-
-/**
  * Given a GherkinDocument and a pickle, find the source line of the
  * scenario that produced this pickle (using astNodeIds).
  */
@@ -102,9 +93,59 @@ function pickleStepToParsedStep(step: PickleStep): ParsedStep {
   };
 }
 
+/**
+ * Build a ParsedTest from a ScenarioOutline AST node.
+ * Produces one TC with template step text (keeping <param> angle brackets)
+ * and an outlineParameters table for Azure's parametrized TC format.
+ */
+function scenarioOutlineToParsedTest(
+  scenario: Scenario,
+  filePath: string,
+  pathTags: string[],
+  tagPrefix: string,
+  linkConfigs: LinkConfig[] | undefined
+): ParsedTest {
+  const scenarioTags = scenario.tags.map((t) => stripAt(t.name));
+  const allTags = [...new Set([...pathTags, ...scenarioTags])];
+
+  // Template steps keep <param> angle-bracket syntax as-is
+  const steps: ParsedStep[] = (scenario.steps as Step[]).map((s) => ({
+    keyword: (s.keyword ?? '').trim(),
+    text: s.text.trim(),
+  }));
+
+  // Merge all Examples tables (may be multiple blocks)
+  let headers: string[] = [];
+  const rows: string[][] = [];
+
+  for (const examples of scenario.examples ?? []) {
+    if (!examples.tableHeader) continue;
+    const exHeaders = examples.tableHeader.cells.map((c) => c.value);
+    if (!headers.length) headers = exHeaders;
+    for (const bodyRow of examples.tableBody as TableRow[]) {
+      rows.push(bodyRow.cells.map((c) => c.value));
+    }
+  }
+
+  return {
+    filePath,
+    title: scenario.name.trim(),
+    steps,
+    tags: allTags,
+    azureId: extractAzureId(allTags, tagPrefix),
+    line: scenario.location?.line ?? 1,
+    outlineParameters: headers.length ? { headers, rows } : undefined,
+    linkRefs: extractLinkRefs(allTags, linkConfigs),
+  };
+}
+
 // ─── Public parser ────────────────────────────────────────────────────────────
 
-export function parseGherkinFile(filePath: string, tagPrefix: string): ParsedTest[] {
+export function parseGherkinFile(
+  filePath: string,
+  tagPrefix: string,
+  linkConfigs?: LinkConfig[]
+): ParsedTest[] {
   const source = fs.readFileSync(filePath, 'utf8');
   const newId = IdGenerator.uuid();
 
@@ -143,18 +184,67 @@ export function parseGherkinFile(filePath: string, tagPrefix: string): ParsedTes
   // Tags from directory path segments (e.g. specs/@smoke/ → 'smoke')
   const pathTags = extractPathTags(filePath);
 
-  return pickles.map((pickle): ParsedTest => {
-    // Pickle tags already include Feature + Scenario + Examples tags (inherited)
+  const results: ParsedTest[] = [];
+
+  // Collect all Scenario nodes from the AST (including inside Rules)
+  const allScenarios: Scenario[] = [];
+  for (const child of doc.feature?.children ?? []) {
+    if (child.scenario) allScenarios.push(child.scenario);
+    if (child.rule) {
+      for (const rc of child.rule.children ?? []) {
+        if (rc.scenario) allScenarios.push(rc.scenario);
+      }
+    }
+  }
+
+  // Identify outline scenarios (have at least one non-empty examples table)
+  const outlineIds = new Set<string>(
+    allScenarios
+      .filter((s) => s.examples?.some((ex) => (ex.tableBody?.length ?? 0) > 0))
+      .map((s) => s.id)
+  );
+
+  // For Scenario Outlines: one ParsedTest per outline (not per example row)
+  for (const scenario of allScenarios) {
+    if (outlineIds.has(scenario.id)) {
+      results.push(
+        scenarioOutlineToParsedTest(scenario, filePath, pathTags, tagPrefix, linkConfigs)
+      );
+    }
+  }
+
+  // Build set of all AST node IDs that belong to outlines (scenario + example rows)
+  const outlineAstNodeIds = new Set<string>();
+  for (const scenario of allScenarios) {
+    if (!outlineIds.has(scenario.id)) continue;
+    outlineAstNodeIds.add(scenario.id);
+    for (const ex of scenario.examples ?? []) {
+      for (const row of ex.tableBody ?? []) {
+        outlineAstNodeIds.add(row.id);
+      }
+    }
+  }
+
+  // For regular Scenarios: use pickles (background steps merged, correct keywords)
+  for (const pickle of pickles) {
+    // Skip pickles that originate from an outline
+    if (pickle.astNodeIds.some((id) => outlineAstNodeIds.has(id))) continue;
+
     const pickleTags = pickle.tags.map((t) => stripAt(t.name));
     const allTags = [...new Set([...pathTags, ...pickleTags])];
 
-    return {
+    results.push({
       filePath,
       title: pickle.name.trim(),
       steps: pickle.steps.map(pickleStepToParsedStep),
       tags: allTags,
       azureId: extractAzureId(allTags, tagPrefix),
       line: findScenarioLine(doc, pickle),
-    };
-  });
+      linkRefs: extractLinkRefs(allTags, linkConfigs),
+    });
+  }
+
+  // Sort by line number to preserve file order
+  results.sort((a, b) => a.line - b.line);
+  return results;
 }
