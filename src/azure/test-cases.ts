@@ -34,7 +34,7 @@ function escapeHtml(str: string): string {
 }
 
 function wrapDiv(text: string): string {
-  return `<DIV><P><B>${escapeHtml(text)}</B></P></DIV>`;
+  return `<DIV><P>${escapeHtml(text)}</P></DIV>`;
 }
 
 function buildStepsXml(steps: AzureStep[]): string {
