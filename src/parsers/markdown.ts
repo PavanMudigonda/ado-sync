@@ -10,7 +10,7 @@
  *   ### 1. Scenario title      ← H3 heading = one test case
  *
  *   <!-- tags: @smoke, @regression -->   ← optional tags (Gap 5)
- *   <!-- tc: 12345 -->                   ← written back after first push
+ *   <!-- @tc:12345 -->                    ← written back after first push
  *
  *   Assumption: ...            ← optional prose, used as description
  *
@@ -48,7 +48,7 @@ function stripBold(s: string): string {
 }
 const SEPARATOR_RE = /^---+\s*$/;
 const mdTcCommentRe = (prefix: string) =>
-  new RegExp(`<!--\\s*${prefix}\\s*:\\s*(\\d+)\\s*-->`, 'i');
+  new RegExp(`<!--\\s*@?${prefix}\\s*:\\s*(\\d+)\\s*-->`, 'i');
 const TAGS_COMMENT_RE = /<!--\s*tags\s*:\s*([^>]+)-->/i;
 
 // ─── Parser ──────────────────────────────────────────────────────────────────
