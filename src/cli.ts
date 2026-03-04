@@ -10,6 +10,7 @@ import * as path from 'path';
 import { applyOverrides, CONFIG_TEMPLATE_JSON, CONFIG_TEMPLATE_YAML, loadConfig, resolveConfigPath } from './config';
 import { pull, push, status } from './sync/engine';
 import { SyncResult } from './types';
+import pkg from '../package.json';
 
 // ─── CLI definition ───────────────────────────────────────────────────────────
 
@@ -18,7 +19,7 @@ const program = new Command();
 program
   .name('ado-sync')
   .description('Bidirectional sync between local test specs and Azure DevOps Test Cases')
-  .version('0.1.0');
+  .version(pkg.version);
 
 // Global option: --config / -c
 program.option('-c, --config <path>', 'Path to config file (default: ado-sync.json)');

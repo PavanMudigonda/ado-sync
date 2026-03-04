@@ -441,7 +441,8 @@ function applyRemoteToGherkin(test: ParsedTest, newTitle: string, newSteps: Pars
     stepEnd++;
   }
 
-  const stepLines = newSteps.map((s) => `    ${s.keyword} ${s.text}`);
+  // s.text == Azure action which already includes the keyword (e.g. "Given I navigate to...")
+  const stepLines = newSteps.map((s) => `    ${s.text}`);
   lines.splice(stepStart, stepEnd - stepStart, ...stepLines);
 
   fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
@@ -478,8 +479,8 @@ function applyRemoteToMarkdown(
     `$1${newTitle}`
   );
 
-  const STEPS_RE = /^steps\s*:/i;
-  const EXPECTED_RE = /^expected\s+results?\s*:/i;
+  const STEPS_RE = /^\*{0,2}steps\s*:\*{0,2}$/i;
+  const EXPECTED_RE = /^\*{0,2}expected\s+results?\s*:\*{0,2}$/i;
   const SEPARATOR_RE = /^---+\s*$/;
   const HEADING_RE = /^#{1,6}\s/;
   const COMMENT_RE = /^<!--/;
@@ -498,12 +499,12 @@ function applyRemoteToMarkdown(
       if (stepsStart !== -1 && stepsEnd === -1) stepsEnd = i;
       break;
     }
-    if (STEPS_RE.test(trimmed)) {
+    if (STEPS_RE.test(trimmed.replace(/^\*+/, '').replace(/\*+$/, ''))) {
       if (descEnd === -1) descEnd = i;
       stepsStart = i;
       continue;
     }
-    if (EXPECTED_RE.test(trimmed)) {
+    if (EXPECTED_RE.test(trimmed.replace(/^\*+/, '').replace(/\*+$/, ''))) {
       if (stepsEnd === -1 && stepsStart !== -1) stepsEnd = i;
       expectedStart = i;
       continue;
@@ -511,8 +512,14 @@ function applyRemoteToMarkdown(
   }
   if (stepsEnd === -1 && stepsStart !== -1) stepsEnd = sectionEnd;
 
-  // Build new step lines
-  const newStepLines = newSteps.map((s, idx) => `${idx + 1}. ${s.text}`);
+  // Build new step lines.
+  // s.text == Azure action; for markdown TCs the action has a "Step " prefix that
+  // was added on push (keyword + text). Strip it so the file stays in canonical form
+  // (plain numbered list without the "Step" label) and push/pull remain idempotent.
+  const newStepLines = newSteps.map((s, idx) => {
+    const text = s.text.replace(/^step\s+/i, '');
+    return `${idx + 1}. ${text}`;
+  });
 
   // Replace steps section
   if (stepsStart !== -1 && stepsEnd !== -1) {
