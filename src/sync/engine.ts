@@ -7,38 +7,40 @@ import * as fs from 'fs';
 import { glob } from 'glob';
 
 import { AzureClient } from '../azure/client';
-import { createTestCase, getTestCase, updateTestCase } from '../azure/test-cases';
+import {
+  createTestCase,
+  getOrCreateSuiteForFile,
+  getTestCase,
+  getTestCasesInSuite,
+  tagTestCaseAsRemoved,
+  updateTestCase,
+} from '../azure/test-cases';
 import { parseGherkinFile } from '../parsers/gherkin';
 import { parseMarkdownFile } from '../parsers/markdown';
-import { ParsedStep, ParsedTest, SyncConfig, SyncResult } from '../types';
+import { ParsedStep, ParsedTest, SyncConfig, SyncResult, TestPlanEntry } from '../types';
+import { CacheEntry, hashSteps, hashString, loadCache, saveCache,SyncCache } from './cache';
 import { writebackId } from './writeback';
 
 // ─── Tag filtering ────────────────────────────────────────────────────────────
 
-/**
- * Returns true when the test's tags satisfy the given tag expression.
- * Expression syntax mirrors Cucumber:  "@smoke and not @wip"
- * Tags in ParsedTest are stored without the leading @.
- * The expression evaluator expects them with @, so we re-add it here.
- */
 function matchesTags(test: ParsedTest, expression: string): boolean {
   const node = parseTagExpression(expression);
-  // Tags in ParsedTest have no leading '@'; tag-expressions evaluator needs them with '@'
   const tagsWithAt = test.tags.map((t) => (t.startsWith('@') ? t : `@${t}`));
   return node.evaluate(tagsWithAt);
 }
 
 // ─── File discovery ───────────────────────────────────────────────────────────
 
-async function discoverFiles(config: SyncConfig, configDir: string): Promise<string[]> {
-  const patterns = Array.isArray(config.local.include)
-    ? config.local.include
-    : [config.local.include];
-
-  const excludes = config.local.exclude
-    ? Array.isArray(config.local.exclude)
-      ? config.local.exclude
-      : [config.local.exclude]
+async function discoverFiles(
+  include: string | string[],
+  exclude: string | string[] | undefined,
+  configDir: string
+): Promise<string[]> {
+  const patterns = Array.isArray(include) ? include : [include];
+  const excludes = exclude
+    ? Array.isArray(exclude)
+      ? exclude
+      : [exclude]
     : [];
 
   const all: string[] = [];
@@ -62,14 +64,15 @@ function parseLocalFiles(
   tagsFilter?: string
 ): ParsedTest[] {
   const tagPrefix = config.sync?.tagPrefix ?? 'tc';
+  const linkConfigs = config.sync?.links;
   const results: ParsedTest[] = [];
 
   for (const fp of filePaths) {
     try {
       const tests =
         config.local.type === 'gherkin'
-          ? parseGherkinFile(fp, tagPrefix)
-          : parseMarkdownFile(fp, tagPrefix);
+          ? parseGherkinFile(fp, tagPrefix, linkConfigs)
+          : parseMarkdownFile(fp, tagPrefix, linkConfigs);
 
       for (const t of tests) {
         if (tagsFilter && !matchesTags(t, tagsFilter)) continue;
@@ -87,9 +90,29 @@ function parseLocalFiles(
 
 export interface SyncOpts {
   dryRun?: boolean;
-  /** Cucumber tag expression to restrict which scenarios are synced.
-   *  Examples:  "@smoke"   "@smoke and not @wip"   "not @manual"  */
   tags?: string;
+}
+
+// ─── Multi-plan helpers ───────────────────────────────────────────────────────
+
+/**
+ * Build an effective config for a single plan entry in testPlans[] mode.
+ * Overrides testPlan and local include/exclude without mutating the original.
+ */
+function configForPlanEntry(base: SyncConfig, entry: TestPlanEntry): SyncConfig {
+  return {
+    ...base,
+    testPlan: {
+      id: entry.id,
+      suiteId: entry.suiteId ?? base.testPlan.suiteId,
+      suiteMapping: entry.suiteMapping ?? base.testPlan.suiteMapping,
+    },
+    local: {
+      ...base.local,
+      include: entry.include ?? base.local.include,
+      exclude: entry.exclude ?? base.local.exclude,
+    },
+  };
 }
 
 // ─── Push ─────────────────────────────────────────────────────────────────────
@@ -99,16 +122,43 @@ export async function push(
   configDir: string,
   opts: SyncOpts = {}
 ): Promise<SyncResult[]> {
-  const files = await discoverFiles(config, configDir);
+  // Multi-plan: delegate to each plan entry
+  if (config.testPlans?.length) {
+    const all: SyncResult[] = [];
+    for (const entry of config.testPlans) {
+      const entryConfig = configForPlanEntry(config, entry);
+      all.push(...await pushSingle(entryConfig, configDir, opts));
+    }
+    return all;
+  }
+  return pushSingle(config, configDir, opts);
+}
+
+async function pushSingle(
+  config: SyncConfig,
+  configDir: string,
+  opts: SyncOpts
+): Promise<SyncResult[]> {
+  const files = await discoverFiles(config.local.include, config.local.exclude, configDir);
   const tests = parseLocalFiles(files, config, opts.tags);
   const client = await AzureClient.create(config);
   const tagPrefix = config.sync?.tagPrefix ?? 'tc';
+  const titleField = config.sync?.titleField ?? 'System.Title';
+  const conflictAction = config.sync?.conflictAction ?? 'overwrite';
+  const disableLocal = config.sync?.disableLocalChanges ?? false;
+  const byFolder = config.testPlan.suiteMapping === 'byFolder';
+  const suiteCache = new Map<string, number>();
   const results: SyncResult[] = [];
+  const conflicts: SyncResult[] = [];
+
+  // Load local cache for conflict detection and skip optimisation
+  const cache = loadCache(configDir);
 
   for (const test of tests) {
     if (test.azureId) {
       try {
-        const remote = await getTestCase(client, test.azureId);
+        const cached = cache[test.azureId];
+        const remote = await getTestCase(client, test.azureId, titleField);
 
         if (!remote) {
           results.push({
@@ -127,12 +177,35 @@ export async function push(
         const stepsChanged = localStepsText !== remoteStepsText;
 
         if (!titleChanged && !stepsChanged) {
+          // Update cache entry even on skip (changedDate may differ due to other fields)
+          updateCacheEntry(cache, test, remote);
           results.push({ action: 'skipped', filePath: test.filePath, title: test.title, azureId: test.azureId });
           continue;
         }
 
+        // Conflict detection: remote was changed since last push AND local also differs
+        if (cached && remote.changedDate && remote.changedDate !== cached.changedDate) {
+          const conflict: SyncResult = {
+            action: 'conflict',
+            filePath: test.filePath,
+            title: test.title,
+            azureId: test.azureId,
+            detail: 'Both local and remote have changed since last sync',
+          };
+          if (conflictAction === 'skip') {
+            results.push(conflict);
+            continue;
+          }
+          if (conflictAction === 'fail') {
+            conflicts.push(conflict);
+            continue;
+          }
+          // 'overwrite' — fall through to update
+        }
+
         if (!opts.dryRun) {
           await updateTestCase(client, test.azureId, test, config);
+          updateCacheEntry(cache, test, remote);
         }
         results.push({ action: 'updated', filePath: test.filePath, title: test.title, azureId: test.azureId });
       } catch (err: any) {
@@ -142,14 +215,53 @@ export async function push(
       try {
         let newId: number | undefined;
         if (!opts.dryRun) {
-          newId = await createTestCase(client, test, config);
-          writebackId(test, newId, config.local.type, tagPrefix);
+          const suiteIdOverride = byFolder
+            ? await getOrCreateSuiteForFile(client, config, test.filePath, configDir, suiteCache)
+            : undefined;
+          newId = await createTestCase(client, test, config, suiteIdOverride);
+          if (!disableLocal) {
+            writebackId(test, newId, config.local.type, tagPrefix);
+          }
+          // Fetch back to get changedDate for cache
+          const created = await getTestCase(client, newId, titleField);
+          if (created) updateCacheEntry(cache, test, created);
         }
         results.push({ action: 'created', filePath: test.filePath, title: test.title, azureId: newId });
       } catch (err: any) {
         results.push({ action: 'error', filePath: test.filePath, title: test.title, detail: err.message });
       }
     }
+  }
+
+  if (conflicts.length) {
+    const titles = conflicts.map((c) => `  #${c.azureId} — ${c.title}`).join('\n');
+    throw new Error(`Conflicts detected (conflictAction=fail):\n${titles}`);
+  }
+
+  // Removed TC detection: find suite TCs not referenced by any local test
+  if (!opts.dryRun || true /* show removed in dry-run too */) {
+    try {
+      const remoteTcs = await getTestCasesInSuite(client, config);
+      const localIds = new Set(tests.map((t) => t.azureId).filter(Boolean) as number[]);
+      for (const remote of remoteTcs) {
+        if (!localIds.has(remote.id)) {
+          if (!opts.dryRun) {
+            await tagTestCaseAsRemoved(client, remote.id);
+          }
+          results.push({
+            action: 'removed',
+            filePath: '',
+            title: remote.title,
+            azureId: remote.id,
+            detail: opts.dryRun ? 'would tag as ado-sync:removed' : 'tagged ado-sync:removed',
+          });
+        }
+      }
+    } catch { /* best-effort: don't fail the whole push */ }
+  }
+
+  if (!opts.dryRun) {
+    saveCache(configDir, cache);
   }
 
   return results;
@@ -162,16 +274,34 @@ export async function pull(
   configDir: string,
   opts: SyncOpts = {}
 ): Promise<SyncResult[]> {
-  const files = await discoverFiles(config, configDir);
+  if (config.testPlans?.length) {
+    const all: SyncResult[] = [];
+    for (const entry of config.testPlans) {
+      all.push(...await pullSingle(configForPlanEntry(config, entry), configDir, opts));
+    }
+    return all;
+  }
+  return pullSingle(config, configDir, opts);
+}
+
+async function pullSingle(
+  config: SyncConfig,
+  configDir: string,
+  opts: SyncOpts
+): Promise<SyncResult[]> {
+  const files = await discoverFiles(config.local.include, config.local.exclude, configDir);
   const tests = parseLocalFiles(files, config, opts.tags);
   const client = await AzureClient.create(config);
+  const titleField = config.sync?.titleField ?? 'System.Title';
+  const disableLocal = config.sync?.disableLocalChanges ?? false;
   const results: SyncResult[] = [];
+  const cache = loadCache(configDir);
 
   const linked = tests.filter((t) => t.azureId !== undefined);
 
   for (const test of linked) {
     try {
-      const remote = await getTestCase(client, test.azureId!);
+      const remote = await getTestCase(client, test.azureId!, titleField);
 
       if (!remote) {
         results.push({
@@ -188,19 +318,24 @@ export async function pull(
       const remoteStepsText = remote.steps.map((s) => s.action + '|' + s.expected).join('\n');
       const localStepsText = test.steps.map((s) => s.keyword + ' ' + s.text + '|' + (s.expected ?? '')).join('\n');
       const stepsChanged = remoteStepsText !== localStepsText;
+      const descriptionChanged = (remote.description ?? '') !== (test.description ?? '');
 
-      if (!titleChanged && !stepsChanged) {
+      if (!titleChanged && !stepsChanged && !descriptionChanged) {
         results.push({ action: 'skipped', filePath: test.filePath, title: test.title, azureId: test.azureId });
         continue;
       }
 
       if (!opts.dryRun) {
-        applyRemoteToLocal(
-          test,
-          remote.title,
-          remote.steps.map((s) => ({ keyword: 'Step', text: s.action, expected: s.expected })),
-          config.local.type
-        );
+        if (!disableLocal) {
+          applyRemoteToLocal(
+            test,
+            remote.title,
+            remote.steps.map((s) => ({ keyword: 'Step', text: s.action, expected: s.expected })),
+            remote.description,
+            config.local.type
+          );
+        }
+        updateCacheEntry(cache, test, remote);
       }
 
       results.push({
@@ -208,11 +343,19 @@ export async function pull(
         filePath: test.filePath,
         title: remote.title,
         azureId: test.azureId,
-        detail: [titleChanged && 'title', stepsChanged && 'steps'].filter(Boolean).join(', ') + ' changed',
+        detail: [
+          titleChanged && 'title',
+          stepsChanged && 'steps',
+          descriptionChanged && 'description',
+        ].filter(Boolean).join(', ') + ' changed' + (disableLocal ? ' (local changes skipped)' : ''),
       });
     } catch (err: any) {
       results.push({ action: 'error', filePath: test.filePath, title: test.title, azureId: test.azureId, detail: err.message });
     }
+  }
+
+  if (!opts.dryRun) {
+    saveCache(configDir, cache);
   }
 
   return results;
@@ -228,18 +371,32 @@ export async function status(
   return push(config, configDir, { dryRun: true, tags: opts.tags });
 }
 
+// ─── Cache helpers ────────────────────────────────────────────────────────────
+
+function updateCacheEntry(cache: SyncCache, test: ParsedTest, remote: { id: number; title: string; steps: any[]; description?: string; changedDate?: string; }): void {
+  if (!remote.changedDate) return;
+  cache[remote.id] = {
+    title: remote.title,
+    stepsHash: hashSteps(remote.steps),
+    descriptionHash: hashString(remote.description),
+    changedDate: remote.changedDate,
+    filePath: test.filePath,
+  } as CacheEntry;
+}
+
 // ─── Apply remote changes to local file ───────────────────────────────────────
 
 function applyRemoteToLocal(
   test: ParsedTest,
   newTitle: string,
   newSteps: ParsedStep[],
+  newDescription: string | undefined,
   localType: 'gherkin' | 'markdown'
 ): void {
   if (localType === 'gherkin') {
     applyRemoteToGherkin(test, newTitle, newSteps);
   } else {
-    applyRemoteToMarkdown(test, newTitle, newSteps);
+    applyRemoteToMarkdown(test, newTitle, newSteps, newDescription);
   }
 }
 
@@ -267,11 +424,32 @@ function applyRemoteToGherkin(test: ParsedTest, newTitle: string, newSteps: Pars
   fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
 }
 
-function applyRemoteToMarkdown(test: ParsedTest, newTitle: string, newSteps: ParsedStep[]): void {
+/** Strip HTML tags from Azure rich-text description. */
+function stripHtml(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function applyRemoteToMarkdown(
+  test: ParsedTest,
+  newTitle: string,
+  newSteps: ParsedStep[],
+  newDescription: string | undefined
+): void {
   const raw = fs.readFileSync(test.filePath, 'utf8');
   const lines = raw.split('\n');
   const headingLineIdx = test.line - 1;
 
+  // Update title
   lines[headingLineIdx] = lines[headingLineIdx].replace(
     /^(###\s+(?:\d+\.\s+)?)(.*)$/,
     `$1${newTitle}`
@@ -281,32 +459,59 @@ function applyRemoteToMarkdown(test: ParsedTest, newTitle: string, newSteps: Par
   const EXPECTED_RE = /^expected\s+results?\s*:/i;
   const SEPARATOR_RE = /^---+\s*$/;
   const HEADING_RE = /^#{1,6}\s/;
+  const COMMENT_RE = /^<!--/;
 
+  // Find boundaries: description block, steps block, expected block
+  let descEnd = -1;   // line index where description content ends (exclusive)
   let stepsStart = -1;
   let stepsEnd = -1;
   let expectedStart = -1;
+  let sectionEnd = lines.length;
 
   for (let i = headingLineIdx + 1; i < lines.length; i++) {
     const trimmed = lines[i].trim();
     if (HEADING_RE.test(lines[i]) || SEPARATOR_RE.test(trimmed)) {
+      sectionEnd = i;
       if (stepsStart !== -1 && stepsEnd === -1) stepsEnd = i;
       break;
     }
-    if (STEPS_RE.test(trimmed)) { stepsStart = i; continue; }
+    if (STEPS_RE.test(trimmed)) {
+      if (descEnd === -1) descEnd = i;
+      stepsStart = i;
+      continue;
+    }
     if (EXPECTED_RE.test(trimmed)) {
       if (stepsEnd === -1 && stepsStart !== -1) stepsEnd = i;
       expectedStart = i;
       continue;
     }
   }
+  if (stepsEnd === -1 && stepsStart !== -1) stepsEnd = sectionEnd;
 
+  // Build new step lines
   const newStepLines = newSteps.map((s, idx) => `${idx + 1}. ${s.text}`);
 
+  // Replace steps section
   if (stepsStart !== -1 && stepsEnd !== -1) {
     lines.splice(stepsStart, stepsEnd - stepsStart, 'Steps:', ...newStepLines);
   }
 
-  // Recalculate after splice
+  // Update description (Gap 8)
+  if (newDescription !== undefined && descEnd !== -1) {
+    const cleanDesc = stripHtml(newDescription);
+    if (cleanDesc) {
+      // Description block is headingLineIdx+1 .. descEnd (skip comment lines)
+      let descBlockStart = headingLineIdx + 1;
+      // Skip over ID/tags comment lines right after heading
+      while (descBlockStart < descEnd && COMMENT_RE.test(lines[descBlockStart].trim())) {
+        descBlockStart++;
+      }
+      const descLines = cleanDesc.split('\n');
+      lines.splice(descBlockStart, descEnd - descBlockStart, ...descLines, '');
+    }
+  }
+
+  // Recalculate expected section position after splices
   const updatedLines = lines.join('\n').split('\n');
   let newExpStart = -1;
   let newExpEnd = -1;

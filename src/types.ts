@@ -6,6 +6,26 @@
 
 export type AuthType = 'pat' | 'accessToken' | 'managedIdentity';
 
+export interface LinkConfig {
+  /** Tag prefix to match, e.g. 'story', 'bug' */
+  prefix: string;
+  /** ADO relation type. Default: 'System.LinkTypes.Related' */
+  relationship?: string;
+  /** Optional: restrict to a specific work item type */
+  workItemType?: string;
+}
+
+export interface TestPlanEntry {
+  id: number;
+  suiteId?: number;
+  /** 'flat' (default) or 'byFolder' to mirror folder structure as nested suites */
+  suiteMapping?: 'flat' | 'byFolder';
+  /** Override local.include for this plan */
+  include?: string | string[];
+  /** Override local.exclude for this plan */
+  exclude?: string | string[];
+}
+
 export interface SyncConfig {
   /** Azure DevOps organisation URL, e.g. https://dev.azure.com/myorg */
   orgUrl: string;
@@ -19,12 +39,16 @@ export interface SyncConfig {
     /** Required when type === 'managedIdentity' */
     applicationIdURI?: string;
   };
-  /** Target test plan / suite */
+  /** Target test plan / suite (single-plan mode) */
   testPlan: {
     id: number;
     /** Root suite to create new test cases under. Defaults to plan root suite. */
     suiteId?: number;
+    /** 'flat' (default) or 'byFolder' to mirror folder structure as nested suites */
+    suiteMapping?: 'flat' | 'byFolder';
   };
+  /** Multi-plan mode: if present, overrides testPlan for each entry */
+  testPlans?: TestPlanEntry[];
   /** Local spec sources */
   local: {
     /** 'gherkin' for .feature files, 'markdown' for .md spec files */
@@ -44,6 +68,23 @@ export interface SyncConfig {
     areaPath?: string;
     /** Default iteration path for new test cases */
     iterationPath?: string;
+    /**
+     * When true, no local files are modified (no ID writeback, no pull apply).
+     * Useful for CI pipelines that should not commit file changes.
+     */
+    disableLocalChanges?: boolean;
+    /**
+     * How to handle conflicts (remote changed since last sync AND local also differs).
+     * 'overwrite' (default): push local version to Azure.
+     * 'skip': emit a conflict result and leave both sides unchanged.
+     * 'fail': throw an error listing all conflicts.
+     */
+    conflictAction?: 'overwrite' | 'skip' | 'fail';
+    /**
+     * Work item link configurations. Tags matching a configured prefix
+     * (e.g. @story:123) will create/maintain ADO work item relations.
+     */
+    links?: LinkConfig[];
   };
 }
 
@@ -70,6 +111,19 @@ export interface ParsedTest {
   azureId?: number;
   /** Line number in the file where the scenario / heading starts (1-based) */
   line: number;
+  /**
+   * Present for Scenario Outlines. Contains the examples table so Azure can
+   * create a parametrized test case instead of one TC per example row.
+   */
+  outlineParameters?: {
+    headers: string[];
+    rows: string[][];
+  };
+  /**
+   * Work item link references extracted from tags matching sync.links config.
+   * e.g. @story:123 → { prefix: 'story', id: 123 }
+   */
+  linkRefs?: Array<{ prefix: string; id: number }>;
 }
 
 // ─── Azure Test Case (normalised) ────────────────────────────────────────────
@@ -93,7 +147,7 @@ export interface AzureStep {
 
 // ─── Sync result ─────────────────────────────────────────────────────────────
 
-export type SyncAction = 'created' | 'updated' | 'skipped' | 'conflict' | 'pulled' | 'error';
+export type SyncAction = 'created' | 'updated' | 'skipped' | 'conflict' | 'pulled' | 'removed' | 'error';
 
 export interface SyncResult {
   action: SyncAction;

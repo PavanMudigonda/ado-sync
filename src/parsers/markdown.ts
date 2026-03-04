@@ -9,6 +9,9 @@
  *
  *   ### 1. Scenario title      ← H3 heading = one test case
  *
+ *   <!-- tags: @smoke, @regression -->   ← optional tags (Gap 5)
+ *   <!-- tc: 12345 -->                   ← written back after first push
+ *
  *   Assumption: ...            ← optional prose, used as description
  *
  *   Steps:
@@ -19,18 +22,17 @@
  *   - Result A
  *   - Result B
  *
- *   <!-- azure-tc: 12345 -->   ← written back after first push
- *
  *   ---                        ← separator between scenarios
  *
  * ID tag convention:  <!-- {tagPrefix}: 12345 --> anywhere within the scenario block
- * e.g. with default tagPrefix "tc":  <!-- tc: 12345 -->
- * The prefix is set via sync.tagPrefix in the config file.
+ * Tags convention:    <!-- tags: @tag1, @tag2 --> anywhere within the scenario block
+ * Path-based auto-tagging: same as Gherkin (directory segments starting with @)
  */
 
 import * as fs from 'fs';
 
-import { ParsedStep, ParsedTest } from '../types';
+import { LinkConfig, ParsedStep, ParsedTest } from '../types';
+import { extractLinkRefs, extractPathTags } from './shared';
 
 // ─── Regexes ─────────────────────────────────────────────────────────────────
 
@@ -42,6 +44,7 @@ const BULLET_STEP_RE = /^\s*[-*]\s+(.+)$/;
 const SEPARATOR_RE = /^---+\s*$/;
 const mdTcCommentRe = (prefix: string) =>
   new RegExp(`<!--\\s*${prefix}\\s*:\\s*(\\d+)\\s*-->`, 'i');
+const TAGS_COMMENT_RE = /<!--\s*tags\s*:\s*([^>]+)-->/i;
 
 // ─── Parser ──────────────────────────────────────────────────────────────────
 
@@ -79,18 +82,34 @@ function splitIntoScenarios(lines: string[]): ScenarioBlock[] {
 function parseScenarioBlock(
   block: ScenarioBlock,
   filePath: string,
-  tagPrefix: string
+  tagPrefix: string,
+  pathTags: string[],
+  linkConfigs: LinkConfig[] | undefined
 ): ParsedTest {
   const lines = block.lines;
+  const blockText = lines.join('\n');
 
   const tcRe = mdTcCommentRe(tagPrefix);
 
   // Find ID comment
   let azureId: number | undefined;
-  const tcComment = lines.join('\n').match(tcRe);
+  const tcComment = blockText.match(tcRe);
   if (tcComment) {
     azureId = parseInt(tcComment[1], 10);
   }
+
+  // Find <!-- tags: @smoke, @regression --> comment (Gap 5)
+  const blockTags: string[] = [...pathTags];
+  const tagsComment = blockText.match(TAGS_COMMENT_RE);
+  if (tagsComment) {
+    const rawTags = tagsComment[1]
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean)
+      .map((t) => (t.startsWith('@') ? t.slice(1) : t));
+    blockTags.push(...rawTags);
+  }
+  const allTags = [...new Set(blockTags)];
 
   // Extract sections
   let section: 'description' | 'steps' | 'expected' | 'other' = 'description';
@@ -99,7 +118,8 @@ function parseScenarioBlock(
   const expectedLines: string[] = [];
 
   for (const line of lines) {
-    if (tcRe.test(line)) continue; // skip ID comment lines
+    if (tcRe.test(line)) continue;       // skip ID comment lines
+    if (TAGS_COMMENT_RE.test(line)) continue; // skip tags comment lines
 
     if (STEPS_HEADING_RE.test(line.trim())) {
       section = 'steps';
@@ -161,15 +181,22 @@ function parseScenarioBlock(
     title: block.title,
     description,
     steps: parsedSteps,
-    tags: [], // markdown specs don't have Gherkin tags
+    tags: allTags,
     azureId,
     line: block.startLine,
+    linkRefs: extractLinkRefs(allTags, linkConfigs),
   };
 }
 
-export function parseMarkdownFile(filePath: string, tagPrefix: string): ParsedTest[] {
+export function parseMarkdownFile(
+  filePath: string,
+  tagPrefix: string,
+  linkConfigs?: LinkConfig[]
+): ParsedTest[] {
   const source = fs.readFileSync(filePath, 'utf8');
   const lines = source.split('\n');
   const blocks = splitIntoScenarios(lines);
-  return blocks.map((b) => parseScenarioBlock(b, filePath, tagPrefix));
+  // Path-based auto-tags (same as Gherkin)
+  const pathTags = extractPathTags(filePath);
+  return blocks.map((b) => parseScenarioBlock(b, filePath, tagPrefix, pathTags, linkConfigs));
 }

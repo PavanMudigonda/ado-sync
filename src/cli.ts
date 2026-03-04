@@ -7,7 +7,7 @@ import { Command } from 'commander';
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { CONFIG_TEMPLATE_JSON,loadConfig, resolveConfigPath } from './config';
+import { applyOverrides, CONFIG_TEMPLATE_JSON, loadConfig, resolveConfigPath } from './config';
 import { pull, push, status } from './sync/engine';
 import { SyncResult } from './types';
 
@@ -22,6 +22,11 @@ program
 
 // Global option: --config / -c
 program.option('-c, --config <path>', 'Path to config file (default: ado-sync.json)');
+
+/** Collect repeatable option values into an array. */
+function collect(value: string, previous: string[]): string[] {
+  return [...previous, value];
+}
 
 // ─── init ─────────────────────────────────────────────────────────────────────
 
@@ -49,11 +54,13 @@ program
   .description('Push local test specs to Azure DevOps (create or update test cases)')
   .option('--dry-run', 'Show what would change without making any modifications')
   .option('--tags <expression>', 'Only sync scenarios matching this tag expression (e.g. "@smoke and not @wip")')
+  .option('--config-override <path=value>', 'Override a config value (repeatable, e.g. --config-override sync.tagPrefix=mytag)', collect, [])
   .action(async (opts) => {
     const globalOpts = program.opts();
     try {
       const configPath = resolveConfigPath(globalOpts.config);
       const config = loadConfig(configPath);
+      if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
       const configDir = path.dirname(configPath);
 
       console.log(chalk.bold('ado-sync push'));
@@ -62,6 +69,7 @@ program
       console.log(chalk.dim(`Plan:    ${config.testPlan.id}`));
       if (opts.dryRun) console.log(chalk.yellow('Dry run — no changes will be made'));
       if (opts.tags) console.log(chalk.dim(`Tags:    ${opts.tags}`));
+      if (opts.configOverride?.length) console.log(chalk.dim(`Overrides: ${opts.configOverride.join(', ')}`));
       console.log('');
 
       const results = await push(config, configDir, { dryRun: opts.dryRun, tags: opts.tags });
@@ -79,11 +87,13 @@ program
   .description('Pull updates from Azure DevOps into local spec files')
   .option('--dry-run', 'Show what would change without modifying local files')
   .option('--tags <expression>', 'Only sync scenarios matching this tag expression (e.g. "@smoke and not @wip")')
+  .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
   .action(async (opts) => {
     const globalOpts = program.opts();
     try {
       const configPath = resolveConfigPath(globalOpts.config);
       const config = loadConfig(configPath);
+      if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
       const configDir = path.dirname(configPath);
 
       console.log(chalk.bold('ado-sync pull'));
@@ -106,11 +116,13 @@ program
   .command('status')
   .description('Show diff between local specs and Azure DevOps without making changes')
   .option('--tags <expression>', 'Only check scenarios matching this tag expression')
+  .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
   .action(async (opts) => {
     const globalOpts = program.opts();
     try {
       const configPath = resolveConfigPath(globalOpts.config);
       const config = loadConfig(configPath);
+      if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
       const configDir = path.dirname(configPath);
 
       console.log(chalk.bold('ado-sync status'));
@@ -129,13 +141,15 @@ program
 // ─── Output helpers ───────────────────────────────────────────────────────────
 
 function printResults(results: SyncResult[]): void {
-  const counts = { created: 0, updated: 0, pulled: 0, skipped: 0, conflict: 0, error: 0 };
+  const counts = { created: 0, updated: 0, pulled: 0, skipped: 0, conflict: 0, removed: 0, error: 0 };
 
   for (const r of results) {
     counts[r.action]++;
     const idStr = r.azureId ? chalk.dim(` [#${r.azureId}]`) : '';
     const detailStr = r.detail ? chalk.dim(` — ${r.detail}`) : '';
-    const filePart = chalk.dim(path.relative(process.cwd(), r.filePath) + ':');
+    const filePart = r.filePath
+      ? chalk.dim(path.relative(process.cwd(), r.filePath) + ':')
+      : chalk.dim('(azure):');
 
     switch (r.action) {
       case 'created':
@@ -153,6 +167,9 @@ function printResults(results: SyncResult[]): void {
       case 'conflict':
         console.log(`${chalk.yellow('!')} ${filePart} ${r.title}${idStr}${detailStr}`);
         break;
+      case 'removed':
+        console.log(`${chalk.magenta('−')} ${filePart} ${r.title}${idStr}${detailStr}`);
+        break;
       case 'error':
         console.log(`${chalk.red('✗')} ${filePart} ${r.title}${idStr}${chalk.red(detailStr)}`);
         break;
@@ -161,12 +178,13 @@ function printResults(results: SyncResult[]): void {
 
   console.log('');
   const summary = [
-    counts.created  && chalk.green(`${counts.created} created`),
-    counts.updated  && chalk.blue(`${counts.updated} updated`),
-    counts.pulled   && chalk.cyan(`${counts.pulled} pulled`),
-    counts.skipped  && chalk.dim(`${counts.skipped} skipped`),
-    counts.conflict && chalk.yellow(`${counts.conflict} conflicts`),
-    counts.error    && chalk.red(`${counts.error} errors`),
+    counts.created   && chalk.green(`${counts.created} created`),
+    counts.updated   && chalk.blue(`${counts.updated} updated`),
+    counts.pulled    && chalk.cyan(`${counts.pulled} pulled`),
+    counts.skipped   && chalk.dim(`${counts.skipped} skipped`),
+    counts.conflict  && chalk.yellow(`${counts.conflict} conflicts`),
+    counts.removed   && chalk.magenta(`${counts.removed} removed`),
+    counts.error     && chalk.red(`${counts.error} errors`),
   ].filter(Boolean).join(chalk.dim('  '));
 
   console.log(summary || chalk.dim('Nothing to sync.'));
