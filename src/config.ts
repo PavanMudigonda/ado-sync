@@ -54,6 +54,9 @@ export function loadConfig(configPath: string): SyncConfig {
   // Default values
   cfg.sync = cfg.sync ?? {};
   cfg.sync.tagPrefix = cfg.sync.tagPrefix ?? 'tc';
+  cfg.sync.titleField = cfg.sync.titleField ?? 'System.Title';
+  cfg.sync.conflictAction = cfg.sync.conflictAction ?? 'overwrite';
+  cfg.sync.disableLocalChanges = cfg.sync.disableLocalChanges ?? false;
 
   return cfg;
 }
@@ -74,9 +77,48 @@ function validateConfig(cfg: SyncConfig, filePath: string): void {
     err('"auth.applicationIdURI" is required when auth.type is "managedIdentity"');
   }
 
-  if (!cfg.testPlan?.id) err('"testPlan.id" is required');
+  if (!cfg.testPlan?.id && !cfg.testPlans?.length) {
+    err('"testPlan.id" or "testPlans" array is required');
+  }
   if (!cfg.local?.type) err('"local.type" is required (gherkin | markdown)');
   if (!cfg.local?.include) err('"local.include" is required');
+}
+
+/**
+ * Apply CLI --config-override values to a loaded config.
+ * Each override is a string like "sync.tagPrefix=mytag" or "testPlan.id=42".
+ * Dot-path navigation sets nested values. Numbers are coerced automatically.
+ */
+export function applyOverrides(cfg: SyncConfig, overrides: string[]): void {
+  for (const override of overrides) {
+    const eqIdx = override.indexOf('=');
+    if (eqIdx === -1) {
+      throw new Error(`Invalid --config-override "${override}": expected format "path=value"`);
+    }
+    const dotPath = override.slice(0, eqIdx).trim();
+    const rawValue = override.slice(eqIdx + 1);
+
+    const segments = dotPath.split('.');
+    let obj: any = cfg;
+    for (let i = 0; i < segments.length - 1; i++) {
+      const seg = segments[i];
+      if (obj[seg] === undefined || obj[seg] === null) obj[seg] = {};
+      obj = obj[seg];
+    }
+
+    const lastKey = segments[segments.length - 1];
+    // Coerce: number if parseable, boolean if 'true'/'false', else string
+    const numVal = Number(rawValue);
+    if (rawValue === 'true') {
+      obj[lastKey] = true;
+    } else if (rawValue === 'false') {
+      obj[lastKey] = false;
+    } else if (!isNaN(numVal) && rawValue.trim() !== '') {
+      obj[lastKey] = numVal;
+    } else {
+      obj[lastKey] = rawValue;
+    }
+  }
 }
 
 export const CONFIG_TEMPLATE_JSON = JSON.stringify(
@@ -90,6 +132,7 @@ export const CONFIG_TEMPLATE_JSON = JSON.stringify(
     testPlan: {
       id: 0,
       suiteId: 0,
+      suiteMapping: 'flat',
     },
     local: {
       type: 'gherkin',
@@ -98,8 +141,12 @@ export const CONFIG_TEMPLATE_JSON = JSON.stringify(
     },
     sync: {
       tagPrefix: 'tc',
+      titleField: 'System.Title',
       areaPath: '',
       iterationPath: '',
+      disableLocalChanges: false,
+      conflictAction: 'overwrite',
+      links: [],
     },
   },
   null,
