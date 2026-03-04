@@ -121,34 +121,34 @@ export function applyOverrides(cfg: SyncConfig, overrides: string[]): void {
   }
 }
 
-export const CONFIG_TEMPLATE_JSON = JSON.stringify(
-  {
-    orgUrl: 'https://dev.azure.com/YOUR_ORG',
-    project: 'YOUR_PROJECT',
-    auth: {
-      type: 'pat',
-      token: '$AZURE_DEVOPS_TOKEN',
-    },
-    testPlan: {
-      id: 0,
-      suiteId: 0,
-      suiteMapping: 'flat',
-    },
-    local: {
-      type: 'gherkin',
-      include: 'specs/**/*.feature',
-      exclude: [],
-    },
-    sync: {
-      tagPrefix: 'tc',
-      titleField: 'System.Title',
-      areaPath: '',
-      iterationPath: '',
-      disableLocalChanges: false,
-      conflictAction: 'overwrite',
-      links: [],
-    },
+const CONFIG_TEMPLATE_OBJECT = {
+  orgUrl: 'https://dev.azure.com/YOUR_ORG',
+  project: 'YOUR_PROJECT',
+  auth: {
+    type: 'pat',
+    token: '$AZURE_DEVOPS_TOKEN',
   },
-  null,
-  2
-);
+  testPlan: {
+    id: 0,
+    suiteId: 0,
+    suiteMapping: 'flat',
+  },
+  local: {
+    type: 'gherkin',
+    include: 'specs/**/*.feature',
+    exclude: [],
+  },
+  sync: {
+    tagPrefix: 'tc',
+    titleField: 'System.Title',
+    areaPath: '',
+    iterationPath: '',
+    disableLocalChanges: false,
+    conflictAction: 'overwrite',
+    links: [],
+  },
+};
+
+export const CONFIG_TEMPLATE_JSON = JSON.stringify(CONFIG_TEMPLATE_OBJECT, null, 2);
+
+export const CONFIG_TEMPLATE_YAML = yaml.dump(CONFIG_TEMPLATE_OBJECT, { indent: 2, lineWidth: 120 });
