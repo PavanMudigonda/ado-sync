@@ -13,12 +13,11 @@
  */
 
 import * as fs from 'fs';
+
 import { ParsedTest } from '../types';
 
 // ─── Gherkin writeback ────────────────────────────────────────────────────────
 
-const GHERKIN_TC_TAG_RE = (prefix: string) =>
-  new RegExp(`@${prefix}:\\d+`, 'g');
 
 /**
  * Write (or update) the @tc:ID tag in a .feature file for a given scenario.
