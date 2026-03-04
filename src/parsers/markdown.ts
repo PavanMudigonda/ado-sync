@@ -47,14 +47,31 @@ function stripBold(s: string): string {
   return s.replace(/^\*+/, '').replace(/\*+$/, '');
 }
 const SEPARATOR_RE = /^---+\s*$/;
-// Matches the new plain-tag format "@tc:12345" on its own line,
-// and the legacy HTML comment "<!-- tc: 12345 -->" / "<!-- @tc:12345 -->" for backward compat.
-const mdTcTagRe = (prefix: string) => new RegExp(`^\\s*@${prefix}:(\\d+)\\s*$`, 'm');
+// Matches a tag line that starts with "@tc:12345" optionally followed by more @tags.
+// e.g.  "@tc:32845"  or  "@tc:32845 @smoke @regression"
+const mdTcTagRe = (prefix: string) => new RegExp(`^\\s*@${prefix}:(\\d+)((?:\\s+@\\S+)*)\\s*$`, 'm');
 const mdTcCommentRe = (prefix: string) =>
   new RegExp(`<!--\\s*@?${prefix}\\s*:\\s*(\\d+)\\s*-->`, 'i');
 function findTcId(prefix: string, blockText: string): number | undefined {
   const m = blockText.match(mdTcTagRe(prefix)) ?? blockText.match(new RegExp(`<!--\\s*@?${prefix}\\s*:\\s*(\\d+)\\s*-->`, 'im'));
   return m ? parseInt(m[1], 10) : undefined;
+}
+/** Extract any extra @tags written on the same line as the tc ID, e.g. @tc:32845 @smoke → ['smoke'] */
+function extractTcLineTags(prefix: string, blockText: string): string[] {
+  const m = blockText.match(mdTcTagRe(prefix));
+  if (!m || !m[2]) return [];
+  return m[2].trim().split(/\s+/).filter(Boolean).map((t) => t.slice(1)); // strip leading '@'
+}
+/** A standalone tag line contains only @word tokens (no tc: ID prefix). e.g. "@smoke @regression" */
+const STANDALONE_TAG_LINE_RE = /^\s*(@[A-Za-z][\w-]*(\s+@[A-Za-z][\w-]*)*)\s*$/;
+function isStandaloneTagLine(prefix: string, line: string): boolean {
+  const t = line.trim();
+  // Must look like all-@tags but NOT be a tc ID line
+  return STANDALONE_TAG_LINE_RE.test(t) && !mdTcTagRe(prefix).test(t);
+}
+/** Extract tags from a standalone tag line: "@smoke @regression" → ['smoke', 'regression'] */
+function parseStandaloneTagLine(line: string): string[] {
+  return line.trim().split(/\s+/).filter((t) => t.startsWith('@')).map((t) => t.slice(1));
 }
 function isTcLine(prefix: string, line: string): boolean {
   const t = line.trim();
@@ -108,8 +125,19 @@ function parseScenarioBlock(
   // Find ID — plain "@tc:12345" line (new) or legacy HTML comment (backward compat)
   const azureId = findTcId(tagPrefix, blockText);
 
-  // Find <!-- tags: @smoke, @regression --> comment (Gap 5)
+  // Collect tags from four sources:
+  //  1. Path-based auto-tags
+  //  2. Inline tags on the tc ID line:    @tc:32845 @smoke @regression
+  //  3. Standalone @tag lines:            @smoke
+  //                                       @regression
+  //  4. HTML comment:                     <!-- tags: @smoke, @regression -->
   const blockTags: string[] = [...pathTags];
+  blockTags.push(...extractTcLineTags(tagPrefix, blockText));
+  for (const line of lines) {
+    if (isStandaloneTagLine(tagPrefix, line)) {
+      blockTags.push(...parseStandaloneTagLine(line));
+    }
+  }
   const tagsComment = blockText.match(TAGS_COMMENT_RE);
   if (tagsComment) {
     const rawTags = tagsComment[1]
@@ -128,8 +156,9 @@ function parseScenarioBlock(
   const expectedLines: string[] = [];
 
   for (const line of lines) {
-    if (isTcLine(tagPrefix, line)) continue;  // skip ID tag/comment lines
-    if (TAGS_COMMENT_RE.test(line)) continue; // skip tags comment lines
+    if (isTcLine(tagPrefix, line)) continue;           // skip ID tag/comment lines
+    if (TAGS_COMMENT_RE.test(line)) continue;          // skip <!-- tags: ... --> lines
+    if (isStandaloneTagLine(tagPrefix, line)) continue; // skip standalone @tag lines
 
     if (STEPS_HEADING_RE.test(stripBold(line.trim()))) {
       section = 'steps';
