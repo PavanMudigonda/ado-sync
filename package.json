@@ -25,6 +25,10 @@
     "playwright",
     "specsync"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PavanMudigonda/ado-sync"
+  },
   "license": "MIT",
   "dependencies": {
     "@azure/identity": "^4.12.0",
