@@ -49,7 +49,7 @@ function stripBold(s: string): string {
 const SEPARATOR_RE = /^---+\s*$/;
 // Matches the new plain-tag format "@tc:12345" on its own line,
 // and the legacy HTML comment "<!-- tc: 12345 -->" / "<!-- @tc:12345 -->" for backward compat.
-const mdTcTagRe = (prefix: string) => new RegExp(`^\\s*@${prefix}:(\\d+)\\s*$`);
+const mdTcTagRe = (prefix: string) => new RegExp(`^\\s*@${prefix}:(\\d+)\\s*$`, 'm');
 const mdTcCommentRe = (prefix: string) =>
   new RegExp(`<!--\\s*@?${prefix}\\s*:\\s*(\\d+)\\s*-->`, 'i');
 function findTcId(prefix: string, blockText: string): number | undefined {
