@@ -1,0 +1,6 @@
+﻿ID,Work Item Type,Title,Test Step,Step Action,Step Expected,Area Path,Assigned To,State
+"24213","Test Case","Scenario: Change theme from light to dark and dark to light back",,,,"Azure-DevOps-Training\Release 1","Mudigonda, Pavan (TR Technology) <NagaPavanKumar.Mudigonda@thomsonreuters.com>","Design"
+,,,"1","Background: Given Go to the playwright website",,,,
+,,,"2","Given A cat fact is recieved",,,,
+,,,"3","When Change theme to ""light"" mode","Then We see ""light"" mode",,,
+,,,"4","When Change theme to ""dark"" mode",,,,
