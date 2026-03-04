@@ -2,9 +2,10 @@
  * Sync engine — orchestrates push, pull, and status operations.
  */
 
+import parseTagExpression from '@cucumber/tag-expressions';
 import * as fs from 'fs';
 import { glob } from 'glob';
-import parseTagExpression from '@cucumber/tag-expressions';
+
 import { AzureClient } from '../azure/client';
 import { createTestCase, getTestCase, updateTestCase } from '../azure/test-cases';
 import { parseGherkinFile } from '../parsers/gherkin';
