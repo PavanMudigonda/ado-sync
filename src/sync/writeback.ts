@@ -7,9 +7,9 @@
  *   Default with tagPrefix "tc":  @tc:12345
  *
  * Markdown strategy:
- *   Inserts (or replaces) a  <!-- {tagPrefix}: 12345 -->  comment on the line
+ *   Inserts (or replaces) a  <!-- @{tagPrefix}:{id} -->  comment on the line
  *   immediately following the ### heading.
- *   Default with tagPrefix "tc":  <!-- tc: 12345 -->
+ *   Default with tagPrefix "tc":  <!-- @tc:12345 -->
  */
 
 import * as fs from 'fs';
@@ -67,7 +67,7 @@ export function writebackGherkin(test: ParsedTest, id: number, tagPrefix: string
  *
  * Strategy:
  *  1. Find the ### heading line (1-based).
- *  2. Scan the next ~15 lines for an existing comment.
+ *  2. Scan the next ~15 lines for an existing <!-- @tc:N --> comment.
  *  3. If found, replace it.
  *  4. If not found, insert immediately after the heading line.
  */
@@ -76,8 +76,8 @@ export function writebackMarkdown(test: ParsedTest, id: number, tagPrefix: strin
   const lines = raw.split('\n');
   const headingLineIdx = test.line - 1; // 0-based
 
-  const comment = `<!-- ${tagPrefix}: ${id} -->`;
-  const existingRe = new RegExp(`<!--\\s*${tagPrefix}\\s*:\\s*\\d+\\s*-->`, 'i');
+  const comment = `<!-- @${tagPrefix}:${id} -->`;
+  const existingRe = new RegExp(`<!--\\s*@?${tagPrefix}\\s*:\\s*\\d+\\s*-->`, 'i');
 
   // Scan forward for an existing comment (up to 15 lines after heading)
   const scanEnd = Math.min(headingLineIdx + 15, lines.length);
