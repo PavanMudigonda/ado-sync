@@ -14,6 +14,8 @@
 
 import * as fs from 'fs';
 
+import { writebackCsv } from '../parsers/csv';
+import { writebackExcel } from '../parsers/excel';
 import { ParsedTest } from '../types';
 
 // ─── Gherkin writeback ────────────────────────────────────────────────────────
@@ -106,15 +108,24 @@ export function writebackMarkdown(test: ParsedTest, id: number, tagPrefix: strin
 
 // ─── Dispatcher ──────────────────────────────────────────────────────────────
 
-export function writebackId(
+export async function writebackId(
   test: ParsedTest,
   id: number,
-  localType: 'gherkin' | 'markdown',
+  localType: 'gherkin' | 'markdown' | 'csv' | 'excel',
   tagPrefix: string
-): void {
-  if (localType === 'gherkin') {
-    writebackGherkin(test, id, tagPrefix);
-  } else {
-    writebackMarkdown(test, id, tagPrefix);
+): Promise<void> {
+  switch (localType) {
+    case 'gherkin':
+      writebackGherkin(test, id, tagPrefix);
+      break;
+    case 'markdown':
+      writebackMarkdown(test, id, tagPrefix);
+      break;
+    case 'csv':
+      writebackCsv(test.filePath, test.title, id);
+      break;
+    case 'excel':
+      await writebackExcel(test.filePath, test.title, id);
+      break;
   }
 }
