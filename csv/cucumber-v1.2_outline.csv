@@ -1,0 +1,5 @@
+﻿ID,Work Item Type,Title,Test Step,Step Action,Step Expected,Area Path,Assigned To,State
+"24214","Test Case","Scenario Outline: Changing theme to from one mode to another link",,,,"Azure-DevOps-Training\Release 1","Mudigonda, Pavan (TR Technology) <NagaPavanKumar.Mudigonda@thomsonreuters.com>","Design"
+,,,"1","Background: Given Go to the playwright website",,,,
+,,,"2","When Change theme to ""@ThemeOne "" mode","Then Snapshot ""@ThemeOne """,,,
+,,,"3","When Change theme to ""@ThemeTwo "" mode","Then Snapshot ""@ThemeTwo """,,,
