@@ -76,8 +76,12 @@ export function writebackMarkdown(test: ParsedTest, id: number, tagPrefix: strin
   const lines = raw.split('\n');
   const headingLineIdx = test.line - 1; // 0-based
 
-  const comment = `<!-- @${tagPrefix}:${id} -->`;
-  const existingRe = new RegExp(`<!--\\s*@?${tagPrefix}\\s*:\\s*\\d+\\s*-->`, 'i');
+  // Plain tag line (same style as Gherkin).  Legacy HTML comment format also matched for replacement.
+  const comment = `@${tagPrefix}:${id}`;
+  const existingRe = new RegExp(
+    `^\\s*@${tagPrefix}:\\d+\\s*$|<!--\\s*@?${tagPrefix}\\s*:\\s*\\d+\\s*-->`,
+    'i'
+  );
 
   // Scan forward for an existing comment (up to 15 lines after heading)
   const scanEnd = Math.min(headingLineIdx + 15, lines.length);
