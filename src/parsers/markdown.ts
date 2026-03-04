@@ -41,6 +41,11 @@ const STEPS_HEADING_RE = /^steps\s*:/i;
 const EXPECTED_HEADING_RE = /^expected\s+results?\s*:/i;
 const NUMBERED_STEP_RE = /^\s*\d+\.\s+(.+)$/;
 const BULLET_STEP_RE = /^\s*[-*]\s+(.+)$/;
+
+/** Strip leading/trailing markdown bold markers (**) so **Steps:** matches Steps: */
+function stripBold(s: string): string {
+  return s.replace(/^\*+/, '').replace(/\*+$/, '');
+}
 const SEPARATOR_RE = /^---+\s*$/;
 const mdTcCommentRe = (prefix: string) =>
   new RegExp(`<!--\\s*${prefix}\\s*:\\s*(\\d+)\\s*-->`, 'i');
@@ -121,16 +126,17 @@ function parseScenarioBlock(
     if (tcRe.test(line)) continue;       // skip ID comment lines
     if (TAGS_COMMENT_RE.test(line)) continue; // skip tags comment lines
 
-    if (STEPS_HEADING_RE.test(line.trim())) {
+    if (STEPS_HEADING_RE.test(stripBold(line.trim()))) {
       section = 'steps';
       continue;
     }
-    if (EXPECTED_HEADING_RE.test(line.trim())) {
+    if (EXPECTED_HEADING_RE.test(stripBold(line.trim()))) {
       section = 'expected';
       continue;
     }
-    // A new unrecognised heading resets to 'other'
-    if (/^#{1,6}\s/.test(line)) {
+    // H1/H2 headings are unexpected inside a scenario block — reset to ignore.
+    // H4+ sub-headings (#### 1.1 ...) are treated as content within the current section.
+    if (/^#{1,2}\s/.test(line)) {
       section = 'other';
     }
 

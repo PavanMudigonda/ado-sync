@@ -150,6 +150,8 @@ async function pushSingle(
   const suiteCache = new Map<string, number>();
   const results: SyncResult[] = [];
   const conflicts: SyncResult[] = [];
+  const createdIds = new Set<number>();
+  const pendingWritebacks: Array<{ test: ParsedTest; newId: number }> = [];
 
   // Load local cache for conflict detection and skip optimisation
   const cache = loadCache(configDir);
@@ -219,8 +221,9 @@ async function pushSingle(
             ? await getOrCreateSuiteForFile(client, config, test.filePath, configDir, suiteCache)
             : undefined;
           newId = await createTestCase(client, test, config, suiteIdOverride);
+          createdIds.add(newId);
           if (!disableLocal) {
-            writebackId(test, newId, config.local.type, tagPrefix);
+            pendingWritebacks.push({ test, newId });
           }
           // Fetch back to get changedDate for cache
           const created = await getTestCase(client, newId, titleField);
@@ -238,11 +241,31 @@ async function pushSingle(
     throw new Error(`Conflicts detected (conflictAction=fail):\n${titles}`);
   }
 
+  // Apply ID writebacks in descending line order per file so earlier insertions
+  // don't shift line numbers for subsequent writebacks in the same file.
+  if (!opts.dryRun && pendingWritebacks.length) {
+    const byFile = new Map<string, typeof pendingWritebacks>();
+    for (const wb of pendingWritebacks) {
+      const fp = wb.test.filePath;
+      if (!byFile.has(fp)) byFile.set(fp, []);
+      byFile.get(fp)!.push(wb);
+    }
+    for (const wbs of byFile.values()) {
+      wbs.sort((a, b) => b.test.line - a.test.line);
+      for (const { test: t, newId } of wbs) {
+        writebackId(t, newId, config.local.type, tagPrefix);
+      }
+    }
+  }
+
   // Removed TC detection: find suite TCs not referenced by any local test
   if (!opts.dryRun || true /* show removed in dry-run too */) {
     try {
       const remoteTcs = await getTestCasesInSuite(client, config);
-      const localIds = new Set(tests.map((t) => t.azureId).filter(Boolean) as number[]);
+      const localIds = new Set([
+        ...(tests.map((t) => t.azureId).filter(Boolean) as number[]),
+        ...createdIds,
+      ]);
       for (const remote of remoteTcs) {
         if (!localIds.has(remote.id)) {
           if (!opts.dryRun) {
