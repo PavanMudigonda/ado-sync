@@ -197,9 +197,11 @@ async function pushSingle(
         const remoteStepsText = remote.steps.map((s) => s.action).join('\n');
         const titleChanged = remote.title !== test.title;
         const stepsChanged = localStepsText !== remoteStepsText;
-        const localTags = [...test.tags].filter((t) => !t.startsWith(tagPrefix + ':')).sort();
-        const remoteTags = [...remote.tags].sort();
-        const tagsChanged = localTags.join(';') !== remoteTags.join(';');
+        // For tags: push is additive (merges local into Azure), so only flag a change
+        // when the local file has tags that are NOT yet present in Azure.
+        const localTags = new Set(test.tags.filter((t) => !t.startsWith(tagPrefix + ':')));
+        const remoteTags = new Set(remote.tags);
+        const tagsChanged = [...localTags].some((t) => !remoteTags.has(t));
 
         if (!titleChanged && !stepsChanged && !tagsChanged) {
           // Update cache entry even on skip (changedDate may differ due to other fields)
