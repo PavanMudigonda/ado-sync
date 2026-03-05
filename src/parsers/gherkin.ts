@@ -253,6 +253,9 @@ function pickleStepToParsedStep(step: PickleStep): ParsedStep {
   return {
     keyword: STEP_TYPE_KEYWORD[step.type ?? 'Unknown'] ?? 'Step',
     text: step.text.trim(),
+    dataTable: step.argument?.dataTable
+      ? step.argument.dataTable.rows.map((r) => r.cells.map((c) => c.value))
+      : undefined,
   };
 }
 
@@ -274,11 +277,21 @@ function scenarioOutlineToParsedTest(
   const scenarioTags = scenario.tags.map((t) => stripAt(t.name));
   const allTags = [...new Set([...pathTags, ...scenarioTags])];
 
-  // Template steps keep <param> angle-bracket syntax as-is
-  const steps: ParsedStep[] = (scenario.steps as Step[]).map((s) => ({
+  // Background steps prepended with isBackground marker so format config can control them
+  const bgParsedSteps: ParsedStep[] = bgSteps.map((s) => ({
     keyword: (s.keyword ?? '').trim(),
     text: s.text.trim(),
+    isBackground: true,
+    dataTable: s.dataTable ? s.dataTable.rows.map((r) => r.cells.map((c) => c.value)) : undefined,
   }));
+
+  // Template steps keep <param> angle-bracket syntax as-is
+  const scenarioSteps: ParsedStep[] = (scenario.steps as Step[]).map((s) => ({
+    keyword: (s.keyword ?? '').trim(),
+    text: s.text.trim(),
+    dataTable: s.dataTable ? s.dataTable.rows.map((r) => r.cells.map((c) => c.value)) : undefined,
+  }));
+  const steps: ParsedStep[] = [...bgParsedSteps, ...scenarioSteps];
 
   // Merge all Examples tables (may be multiple blocks)
   let headers: string[] = [];
