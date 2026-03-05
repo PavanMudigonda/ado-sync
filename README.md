@@ -425,7 +425,6 @@ Tags are evaluated against all tags on a scenario, including:
 - Tags inherited from the Feature block (Gherkin)
 - Tags on the Scenario / Scenario Outline block
 - Tags on individual Examples tables
-- Inline `<!-- tags: -->` comments in Markdown (see below)
 - **Path-based auto-tags** — directory segments prefixed with `@` are automatically applied as tags to all scenarios in that directory:
 
   ```
@@ -443,12 +442,11 @@ Tags are evaluated against all tags on a scenario, including:
 
 ### Tags in Markdown
 
-Add a `<!-- tags: -->` HTML comment anywhere inside a scenario block to assign tags:
+Add a @ inside a scenario block to assign tags:
 
 ```markdown
 ### Login with valid credentials
-@tc:1042
-<!-- tags: @smoke, @regression -->
+@tc:1042 @smoke
 
 Steps:
 1. Navigate to the login page
@@ -506,7 +504,7 @@ Each `### heading` is treated as one test case. The file can contain any number 
 ## Test scenarios
 
 ### Login with valid credentials
-<!-- tags: @smoke -->
+@smoke
 
 Assumption: Fresh browser session.
 
@@ -643,7 +641,7 @@ Tags matching a configured `links` prefix are turned into Azure DevOps work item
 ```markdown
 ### User can add items to cart
 @tc:1042
-<!-- tags: @story:555, @bug:789 -->
+
 ```
 
 On each `push`, relations are synced: new links are added and stale links (whose tag was removed) are deleted. The `relationship` value is the ADO relation type; `"System.LinkTypes.Related"` is the default if omitted.

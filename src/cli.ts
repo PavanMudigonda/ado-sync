@@ -19,6 +19,7 @@ import * as path from 'path';
 import pkg from '../package.json';
 import { applyOverrides, CONFIG_TEMPLATE_JSON, CONFIG_TEMPLATE_YAML, loadConfig, resolveConfigPath } from './config';
 import { pull, push, status } from './sync/engine';
+import { publishTestResults } from './sync/publish-results';
 import { SyncResult } from './types';
 
 // ─── CLI definition ───────────────────────────────────────────────────────────
@@ -153,6 +154,50 @@ program
       const results = await status(config, configDir, { tags: opts.tags, onProgress });
       if (isTTY) clearProgressLine();
       printResults(results);
+    } catch (err: any) {
+      console.error(chalk.red(err.message));
+      process.exit(1);
+    }
+  });
+
+// ─── publish-test-results ─────────────────────────────────────────────────────
+
+program
+  .command('publish-test-results')
+  .description('Publish test results from result files (TRX, JUnit, Cucumber JSON) to Azure DevOps')
+  .option('--testResult <path>', 'Path to a test result file (repeatable)', collect, [])
+  .option('--testResultFormat <format>', 'Result file format: trx, junit, cucumberJson')
+  .option('--runName <name>', 'Name for the test run in Azure DevOps')
+  .option('--buildId <id>', 'Build ID to associate with the test run')
+  .option('--dry-run', 'Parse results and show summary without publishing')
+  .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
+  .action(async (opts) => {
+    const globalOpts = program.opts();
+    try {
+      const configPath = resolveConfigPath(globalOpts.config);
+      const config = loadConfig(configPath);
+      if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
+      const configDir = path.dirname(configPath);
+
+      console.log(chalk.bold('ado-sync publish-test-results'));
+      console.log(chalk.dim(`Config: ${configPath}`));
+      if (opts.dryRun) console.log(chalk.yellow('Dry run — no changes will be made'));
+      console.log('');
+
+      const result = await publishTestResults(config, configDir, {
+        dryRun: opts.dryRun,
+        resultFiles: opts.testResult?.length ? opts.testResult : undefined,
+        resultFormat: opts.testResultFormat,
+        runName: opts.runName,
+        buildId: opts.buildId ? parseInt(opts.buildId) : undefined,
+      });
+
+      console.log(chalk.green(`Total results: ${result.totalResults}`));
+      console.log(`  ${chalk.green(`${result.passed} passed`)}  ${chalk.red(`${result.failed} failed`)}  ${chalk.dim(`${result.other} other`)}`);
+      if (result.runId) {
+        console.log(chalk.dim(`Run ID: ${result.runId}`));
+        console.log(chalk.dim(`URL: ${result.runUrl}`));
+      }
     } catch (err: any) {
       console.error(chalk.red(err.message));
       process.exit(1);
