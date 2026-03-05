@@ -17,6 +17,7 @@
  *   Microsoft.VSTS.TCM.LocalDataSource  (NewDataSet XML)
  */
 
+import * as crypto from 'crypto';
 import { XMLBuilder, XMLParser } from 'fast-xml-parser';
 import * as path from 'path';
 
@@ -119,9 +120,75 @@ function buildParameterDataXml(headers: string[], rows: string[][]): string {
   return `<NewDataSet>${rowsXml}</NewDataSet>`;
 }
 
+/**
+ * Build the parameter names XML for Microsoft.VSTS.TCM.Parameters.
+ * Azure DevOps requires this field in addition to LocalDataSource so it knows
+ * which parameter names exist in the test case.
+ */
+function buildParameterNamesXml(headers: string[]): string {
+  if (!headers.length) return '';
+  const params = headers
+    .map((h) => `<param name="${escapeXmlName(h)}" bind="default" />`)
+    .join('');
+  return `<parameters>${params}</parameters>`;
+}
+
+/**
+ * Convert Gherkin angle-bracket parameter syntax to Azure's @param@ syntax.
+ * e.g.  "I enter username \"<username>\""  →  "I enter username \"@username@\""
+ */
+function gherkinParamsToAzure(text: string): string {
+  return text.replace(/<([^>]+)>/g, '@$1@');
+}
+
 /** Make a column name safe for XML element names (spaces → underscores). */
 function escapeXmlName(name: string): string {
   return name.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_\-.]/g, '');
+}
+
+// ─── Automation helpers ───────────────────────────────────────────────────────
+
+/**
+ * Produce a deterministic UUID (v4 shape, SHA-256 seeded) from a string.
+ * Using a deterministic ID means re-running push never creates duplicate
+ * automation associations in Azure DevOps.
+ */
+function deterministicGuid(seed: string): string {
+  const hash = crypto.createHash('sha256').update(seed).digest('hex');
+  return [
+    hash.slice(0, 8),
+    hash.slice(8, 12),
+    '4' + hash.slice(13, 16),
+    ((parseInt(hash[16], 16) & 0x3) | 0x8).toString(16) + hash.slice(17, 20),
+    hash.slice(20, 32),
+  ].join('-');
+}
+
+function sanitizeTestName(s: string): string {
+  return s.replace(/[^a-zA-Z0-9_.]/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+/**
+ * Build the set of PATCH operations that mark a test case as Automated.
+ * Only included when sync.markAutomated is true.
+ */
+function buildAutomationPatches(test: ParsedTest, config: SyncConfig, op: 'add' | 'replace'): any[] {
+  if (!config.sync?.markAutomated) return [];
+
+  const ext = path.extname(test.filePath);
+  const fileBase = sanitizeTestName(path.basename(test.filePath, ext));
+  const scenarioName = sanitizeTestName(test.title);
+  const automatedTestName = `${fileBase}.${scenarioName}`;
+  const automatedTestStorage = path.basename(test.filePath);
+  const automatedTestId = deterministicGuid(`${test.filePath}::${test.title}`);
+
+  return [
+    { op, path: '/fields/Microsoft.VSTS.TCM.AutomationStatus',    value: 'Automated' },
+    { op, path: '/fields/Microsoft.VSTS.TCM.AutomatedTestName',   value: automatedTestName },
+    { op, path: '/fields/Microsoft.VSTS.TCM.AutomatedTestStorage', value: automatedTestStorage },
+    { op, path: '/fields/Microsoft.VSTS.TCM.AutomatedTestId',     value: automatedTestId },
+    { op, path: '/fields/Microsoft.VSTS.TCM.AutomatedTestType',   value: 'Unit Test' },
+  ];
 }
 
 // ─── Tag helpers ─────────────────────────────────────────────────────────────
@@ -367,10 +434,14 @@ export async function createTestCase(
   const syncCfg = config.sync ?? {};
   const titleField = syncCfg.titleField ?? 'System.Title';
 
-  const steps: AzureStep[] = test.steps.map((s) => ({
-    action: `${s.keyword} ${s.text}`.trim(),
-    expected: s.expected ?? '',
-  }));
+  const isParametrized = !!test.outlineParameters?.headers.length;
+  const steps: AzureStep[] = test.steps.map((s) => {
+    const rawAction = `${s.keyword} ${s.text}`.trim();
+    return {
+      action: isParametrized ? gherkinParamsToAzure(rawAction) : rawAction,
+      expected: s.expected ?? '',
+    };
+  });
 
   const patchDoc: any[] = [
     { op: 'add', path: `/fields/${titleField}`, value: test.title },
@@ -381,13 +452,17 @@ export async function createTestCase(
     patchDoc.push({ op: 'add', path: '/fields/System.Description', value: test.description });
   }
 
+  patchDoc.push(...buildAutomationPatches(test, config, 'add'));
+
   if (test.outlineParameters) {
-    const paramXml = buildParameterDataXml(
-      test.outlineParameters.headers,
-      test.outlineParameters.rows
-    );
-    if (paramXml) {
-      patchDoc.push({ op: 'add', path: '/fields/Microsoft.VSTS.TCM.LocalDataSource', value: paramXml });
+    const { headers, rows } = test.outlineParameters;
+    const namesXml = buildParameterNamesXml(headers);
+    if (namesXml) {
+      patchDoc.push({ op: 'add', path: '/fields/Microsoft.VSTS.TCM.Parameters', value: namesXml });
+    }
+    const dataXml = buildParameterDataXml(headers, rows);
+    if (dataXml) {
+      patchDoc.push({ op: 'add', path: '/fields/Microsoft.VSTS.TCM.LocalDataSource', value: dataXml });
     }
   }
 
@@ -431,10 +506,14 @@ export async function updateTestCase(
   const syncCfg = config.sync ?? {};
   const titleField = syncCfg.titleField ?? 'System.Title';
 
-  const steps: AzureStep[] = test.steps.map((s) => ({
-    action: `${s.keyword} ${s.text}`.trim(),
-    expected: s.expected ?? '',
-  }));
+  const isParametrized = !!test.outlineParameters?.headers.length;
+  const steps: AzureStep[] = test.steps.map((s) => {
+    const rawAction = `${s.keyword} ${s.text}`.trim();
+    return {
+      action: isParametrized ? gherkinParamsToAzure(rawAction) : rawAction,
+      expected: s.expected ?? '',
+    };
+  });
 
   const localTags = test.tags.filter((t) => !t.startsWith(syncCfg.tagPrefix + ':'));
 
@@ -454,13 +533,17 @@ export async function updateTestCase(
     patchDoc.push({ op: 'replace', path: '/fields/System.Description', value: test.description });
   }
 
+  patchDoc.push(...buildAutomationPatches(test, config, 'replace'));
+
   if (test.outlineParameters) {
-    const paramXml = buildParameterDataXml(
-      test.outlineParameters.headers,
-      test.outlineParameters.rows
-    );
-    if (paramXml) {
-      patchDoc.push({ op: 'replace', path: '/fields/Microsoft.VSTS.TCM.LocalDataSource', value: paramXml });
+    const { headers, rows } = test.outlineParameters;
+    const namesXml = buildParameterNamesXml(headers);
+    if (namesXml) {
+      patchDoc.push({ op: 'replace', path: '/fields/Microsoft.VSTS.TCM.Parameters', value: namesXml });
+    }
+    const dataXml = buildParameterDataXml(headers, rows);
+    if (dataXml) {
+      patchDoc.push({ op: 'replace', path: '/fields/Microsoft.VSTS.TCM.LocalDataSource', value: dataXml });
     }
   }
 
