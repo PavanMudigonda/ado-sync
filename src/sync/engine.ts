@@ -197,8 +197,11 @@ async function pushSingle(
         const remoteStepsText = remote.steps.map((s) => s.action).join('\n');
         const titleChanged = remote.title !== test.title;
         const stepsChanged = localStepsText !== remoteStepsText;
+        const localTags = [...test.tags].filter((t) => !t.startsWith(tagPrefix + ':')).sort();
+        const remoteTags = [...remote.tags].sort();
+        const tagsChanged = localTags.join(';') !== remoteTags.join(';');
 
-        if (!titleChanged && !stepsChanged) {
+        if (!titleChanged && !stepsChanged && !tagsChanged) {
           // Update cache entry even on skip (changedDate may differ due to other fields)
           updateCacheEntry(cache, test, remote);
           results.push({ action: 'skipped', filePath: test.filePath, title: test.title, azureId: test.azureId });
