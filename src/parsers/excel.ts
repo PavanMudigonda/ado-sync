@@ -1,19 +1,19 @@
 /**
  * Excel (.xlsx) test spec parser.
  *
- * Reads the Azure DevOps / SpecSync xlsx export format. The xlsx files produced
- * by this toolchain use a custom non-standard structure (no shared strings,
- * inline strings for rich-text step cells), so we parse the raw XML directly
- * using JSZip (already a transitive dependency) instead of a heavyweight xlsx
- * library that may not handle this format.
+ * Reads the Azure DevOps / SpecSync xlsx export format.
  *
- * Cell types observed:
- *   t="str"       → plain string in <v>
- *   t="n"         → number in <v>
- *   t="inlineStr" → rich text in <is><r><t> …</t></r></is>; concat all <t> runs
+ * Cell types handled:
+ *   t="s"        → shared string; <v> holds an index into xl/sharedStrings.xml
+ *   t="str"      → formula-result string in <v>
+ *   t="n" / none → number in <v>
+ *   t="inlineStr"→ rich text in <is><r><t>…</t></r></is>; concat all <t> runs
  *
- * ID writeback rewrites the xlsx XML in place (updates the ID cell on the
- * matching title row).
+ * Rows in xlsx are sparse — empty cells are omitted. We restore correct column
+ * positions using the cell reference attribute (r="C5" → col index 2).
+ *
+ * ID writeback rewrites the xlsx XML in place (updates or inserts the ID cell
+ * on the matching title row).
  */
 
 import * as fs from 'fs';
@@ -30,29 +30,79 @@ function detectNsPrefix(xml: string): string {
   return m?.[1] ? `${m[1]}:` : '';
 }
 
-/** Extract the text value from a cell element string. */
-function cellText(cellXml: string, nsPrefix: string): string {
-  // inlineStr: <{ns}is> containing <{ns}r><{ns}t>…</…> runs
+/** Unescape XML entities. */
+function unescapeXml(s: string): string {
+  return s
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
+}
+
+/**
+ * Parse xl/sharedStrings.xml into a lookup array.
+ * Each <si> element is one entry; rich-text runs (<r><t>…</t></r>) are concatenated.
+ */
+function parseSharedStrings(xml: string): string[] {
+  const strings: string[] = [];
+  const siRe = /<si[^>]*>([\s\S]*?)<\/si>/g;
+  let m: RegExpExecArray | null;
+  while ((m = siRe.exec(xml)) !== null) {
+    const tRe = /<t[^>]*>([\s\S]*?)<\/t>/g;
+    const parts: string[] = [];
+    let tm: RegExpExecArray | null;
+    while ((tm = tRe.exec(m[1])) !== null) {
+      parts.push(unescapeXml(tm[1]));
+    }
+    strings.push(parts.join(''));
+  }
+  return strings;
+}
+
+/** Convert column letter(s) to 0-based index: A→0, B→1, Z→25, AA→26. */
+function colLetterToIndex(letters: string): number {
+  let n = 0;
+  for (const ch of letters.toUpperCase()) {
+    n = n * 26 + (ch.charCodeAt(0) - 64);
+  }
+  return n - 1;
+}
+
+/**
+ * Extract the text value from a single <c> element, resolving shared strings.
+ * cellXml: the full <c …>…</c> XML string.
+ */
+function cellValue(cellXml: string, nsPrefix: string, sharedStrings: string[]): string {
+  // inlineStr: <ns:is> containing <ns:r><ns:t>…</ns:t></ns:r> runs
   const isMatch = cellXml.match(new RegExp(`<${nsPrefix}is>([\\s\\S]*?)<\\/${nsPrefix}is>`));
   if (isMatch) {
     const tRe = new RegExp(`<${nsPrefix}t[^>]*>([\\s\\S]*?)<\\/${nsPrefix}t>`, 'g');
     const parts: string[] = [];
     let m: RegExpExecArray | null;
     while ((m = tRe.exec(isMatch[1])) !== null) {
-      parts.push(m[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"'));
+      parts.push(unescapeXml(m[1]));
     }
     return parts.join('');
   }
-  // plain value in <v>
+
   const vMatch = cellXml.match(new RegExp(`<${nsPrefix}v>([\\s\\S]*?)<\\/${nsPrefix}v>`));
-  if (vMatch) {
-    return vMatch[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"');
+  if (!vMatch) return '';
+
+  // Shared string: t="s"
+  if (/\bt="s"/.test(cellXml)) {
+    const idx = parseInt(vMatch[1], 10);
+    return sharedStrings[idx] ?? '';
   }
-  return '';
+
+  return unescapeXml(vMatch[1]);
 }
 
-/** Parse all rows from the sheet XML. Returns array of string-array rows. */
-function parseSheetXml(xml: string): string[][] {
+/**
+ * Parse all rows from the sheet XML into string[][] with correct column positions.
+ * Uses the cell reference attribute (r="C5") to fill sparse rows correctly.
+ */
+function parseSheetXml(xml: string, sharedStrings: string[]): string[][] {
   const nsPrefix = detectNsPrefix(xml);
   const rowRe = new RegExp(`<${nsPrefix}row([^>]*)>([\\s\\S]*?)<\\/${nsPrefix}row>`, 'g');
   const cellRe = new RegExp(`<${nsPrefix}c([^>]*)>([\\s\\S]*?)<\\/${nsPrefix}c>`, 'g');
@@ -62,14 +112,27 @@ function parseSheetXml(xml: string): string[][] {
 
   while ((rowMatch = rowRe.exec(xml)) !== null) {
     const rowContent = rowMatch[2];
-    const cells: string[] = [];
+    const cellData: Array<{ colIdx: number; value: string }> = [];
     let cellMatch: RegExpExecArray | null;
 
     while ((cellMatch = cellRe.exec(rowContent)) !== null) {
-      cells.push(cellText(cellMatch[0], nsPrefix));
+      const attrs = cellMatch[1];
+      // r="C5" → extract column letters "C"
+      const refMatch = attrs.match(/\br="([A-Z]+)\d+"/i);
+      const colIdx = refMatch ? colLetterToIndex(refMatch[1]) : cellData.length;
+      const value = cellValue(cellMatch[0], nsPrefix, sharedStrings);
+      cellData.push({ colIdx, value });
     }
 
-    rows.push(cells);
+    if (cellData.length === 0) continue; // skip fully empty rows
+
+    // Build dense row array: fill gaps with empty strings
+    const maxColIdx = Math.max(...cellData.map((c) => c.colIdx));
+    const row = new Array<string>(maxColIdx + 1).fill('');
+    for (const { colIdx, value } of cellData) {
+      row[colIdx] = value;
+    }
+    rows.push(row);
   }
 
   return rows;
@@ -85,7 +148,13 @@ export async function parseExcelFile(
   const buffer = fs.readFileSync(filePath);
   const zip = await JSZip.loadAsync(buffer);
 
-  // Find the sheet XML — may be sheet.xml or sheet1.xml
+  // Load shared strings table (present in most xlsx files)
+  const ssEntry = zip.file('xl/sharedStrings.xml');
+  const sharedStrings = ssEntry
+    ? parseSharedStrings(await ssEntry.async('string'))
+    : [];
+
+  // Find the worksheet XML
   const sheetEntry =
     zip.file('xl/worksheets/sheet.xml') ??
     zip.file('xl/worksheets/sheet1.xml');
@@ -93,14 +162,13 @@ export async function parseExcelFile(
   if (!sheetEntry) throw new Error(`No worksheet found in ${filePath}`);
 
   const xml: string = await sheetEntry.async('string');
-  // Strip BOM if present
   const cleanXml = xml.startsWith('\uFEFF') ? xml.slice(1) : xml;
 
-  const rawRows = parseSheetXml(cleanXml);
+  const rawRows = parseSheetXml(cleanXml, sharedStrings);
 
   const rows: TabularRow[] = rawRows.map((cells, idx) => ({
     cells: cells.concat(Array(Math.max(0, 9 - cells.length)).fill('')),
-    rowIndex: idx + 1, // 1-based
+    rowIndex: idx + 1,
   }));
 
   return parseTabularRows(rows, filePath, tagPrefix, linkConfigs);
@@ -112,11 +180,11 @@ export async function parseExcelFile(
  * Write (or update) the TC ID in column A of the matching title row in an xlsx file.
  *
  * Strategy:
- *  1. Load the xlsx zip.
- *  2. Parse the sheet XML.
- *  3. Find the row matching the test title where ID is currently empty.
- *  4. Replace the empty ID cell XML with a numeric cell containing the new id.
- *  5. Repack the zip and write back.
+ *  1. Load the xlsx zip and shared strings.
+ *  2. Find the row where col C (Title) matches and col D (Test Step) is empty.
+ *  3. If col A cell exists, replace its value; if it's missing (sparse row),
+ *     insert a new numeric cell at the start of the row.
+ *  4. Repack and write.
  */
 export async function writebackExcel(filePath: string, title: string, id: number): Promise<void> {
   const buffer = fs.readFileSync(filePath);
@@ -129,6 +197,9 @@ export async function writebackExcel(filePath: string, title: string, id: number
 
   if (!sheetKey) throw new Error(`No worksheet found in ${filePath}`);
 
+  const ssEntry = zip.file('xl/sharedStrings.xml');
+  const sharedStrings = ssEntry ? parseSharedStrings(await ssEntry.async('string')) : [];
+
   let xml: string = await zip.file(sheetKey)!.async('string');
   const hasBom = xml.startsWith('\uFEFF');
   if (hasBom) xml = xml.slice(1);
@@ -137,43 +208,58 @@ export async function writebackExcel(filePath: string, title: string, id: number
   const TITLE_STRIP_RE = /^(Scenario Outline|Scenario)\s*:\s*/i;
   const normalise = (s: string) => s.replace(TITLE_STRIP_RE, '').trim();
 
-  // Split into rows, find the matching one, and update its first cell
-  const rowRe = new RegExp(`(<${nsPrefix}row[^>]*>)([\\s\\S]*?)(<\\/${nsPrefix}row>)`, 'g');
+  const rowRe = new RegExp(`(<${nsPrefix}row([^>]*)>)([\\s\\S]*?)(<\\/${nsPrefix}row>)`, 'g');
+  const cellRe = new RegExp(`<${nsPrefix}c([^>]*)>[\\s\\S]*?<\\/${nsPrefix}c>`, 'g');
 
   let updated = false;
-  const newXml = xml.replace(rowRe, (_full, open, content, close) => {
+  const newXml = xml.replace(rowRe, (_full, open, rowAttrs, content, close) => {
     if (updated) return open + content + close;
 
-    // Extract cells from this row
-    const cellRe = new RegExp(`<${nsPrefix}c([^>]*)>([\\s\\S]*?)<\\/${nsPrefix}c>`, 'g');
-    const cellMatches = [...content.matchAll(cellRe)];
-    if (cellMatches.length < 3) return open + content + close;
+    // Collect all cells with their column index
+    const cellMatches = [...content.matchAll(
+      new RegExp(`(<${nsPrefix}c([^>]*)>)([\\s\\S]*?)(<\\/${nsPrefix}c>)`, 'g')
+    )];
 
-    const idCell    = cellText(cellMatches[0]?.[0] ?? '', nsPrefix);
-    const titleCell = cellText(cellMatches[2]?.[0] ?? '', nsPrefix);
-    const stepCell  = cellText(cellMatches[3]?.[0] ?? '', nsPrefix);
+    const getCellAtCol = (colLetter: string) => {
+      const targetIdx = colLetterToIndex(colLetter);
+      return cellMatches.find((m) => {
+        const refMatch = (m[2] as string).match(/\br="([A-Z]+)\d+"/i);
+        return refMatch ? colLetterToIndex(refMatch[1]) === targetIdx : false;
+      });
+    };
 
-    // Match: no existing ID, has title, no step number, title matches
-    if (!idCell && titleCell && !stepCell && normalise(titleCell) === title) {
-      // Replace the first cell (empty string) with a numeric cell
-      const firstCellFull = cellMatches[0]![0];
-      const numericCell = firstCellFull
-        .replace(new RegExp(`(<${nsPrefix}c)([^>]*t="str")`), `$1 t="n"`)
-        .replace(new RegExp(`<${nsPrefix}v>[^<]*<\\/${nsPrefix}v>`), `<${nsPrefix}v>${id}</${nsPrefix}v>`);
+    const titleMatch = getCellAtCol('C');
+    const stepMatch  = getCellAtCol('D');
+    const idMatch    = getCellAtCol('A');
 
-      const newContent = content.replace(firstCellFull, numericCell);
-      updated = true;
-      return open + newContent + close;
+    const titleVal = titleMatch ? cellValue(titleMatch[0], nsPrefix, sharedStrings) : '';
+    const stepVal  = stepMatch  ? cellValue(stepMatch[0],  nsPrefix, sharedStrings) : '';
+    const idVal    = idMatch    ? cellValue(idMatch[0],    nsPrefix, sharedStrings) : '';
+
+    if (!titleVal || stepVal || idVal) return open + content + close;
+    if (normalise(titleVal) !== title) return open + content + close;
+
+    // Extract row number from the row's r attribute or first cell reference
+    const rowNumMatch = rowAttrs.match(/\br="(\d+)"/);
+    const rowNum = rowNumMatch ? rowNumMatch[1] : '1';
+
+    const numericCellXml = `<${nsPrefix}c r="A${rowNum}" t="n"><${nsPrefix}v>${id}</${nsPrefix}v></${nsPrefix}c>`;
+
+    let newContent: string;
+    if (idMatch) {
+      // Replace existing (empty) A cell
+      newContent = content.replace(idMatch[0], numericCellXml);
+    } else {
+      // Insert new A cell at start of row content
+      newContent = numericCellXml + content;
     }
 
-    return open + content + close;
+    updated = true;
+    return open + newContent + close;
   });
 
   zip.file(sheetKey, (hasBom ? '\uFEFF' : '') + newXml);
 
-  const outBuffer = await zip.generateAsync({
-    type: 'nodebuffer',
-    compression: 'DEFLATE',
-  });
+  const outBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
   fs.writeFileSync(filePath, outBuffer);
 }
