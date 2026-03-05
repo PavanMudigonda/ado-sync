@@ -209,7 +209,6 @@ export async function writebackExcel(filePath: string, title: string, id: number
   const normalise = (s: string) => s.replace(TITLE_STRIP_RE, '').trim();
 
   const rowRe = new RegExp(`(<${nsPrefix}row([^>]*)>)([\\s\\S]*?)(<\\/${nsPrefix}row>)`, 'g');
-  const cellRe = new RegExp(`<${nsPrefix}c([^>]*)>[\\s\\S]*?<\\/${nsPrefix}c>`, 'g');
 
   let updated = false;
   const newXml = xml.replace(rowRe, (_full, open, rowAttrs, content, close) => {
