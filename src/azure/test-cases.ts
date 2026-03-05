@@ -20,9 +20,23 @@
 import parseTagExpression from '@cucumber/tag-expressions';
 import * as crypto from 'crypto';
 import { XMLBuilder, XMLParser } from 'fast-xml-parser';
+import * as fs from 'fs';
+import { glob } from 'glob';
 import * as path from 'path';
 
-import { AzureStep, AzureTestCase, LinkConfig, ParsedTest, SuiteCondition, SyncConfig } from '../types';
+import {
+  AzureStep,
+  AzureTestCase,
+  CustomizationsConfig,
+  FieldUpdates,
+  FieldUpdateValue,
+  FormatConfig,
+  LinkConfig,
+  ParsedTest,
+  StateConfig,
+  SuiteCondition,
+  SyncConfig,
+} from '../types';
 import { AzureClient } from './client';
 
 // ─── XML helpers ─────────────────────────────────────────────────────────────
@@ -223,6 +237,379 @@ function tagsFromString(raw: string | undefined): string[] {
     .split(/[;,]/)
     .map((t) => t.trim())
     .filter(Boolean);
+}
+
+// ─── Tag transformation helpers ──────────────────────────────────────────────
+
+/**
+ * Apply tag text map transformation (character/substring replacements).
+ * e.g. textMap { "_": " " } transforms "my_tag" → "my tag"
+ */
+function applyTagTextMap(tags: string[], textMap: Record<string, string>): string[] {
+  return tags.map((t) => {
+    let result = t;
+    for (const [from, to] of Object.entries(textMap)) {
+      result = result.split(from).join(to);
+    }
+    return result;
+  });
+}
+
+/**
+ * Filter tags that should be ignored from removal during push.
+ * Patterns support trailing wildcard (e.g. "ado-tag*").
+ */
+function isIgnoredTag(tag: string, ignorePatterns: string[]): boolean {
+  for (const pattern of ignorePatterns) {
+    if (pattern.endsWith('*')) {
+      if (tag.startsWith(pattern.slice(0, -1))) return true;
+    } else if (tag === pattern) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Process tags for push: apply tag mapping and filter ignored tags.
+ * Returns the transformed tags list ready for Azure DevOps.
+ */
+export function processTagsForPush(
+  tags: string[],
+  tagPrefix: string,
+  customizations?: CustomizationsConfig
+): string[] {
+  let processed = tags.filter((t) => !t.startsWith(tagPrefix + ':'));
+
+  // Apply tag text map transformation
+  if (customizations?.tagTextMapTransformation?.enabled && customizations.tagTextMapTransformation.textMap) {
+    processed = applyTagTextMap(processed, customizations.tagTextMapTransformation.textMap);
+  }
+
+  return processed;
+}
+
+// ─── State change helpers ────────────────────────────────────────────────────
+
+/**
+ * Build the PATCH operation to set the TC state when the scenario has changed.
+ * Only applies when state.setValueOnChangeTo is configured.
+ * Respects an optional state.condition tag expression.
+ */
+function buildStateChangePatches(
+  test: ParsedTest,
+  stateConfig: StateConfig | undefined,
+  op: 'add' | 'replace'
+): any[] {
+  if (!stateConfig?.setValueOnChangeTo) return [];
+
+  // Check condition: if specified, only apply state change when tags match
+  if (stateConfig.condition) {
+    const tagsWithAt = test.tags.map((t) => (t.startsWith('@') ? t : `@${t}`));
+    const node = parseTagExpression(stateConfig.condition);
+    if (!node.evaluate(tagsWithAt)) return [];
+  }
+
+  return [
+    { op, path: '/fields/System.State', value: stateConfig.setValueOnChangeTo },
+  ];
+}
+
+// ─── Field update helpers ────────────────────────────────────────────────────
+
+/**
+ * Expand placeholders in a field update value string.
+ * Supported placeholders:
+ *   {scenario-name} → test title
+ *   {feature-name}  → file basename without extension
+ *   {feature-file}  → file basename
+ *   {scenario-description} → test description
+ *   {1}, {2}, etc. → wildcard captures from condition
+ */
+function expandFieldPlaceholders(
+  value: string,
+  test: ParsedTest,
+  wildcardCaptures: string[] = []
+): string {
+  let result = value;
+  result = result.replace(/\{scenario-name\}/g, test.title);
+  result = result.replace(/\{feature-name\}/g, path.basename(test.filePath, path.extname(test.filePath)));
+  result = result.replace(/\{feature-file\}/g, path.basename(test.filePath));
+  result = result.replace(/\{scenario-description\}/g, test.description ?? '');
+
+  // Replace numbered captures {1}, {2}, ...
+  for (let i = 0; i < wildcardCaptures.length; i++) {
+    result = result.replace(new RegExp(`\\{${i + 1}\\}`, 'g'), wildcardCaptures[i]);
+  }
+
+  return result;
+}
+
+/**
+ * Evaluate a tag condition with wildcard support.
+ * e.g. condition "@priority:*" with tags ["priority:high"] → captures: ["high"]
+ * Returns null if no match, or the array of wildcard captures if matched.
+ */
+function evaluateWildcardCondition(
+  condition: string,
+  tags: string[]
+): string[] | null {
+  const tagsWithAt = tags.map((t) => (t.startsWith('@') ? t : `@${t}`));
+
+  // Check for wildcard patterns in the condition
+  if (!condition.includes('*')) {
+    // Simple tag expression evaluation
+    const node = parseTagExpression(condition);
+    return node.evaluate(tagsWithAt) ? [] : null;
+  }
+
+  // Extract wildcard tag patterns from condition
+  const tagPatterns = condition.match(/@[\w-]+(?::[\w-]*\*[\w-]*)+|@[\w-]*\*[\w-]*/g) ?? [];
+  const captures: string[] = [];
+
+  for (const pattern of tagPatterns) {
+    const cleanPattern = pattern.startsWith('@') ? pattern.slice(1) : pattern;
+    // Convert wildcard pattern to regex: @priority:* → priority:(.+)
+    const regexStr = '^' + cleanPattern.replace(/\*/g, '(.+)') + '$';
+    const regex = new RegExp(regexStr);
+
+    let matched = false;
+    for (const tag of tags) {
+      const m = tag.match(regex);
+      if (m) {
+        captures.push(...m.slice(1));
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) return null;
+  }
+
+  // Also evaluate the non-wildcard part of the expression
+  // Replace wildcard tags with a dummy tag name for expression evaluation
+  let evalExpr = condition;
+  for (const pattern of tagPatterns) {
+    evalExpr = evalExpr.replace(pattern, '@__wildcard_matched__');
+  }
+  // Add the dummy tag so it evaluates the rest of the expression correctly
+  const evalTags = [...tagsWithAt, '@__wildcard_matched__'];
+  try {
+    const node = parseTagExpression(evalExpr);
+    if (!node.evaluate(evalTags)) return null;
+  } catch {
+    // If the expression can't be parsed after replacement, trust the wildcard match
+  }
+
+  return captures;
+}
+
+/**
+ * Build PATCH operations for field updates.
+ * Handles simple values, conditional values, wildcard tag matches, and update events.
+ */
+function buildFieldUpdatePatches(
+  test: ParsedTest,
+  fieldUpdates: FieldUpdates | undefined,
+  isCreate: boolean,
+  op: 'add' | 'replace'
+): any[] {
+  if (!fieldUpdates) return [];
+
+  const patches: any[] = [];
+
+  for (const [field, spec] of Object.entries(fieldUpdates)) {
+    // Normalize field reference: if it doesn't contain a dot, assume it's a display name
+    const fieldPath = field.includes('.') ? field : field;
+
+    if (typeof spec === 'string') {
+      // Simple value — always update
+      const value = expandFieldPlaceholders(spec, test);
+      patches.push({ op, path: `/fields/${fieldPath}`, value });
+      continue;
+    }
+
+    const update = spec as FieldUpdateValue;
+
+    // Check update event
+    if (update.update === 'onCreate' && !isCreate) continue;
+    if (update.update === 'onChange' && isCreate) continue;
+
+    // Handle conditionalValue (switch-style)
+    if (update.conditionalValue) {
+      let resolved = false;
+      for (const [condExpr, condValue] of Object.entries(update.conditionalValue)) {
+        if (condExpr === 'otherwise') continue;
+
+        const captures = evaluateWildcardCondition(condExpr, test.tags);
+        if (captures !== null) {
+          const value = expandFieldPlaceholders(condValue, test, captures);
+          patches.push({ op, path: `/fields/${fieldPath}`, value });
+          resolved = true;
+          break;
+        }
+      }
+      if (!resolved && update.conditionalValue['otherwise'] !== undefined) {
+        const value = expandFieldPlaceholders(update.conditionalValue['otherwise'], test);
+        patches.push({ op, path: `/fields/${fieldPath}`, value });
+      }
+      continue;
+    }
+
+    // Handle single value with optional condition
+    if (update.condition) {
+      const captures = evaluateWildcardCondition(update.condition, test.tags);
+      if (captures === null) continue;
+      if (update.value !== undefined) {
+        const value = expandFieldPlaceholders(update.value, test, captures);
+        patches.push({ op, path: `/fields/${fieldPath}`, value });
+      }
+    } else if (update.value !== undefined) {
+      const value = expandFieldPlaceholders(update.value, test);
+      patches.push({ op, path: `/fields/${fieldPath}`, value });
+    }
+  }
+
+  return patches;
+}
+
+/**
+ * Build PATCH operations for field defaults (applied on create only).
+ */
+function buildFieldDefaultPatches(
+  customizations: CustomizationsConfig | undefined
+): any[] {
+  if (!customizations?.fieldDefaults?.enabled) return [];
+  const patches: any[] = [];
+  for (const [field, value] of Object.entries(customizations.fieldDefaults.defaultValues)) {
+    patches.push({ op: 'add', path: `/fields/${field}`, value });
+  }
+  return patches;
+}
+
+// ─── Format helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Apply format configuration to step conversion.
+ * Handles useExpectedResult, prefixTitle, emptyActionValue, etc.
+ */
+function applyFormatToSteps(
+  steps: { keyword: string; text: string; expected?: string }[],
+  formatConfig: FormatConfig | undefined
+): AzureStep[] {
+  const useExpected = formatConfig?.useExpectedResult ?? false;
+  const emptyAction = formatConfig?.emptyActionValue;
+  const emptyExpected = formatConfig?.emptyExpectedResultValue;
+
+  return steps.map((s) => {
+    const rawAction = `${s.keyword} ${s.text}`.trim();
+    let action = rawAction || emptyAction || '';
+    let expected = s.expected ?? '';
+
+    // When useExpectedResult is true, Then/Verify steps go to expected column
+    if (useExpected && (s.keyword === 'Then' || s.keyword === 'Verify')) {
+      expected = s.text;
+      action = emptyAction || '';
+    }
+
+    if (!expected && emptyExpected) {
+      expected = emptyExpected;
+    }
+
+    return { action, expected };
+  });
+}
+
+/**
+ * Apply prefixTitle format config to the test case title.
+ */
+function formatTitle(title: string, test: ParsedTest, formatConfig: FormatConfig | undefined): string {
+  if (formatConfig?.prefixTitle === false) return title;
+  // Don't double-prefix if title already has the prefix
+  if (/^Scenario(?:\s+Outline)?:\s+/i.test(title)) return title;
+  const isOutline = !!test.outlineParameters?.headers.length;
+  const prefix = isOutline ? 'Scenario Outline: ' : 'Scenario: ';
+  return prefix + title;
+}
+
+// ─── Attachment helpers ──────────────────────────────────────────────────────
+
+/**
+ * Upload file attachments to a test case work item.
+ * Resolves file paths relative to the feature file or the configured baseFolder.
+ */
+async function syncAttachments(
+  client: AzureClient,
+  tcId: number,
+  test: ParsedTest,
+  config: SyncConfig,
+  configDir: string
+): Promise<void> {
+  const attachConfig = config.sync?.attachments;
+  if (!attachConfig?.enabled) return;
+  if (!test.attachmentRefs?.length) return;
+
+  const wit = await client.getWitApi();
+  const baseFolder = attachConfig.baseFolder
+    ? path.resolve(configDir, attachConfig.baseFolder)
+    : path.dirname(test.filePath);
+
+  // Fetch existing attachments on the TC
+  let existingAttachments: Array<{ name: string; url: string }> = [];
+  try {
+    const wi = await (wit as any).getWorkItem(tcId, undefined, undefined, 4 /* WorkItemExpand.Relations */);
+    if (wi?.relations) {
+      existingAttachments = (wi.relations as any[])
+        .filter((r: any) => r.rel === 'AttachedFile')
+        .map((r: any) => ({
+          name: r.attributes?.name ?? '',
+          url: r.url ?? '',
+        }));
+    }
+  } catch { /* continue without existing attachment info */ }
+
+  const existingNames = new Set(existingAttachments.map((a) => a.name));
+
+  for (const ref of test.attachmentRefs) {
+    // Resolve glob patterns for file paths
+    const resolvedPaths = await glob(ref.filePath, {
+      cwd: baseFolder,
+      absolute: true,
+    });
+
+    for (const filePath of resolvedPaths) {
+      const fileName = path.basename(filePath);
+      if (existingNames.has(fileName)) continue; // Already attached
+
+      if (!fs.existsSync(filePath)) {
+        console.warn(`  [warn] Attachment file not found: ${filePath}`);
+        continue;
+      }
+
+      const content = fs.readFileSync(filePath);
+      const stream = Buffer.from(content);
+
+      try {
+        const attachment = await wit.createAttachment({} as any, stream as any, fileName);
+        if (attachment?.url) {
+          await wit.updateWorkItem(
+            {},
+            [{
+              op: 'add',
+              path: '/relations/-',
+              value: {
+                rel: 'AttachedFile',
+                url: attachment.url,
+                attributes: { comment: `ado-sync:${ref.prefix}:${ref.filePath}` },
+              },
+            }],
+            tcId
+          );
+        }
+      } catch (err: any) {
+        console.warn(`  [warn] Failed to attach ${fileName} to TC #${tcId}: ${err.message}`);
+      }
+    }
+  }
 }
 
 // ─── Work item relation helpers ───────────────────────────────────────────────
@@ -452,23 +839,25 @@ export async function createTestCase(
   client: AzureClient,
   test: ParsedTest,
   config: SyncConfig,
-  suiteIdOverride?: number
+  suiteIdOverride?: number,
+  configDir?: string
 ): Promise<number> {
   const wit = await client.getWitApi();
   const syncCfg = config.sync ?? {};
   const titleField = syncCfg.titleField ?? 'System.Title';
+  const formatConfig = syncCfg.format;
 
   const isParametrized = !!test.outlineParameters?.headers.length;
-  const steps: AzureStep[] = test.steps.map((s) => {
-    const rawAction = `${s.keyword} ${s.text}`.trim();
-    return {
-      action: isParametrized ? gherkinParamsToAzure(rawAction) : rawAction,
-      expected: s.expected ?? '',
-    };
-  });
+  const steps: AzureStep[] = applyFormatToSteps(test.steps, formatConfig).map((s) => ({
+    action: isParametrized ? gherkinParamsToAzure(s.action) : s.action,
+    expected: s.expected,
+  }));
+
+  // Apply format prefixTitle
+  const title = formatTitle(test.title, test, formatConfig);
 
   const patchDoc: any[] = [
-    { op: 'add', path: `/fields/${titleField}`, value: test.title },
+    { op: 'add', path: `/fields/${titleField}`, value: title },
     { op: 'add', path: '/fields/Microsoft.VSTS.TCM.Steps', value: buildStepsXml(steps) },
   ];
 
@@ -477,6 +866,15 @@ export async function createTestCase(
   }
 
   patchDoc.push(...buildAutomationPatches(test, config, 'add'));
+
+  // State change on create
+  patchDoc.push(...buildStateChangePatches(test, syncCfg.state, 'add'));
+
+  // Field defaults (customizations) — only on create
+  patchDoc.push(...buildFieldDefaultPatches(config.customizations));
+
+  // Field updates
+  patchDoc.push(...buildFieldUpdatePatches(test, syncCfg.fieldUpdates, true, 'add'));
 
   if (test.outlineParameters) {
     const { headers, rows } = test.outlineParameters;
@@ -490,9 +888,9 @@ export async function createTestCase(
     }
   }
 
-  const filteredTags = test.tags
-    .filter((t) => !t.startsWith(syncCfg.tagPrefix + ':'))
-    .join('; ');
+  // Process tags: apply tag text map transformation
+  const processedTags = processTagsForPush(test.tags, syncCfg.tagPrefix ?? 'tc', config.customizations);
+  const filteredTags = processedTags.join('; ');
   if (filteredTags) {
     patchDoc.push({ op: 'add', path: '/fields/System.Tags', value: filteredTags });
   }
@@ -517,6 +915,11 @@ export async function createTestCase(
     await addTestCaseToRootSuite(client, config, wi.id);
   }
 
+  // Sync attachments
+  if (configDir) {
+    await syncAttachments(client, wi.id, test, config, configDir);
+  }
+
   return wi.id;
 }
 
@@ -524,31 +927,42 @@ export async function updateTestCase(
   client: AzureClient,
   id: number,
   test: ParsedTest,
-  config: SyncConfig
+  config: SyncConfig,
+  configDir?: string
 ): Promise<void> {
   const wit = await client.getWitApi();
   const syncCfg = config.sync ?? {};
   const titleField = syncCfg.titleField ?? 'System.Title';
+  const formatConfig = syncCfg.format;
 
   const isParametrized = !!test.outlineParameters?.headers.length;
-  const steps: AzureStep[] = test.steps.map((s) => {
-    const rawAction = `${s.keyword} ${s.text}`.trim();
-    return {
-      action: isParametrized ? gherkinParamsToAzure(rawAction) : rawAction,
-      expected: s.expected ?? '',
-    };
-  });
+  const steps: AzureStep[] = applyFormatToSteps(test.steps, formatConfig).map((s) => ({
+    action: isParametrized ? gherkinParamsToAzure(s.action) : s.action,
+    expected: s.expected,
+  }));
 
-  const localTags = test.tags.filter((t) => !t.startsWith(syncCfg.tagPrefix + ':'));
+  // Apply format prefixTitle
+  const title = formatTitle(test.title, test, formatConfig);
 
-  // Fetch existing Azure tags and merge: preserve any Azure-only tags, add new local tags
+  // Process tags with transformations
+  const processedLocalTags = processTagsForPush(test.tags, syncCfg.tagPrefix ?? 'tc', config.customizations);
+
+  // Fetch existing Azure tags and merge
   const wi = await wit.getWorkItem(id, ['System.Tags']);
   const existingAzureTags = tagsFromString((wi?.fields?.['System.Tags'] as string | undefined) ?? '');
-  const mergedTags = [...new Set([...existingAzureTags, ...localTags])];
+
+  // Filter ignored tags from removal — they should be preserved in Azure
+  const ignorePatterns = config.customizations?.ignoreTestCaseTags?.enabled
+    ? config.customizations.ignoreTestCaseTags.tags
+    : [];
+  const mergedTags = [...new Set([
+    ...existingAzureTags.filter((t) => isIgnoredTag(t, ignorePatterns)),
+    ...processedLocalTags,
+  ])];
   const mergedTagsValue = mergedTags.join('; ');
 
   const patchDoc: any[] = [
-    { op: 'replace', path: `/fields/${titleField}`, value: test.title },
+    { op: 'replace', path: `/fields/${titleField}`, value: title },
     { op: 'replace', path: '/fields/Microsoft.VSTS.TCM.Steps', value: buildStepsXml(steps) },
     { op: 'replace', path: '/fields/System.Tags', value: mergedTagsValue },
   ];
@@ -558,6 +972,12 @@ export async function updateTestCase(
   }
 
   patchDoc.push(...buildAutomationPatches(test, config, 'replace'));
+
+  // State change on update
+  patchDoc.push(...buildStateChangePatches(test, syncCfg.state, 'replace'));
+
+  // Field updates
+  patchDoc.push(...buildFieldUpdatePatches(test, syncCfg.fieldUpdates, false, 'replace'));
 
   if (test.outlineParameters) {
     const { headers, rows } = test.outlineParameters;
@@ -576,6 +996,11 @@ export async function updateTestCase(
   patchDoc.push(...relationPatches);
 
   await wit.updateWorkItem({}, patchDoc, id);
+
+  // Sync attachments
+  if (configDir) {
+    await syncAttachments(client, id, test, config, configDir);
+  }
 }
 
 export async function updateLocalFromAzure(

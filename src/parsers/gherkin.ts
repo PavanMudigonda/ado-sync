@@ -40,7 +40,7 @@ import {
 import * as fs from 'fs';
 
 import { LinkConfig, ParsedStep, ParsedTest } from '../types';
-import { extractLinkRefs, extractPathTags } from './shared';
+import { extractAttachmentRefs, extractLinkRefs, extractPathTags, getAttachmentPrefixes } from './shared';
 
 // Re-export for backward-compatibility
 export { extractPathTags };
@@ -269,6 +269,7 @@ function scenarioOutlineToParsedTest(
   linkConfigs: LinkConfig[] | undefined,
   feature: NonNullable<GherkinDocument['feature']>,
   bgSteps: Step[],
+  attachmentPrefixes: string[],
 ): ParsedTest {
   const scenarioTags = scenario.tags.map((t) => stripAt(t.name));
   const allTags = [...new Set([...pathTags, ...scenarioTags])];
@@ -302,6 +303,7 @@ function scenarioOutlineToParsedTest(
     line: scenario.location?.line ?? 1,
     outlineParameters: headers.length ? { headers, rows } : undefined,
     linkRefs: extractLinkRefs(allTags, linkConfigs),
+    attachmentRefs: extractAttachmentRefs(allTags, attachmentPrefixes),
   };
 }
 
@@ -310,7 +312,8 @@ function scenarioOutlineToParsedTest(
 export function parseGherkinFile(
   filePath: string,
   tagPrefix: string,
-  linkConfigs?: LinkConfig[]
+  linkConfigs?: LinkConfig[],
+  attachmentsConfig?: { enabled: boolean; tagPrefixes?: string[] }
 ): ParsedTest[] {
   const source = fs.readFileSync(filePath, 'utf8');
   const newId = IdGenerator.uuid();
@@ -350,6 +353,7 @@ export function parseGherkinFile(
 
   // Tags from directory path segments (e.g. specs/@smoke/ → 'smoke')
   const pathTags = extractPathTags(filePath);
+  const attachmentPrefixes = getAttachmentPrefixes(attachmentsConfig);
 
   // Background steps (shared across all scenarios in this file)
   const bgSteps = extractBackgroundSteps(doc);
@@ -378,7 +382,7 @@ export function parseGherkinFile(
   for (const scenario of allScenarios) {
     if (outlineIds.has(scenario.id)) {
       results.push(
-        scenarioOutlineToParsedTest(scenario, filePath, pathTags, tagPrefix, linkConfigs, feature, bgSteps)
+        scenarioOutlineToParsedTest(scenario, filePath, pathTags, tagPrefix, linkConfigs, feature, bgSteps, attachmentPrefixes)
       );
     }
   }
@@ -417,6 +421,7 @@ export function parseGherkinFile(
       azureId: extractAzureId(allTags, tagPrefix),
       line: findScenarioLine(doc, pickle),
       linkRefs: extractLinkRefs(allTags, linkConfigs),
+      attachmentRefs: extractAttachmentRefs(allTags, attachmentPrefixes),
     });
   }
 

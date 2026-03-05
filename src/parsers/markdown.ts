@@ -32,7 +32,7 @@
 import * as fs from 'fs';
 
 import { LinkConfig, ParsedStep, ParsedTest } from '../types';
-import { extractLinkRefs, extractPathTags } from './shared';
+import { extractAttachmentRefs, extractLinkRefs, extractPathTags, getAttachmentPrefixes } from './shared';
 
 // ─── Regexes ─────────────────────────────────────────────────────────────────
 
@@ -117,7 +117,8 @@ function parseScenarioBlock(
   filePath: string,
   tagPrefix: string,
   pathTags: string[],
-  linkConfigs: LinkConfig[] | undefined
+  linkConfigs: LinkConfig[] | undefined,
+  attachmentPrefixes: string[]
 ): ParsedTest {
   const lines = block.lines;
   const blockText = lines.join('\n');
@@ -225,18 +226,21 @@ function parseScenarioBlock(
     azureId,
     line: block.startLine,
     linkRefs: extractLinkRefs(allTags, linkConfigs),
+    attachmentRefs: extractAttachmentRefs(allTags, attachmentPrefixes),
   };
 }
 
 export function parseMarkdownFile(
   filePath: string,
   tagPrefix: string,
-  linkConfigs?: LinkConfig[]
+  linkConfigs?: LinkConfig[],
+  attachmentsConfig?: { enabled: boolean; tagPrefixes?: string[] }
 ): ParsedTest[] {
   const source = fs.readFileSync(filePath, 'utf8');
   const lines = source.split('\n');
   const blocks = splitIntoScenarios(lines);
   // Path-based auto-tags (same as Gherkin)
   const pathTags = extractPathTags(filePath);
-  return blocks.map((b) => parseScenarioBlock(b, filePath, tagPrefix, pathTags, linkConfigs));
+  const attachmentPrefixes = getAttachmentPrefixes(attachmentsConfig);
+  return blocks.map((b) => parseScenarioBlock(b, filePath, tagPrefix, pathTags, linkConfigs, attachmentPrefixes));
 }
