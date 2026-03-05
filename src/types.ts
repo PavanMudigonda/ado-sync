@@ -81,6 +81,14 @@ export interface SyncConfig {
      */
     conflictAction?: 'overwrite' | 'skip' | 'fail';
     /**
+     * When true, marks every pushed test case as Automated by setting
+     * Microsoft.VSTS.TCM.AutomationStatus = 'Automated' plus the related
+     * AutomatedTestName / AutomatedTestStorage / AutomatedTestId / AutomatedTestType fields.
+     * The AutomatedTestName is derived from the file basename + scenario title.
+     * Default: false.
+     */
+    markAutomated?: boolean;
+    /**
      * Work item link configurations. Tags matching a configured prefix
      * (e.g. @story:123) will create/maintain ADO work item relations.
      */

@@ -103,6 +103,8 @@ async function parseLocalFiles(
 export interface SyncOpts {
   dryRun?: boolean;
   tags?: string;
+  /** Called after each test case is processed. Useful for rendering a live progress bar. */
+  onProgress?: (done: number, total: number, result: SyncResult) => void;
 }
 
 // ─── Multi-plan helpers ───────────────────────────────────────────────────────
@@ -168,6 +170,12 @@ async function pushSingle(
   // Load local cache for conflict detection and skip optimisation
   const cache = loadCache(configDir);
 
+  let done = 0;
+  const reportProgress = (result: SyncResult) => {
+    results.push(result);
+    opts.onProgress?.(++done, tests.length, result);
+  };
+
   for (const test of tests) {
     if (test.azureId) {
       try {
@@ -189,7 +197,7 @@ async function pushSingle(
             const created = await getTestCase(client, newId, titleField);
             if (created) updateCacheEntry(cache, test, created);
           }
-          results.push({ action: 'created', filePath: test.filePath, title: test.title, azureId: newId });
+          reportProgress({ action: 'created', filePath: test.filePath, title: test.title, azureId: newId });
           continue;
         }
 
@@ -211,7 +219,7 @@ async function pushSingle(
         if (!titleChanged && !stepsChanged && !tagsChanged && !descriptionChanged) {
           // Update cache entry even on skip (changedDate may differ due to other fields)
           updateCacheEntry(cache, test, remote);
-          results.push({ action: 'skipped', filePath: test.filePath, title: test.title, azureId: test.azureId });
+          reportProgress({ action: 'skipped', filePath: test.filePath, title: test.title, azureId: test.azureId });
           continue;
         }
 
@@ -225,11 +233,12 @@ async function pushSingle(
             detail: 'Both local and remote have changed since last sync',
           };
           if (conflictAction === 'skip') {
-            results.push(conflict);
+            reportProgress(conflict);
             continue;
           }
           if (conflictAction === 'fail') {
             conflicts.push(conflict);
+            done++;
             continue;
           }
           // 'overwrite' — fall through to update
@@ -239,9 +248,9 @@ async function pushSingle(
           await updateTestCase(client, test.azureId, test, config);
           updateCacheEntry(cache, test, remote);
         }
-        results.push({ action: 'updated', filePath: test.filePath, title: test.title, azureId: test.azureId });
+        reportProgress({ action: 'updated', filePath: test.filePath, title: test.title, azureId: test.azureId });
       } catch (err: any) {
-        results.push({ action: 'error', filePath: test.filePath, title: test.title, azureId: test.azureId, detail: err.message });
+        reportProgress({ action: 'error', filePath: test.filePath, title: test.title, azureId: test.azureId, detail: err.message });
       }
     } else {
       try {
@@ -259,9 +268,9 @@ async function pushSingle(
           const created = await getTestCase(client, newId, titleField);
           if (created) updateCacheEntry(cache, test, created);
         }
-        results.push({ action: 'created', filePath: test.filePath, title: test.title, azureId: newId });
+        reportProgress({ action: 'created', filePath: test.filePath, title: test.title, azureId: newId });
       } catch (err: any) {
-        results.push({ action: 'error', filePath: test.filePath, title: test.title, detail: err.message });
+        reportProgress({ action: 'error', filePath: test.filePath, title: test.title, detail: err.message });
       }
     }
   }
@@ -353,13 +362,19 @@ async function pullSingle(
 
   const linked = tests.filter((t) => t.azureId !== undefined);
 
+  let done = 0;
+  const reportProgress = (result: SyncResult) => {
+    results.push(result);
+    opts.onProgress?.(++done, linked.length, result);
+  };
+
   for (const test of linked) {
     try {
       const remote = await getTestCase(client, test.azureId!, titleField);
 
       if (!remote) {
         // TC was deleted from Azure — skip on pull; run push to re-create it.
-        results.push({
+        reportProgress({
           action: 'skipped',
           filePath: test.filePath,
           title: test.title,
@@ -376,7 +391,7 @@ async function pullSingle(
       const descriptionChanged = (remote.description ?? '') !== (test.description ?? '');
 
       if (!titleChanged && !stepsChanged && !descriptionChanged) {
-        results.push({ action: 'skipped', filePath: test.filePath, title: test.title, azureId: test.azureId });
+        reportProgress({ action: 'skipped', filePath: test.filePath, title: test.title, azureId: test.azureId });
         continue;
       }
 
@@ -394,7 +409,7 @@ async function pullSingle(
         updateCacheEntry(cache, test, remote);
       }
 
-      results.push({
+      reportProgress({
         action: 'pulled',
         filePath: test.filePath,
         title: remote.title,
@@ -406,7 +421,7 @@ async function pullSingle(
         ].filter(Boolean).join(', ') + ' changed' + (disableLocal ? ' (local changes skipped)' : ''),
       });
     } catch (err: any) {
-      results.push({ action: 'error', filePath: test.filePath, title: test.title, azureId: test.azureId, detail: err.message });
+      reportProgress({ action: 'error', filePath: test.filePath, title: test.title, azureId: test.azureId, detail: err.message });
     }
   }
 
@@ -422,9 +437,9 @@ async function pullSingle(
 export async function status(
   config: SyncConfig,
   configDir: string,
-  opts: Pick<SyncOpts, 'tags'> = {}
+  opts: Pick<SyncOpts, 'tags' | 'onProgress'> = {}
 ): Promise<SyncResult[]> {
-  return push(config, configDir, { dryRun: true, tags: opts.tags });
+  return push(config, configDir, { dryRun: true, tags: opts.tags, onProgress: opts.onProgress });
 }
 
 // ─── Cache helpers ────────────────────────────────────────────────────────────
