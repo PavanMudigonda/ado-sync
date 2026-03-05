@@ -17,7 +17,7 @@ Local files                   ado-sync              Azure DevOps
 .csv files      ── push ──►  (push-only)
 .xlsx files     ── push ──►  (push-only)
                               write ID back
-                              @tc:12345 / <!-- tc: 12345 --> / col A
+                              @tc:12345 / col A (csv/xlsx)
 ```
 
 On the **first push** of a scenario, a new Test Case is created in Azure DevOps and its ID is written back into the local file as a tag or comment. Every subsequent push uses that ID to update the existing Test Case. Pulling fetches the latest title and steps from Azure and overwrites the local file.
@@ -334,7 +334,7 @@ After a scenario is pushed for the first time, ado-sync writes the Azure Test Ca
 | Format | Writeback location |
 |--------|--------------------|
 | Gherkin | `@tc:12345` tag above the `Scenario:` line |
-| Markdown | `<!-- tc: 12345 -->` comment after the `### heading` |
+| Markdown | `@tc:12345` tag after the `### heading` |
 | CSV | Numeric ID in column A of the matching title row |
 | Excel | Numeric ID in cell A of the matching title row |
 
@@ -368,11 +368,11 @@ For `Scenario Outline`, a **single** parametrized Test Case is created in Azure 
 
 ### Markdown
 
-The ID comment is inserted on the line immediately after the `### heading`:
+The ID tag is inserted on the line immediately after the `### heading`:
 
 ```markdown
 ### 1. Login (happy path)
-<!-- tc: 1042 -->
+@tc:1042
 
 Assumption: Fresh browser session.
 
@@ -388,8 +388,6 @@ Expected results:
 ---
 ```
 
-The comment is invisible when the Markdown is rendered.
-
 ### Custom prefix
 
 Change the `sync.tagPrefix` in your config to use a different prefix:
@@ -400,7 +398,7 @@ Change the `sync.tagPrefix` in your config to use a different prefix:
 
 Result:
 - Gherkin: `@azure:1042`
-- Markdown: `<!-- azure: 1042 -->`
+- Markdown: `@azure:1042`
 
 > **Warning:** Changing the prefix on an existing project means all existing ID tags will no longer be recognised. Do a project-wide find-and-replace on the old prefix before changing it.
 
@@ -449,7 +447,7 @@ Add a `<!-- tags: -->` HTML comment anywhere inside a scenario block to assign t
 
 ```markdown
 ### Login with valid credentials
-<!-- tc: 1042 -->
+@tc:1042
 <!-- tags: @smoke, @regression -->
 
 Steps:
@@ -644,7 +642,7 @@ Tags matching a configured `links` prefix are turned into Azure DevOps work item
 
 ```markdown
 ### User can add items to cart
-<!-- tc: 1042 -->
+@tc:1042
 <!-- tags: @story:555, @bug:789 -->
 ```
 
