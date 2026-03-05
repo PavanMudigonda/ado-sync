@@ -19,6 +19,7 @@ import {
   tagTestCaseAsRemoved,
   updateTestCase,
 } from '../azure/test-cases';
+import { parseCsharpFile } from '../parsers/csharp';
 import { parseCsvFile } from '../parsers/csv';
 import { parseExcelFile } from '../parsers/excel';
 import { parseGherkinFile } from '../parsers/gherkin';
@@ -92,6 +93,9 @@ async function parseLocalFiles(
           break;
         case 'excel':
           tests = await parseExcelFile(fp, tagPrefix, linkConfigs);
+          break;
+        case 'csharp':
+          tests = parseCsharpFile(fp, tagPrefix, linkConfigs);
           break;
         default:
           tests = parseMarkdownFile(fp, tagPrefix, linkConfigs, attachmentsConfig);
@@ -526,7 +530,7 @@ function applyRemoteToLocal(
   newTitle: string,
   newSteps: ParsedStep[],
   newDescription: string | undefined,
-  localType: 'gherkin' | 'markdown' | 'csv' | 'excel',
+  localType: 'gherkin' | 'markdown' | 'csv' | 'excel' | 'csharp',
   tagPrefix: string
 ): void {
   if (localType === 'gherkin') {
