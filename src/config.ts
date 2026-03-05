@@ -24,17 +24,72 @@ export function resolveConfigPath(explicitPath?: string): string {
   );
 }
 
-export function loadConfig(configPath: string): SyncConfig {
+/**
+ * Deep merge two plain objects. Source values overwrite target values.
+ * Arrays are replaced, not concatenated.
+ */
+function deepMerge(target: Record<string, any>, source: Record<string, any>): Record<string, any> {
+  const result = { ...target };
+  for (const key of Object.keys(source)) {
+    if (
+      source[key] !== null &&
+      typeof source[key] === 'object' &&
+      !Array.isArray(source[key]) &&
+      typeof result[key] === 'object' &&
+      !Array.isArray(result[key])
+    ) {
+      result[key] = deepMerge(result[key], source[key]);
+    } else {
+      result[key] = source[key];
+    }
+  }
+  return result;
+}
+
+/**
+ * Load a config file (JSON or YAML) and return the raw parsed object.
+ */
+function loadRawConfig(configPath: string): Record<string, any> {
   const raw = fs.readFileSync(configPath, 'utf8');
   const ext = path.extname(configPath).toLowerCase();
-
-  let parsed: unknown;
   if (ext === '.json') {
-    parsed = JSON.parse(raw);
-  } else {
-    parsed = yaml.load(raw);
+    return JSON.parse(raw);
+  }
+  return yaml.load(raw) as Record<string, any>;
+}
+
+/**
+ * Resolve hierarchical configuration by loading parent configs recursively.
+ * Parent configs are merged bottom-up: child values override parent values.
+ */
+function resolveHierarchicalConfig(configPath: string, visited = new Set<string>()): Record<string, any> {
+  const absPath = path.resolve(configPath);
+  if (visited.has(absPath)) {
+    throw new Error(`Circular parent config reference detected: ${absPath}`);
+  }
+  visited.add(absPath);
+
+  const parsed = loadRawConfig(absPath);
+
+  // Check for parent config
+  const parentConfigPath = parsed.toolSettings?.parentConfig;
+  const ignoreParent = parsed.toolSettings?.ignoreParentConfig === true;
+
+  if (parentConfigPath && !ignoreParent) {
+    const resolvedParent = path.resolve(path.dirname(absPath), parentConfigPath);
+    if (!fs.existsSync(resolvedParent)) {
+      throw new Error(`Parent config file not found: ${resolvedParent} (referenced from ${absPath})`);
+    }
+    const parentConfig = resolveHierarchicalConfig(resolvedParent, visited);
+    // Child overrides parent
+    return deepMerge(parentConfig, parsed);
   }
 
+  return parsed;
+}
+
+export function loadConfig(configPath: string): SyncConfig {
+  const parsed = resolveHierarchicalConfig(configPath);
   const cfg = parsed as SyncConfig;
 
   // Expand env var tokens like "$MY_TOKEN"
@@ -57,6 +112,15 @@ export function loadConfig(configPath: string): SyncConfig {
   cfg.sync.titleField = cfg.sync.titleField ?? 'System.Title';
   cfg.sync.conflictAction = cfg.sync.conflictAction ?? 'overwrite';
   cfg.sync.disableLocalChanges = cfg.sync.disableLocalChanges ?? false;
+
+  // Format defaults
+  if (cfg.sync.format) {
+    cfg.sync.format.prefixBackgroundSteps = cfg.sync.format.prefixBackgroundSteps ?? true;
+    cfg.sync.format.prefixTitle = cfg.sync.format.prefixTitle ?? true;
+    cfg.sync.format.useExpectedResult = cfg.sync.format.useExpectedResult ?? false;
+    cfg.sync.format.syncDataTableAsText = cfg.sync.format.syncDataTableAsText ?? false;
+    cfg.sync.format.showParameterListStep = cfg.sync.format.showParameterListStep ?? 'whenUnusedParameters';
+  }
 
   return cfg;
 }
@@ -126,6 +190,7 @@ export function applyOverrides(cfg: SyncConfig, overrides: string[]): void {
 const CONFIG_TEMPLATE_OBJECT = {
   orgUrl: 'https://dev.azure.com/YOUR_ORG',
   project: 'YOUR_PROJECT',
+  configurationKey: '',
   auth: {
     type: 'pat',
     token: '$AZURE_DEVOPS_TOKEN',
@@ -139,6 +204,11 @@ const CONFIG_TEMPLATE_OBJECT = {
     type: 'gherkin',
     include: 'specs/**/*.feature',
     exclude: [],
+    condition: '',
+  },
+  toolSettings: {
+    parentConfig: '',
+    outputLevel: 'normal',
   },
   sync: {
     tagPrefix: 'tc',
@@ -148,6 +218,50 @@ const CONFIG_TEMPLATE_OBJECT = {
     disableLocalChanges: false,
     conflictAction: 'overwrite',
     links: [],
+    state: {
+      setValueOnChangeTo: '',
+    },
+    fieldUpdates: {},
+    format: {
+      useExpectedResult: false,
+      prefixBackgroundSteps: true,
+      prefixTitle: true,
+      syncDataTableAsText: false,
+    },
+    attachments: {
+      enabled: false,
+      tagPrefixes: [],
+      baseFolder: '',
+    },
+    pull: {
+      enabled: false,
+      enableCreatingNewLocalTestCases: false,
+    },
+  },
+  customizations: {
+    fieldDefaults: {
+      enabled: false,
+      defaultValues: {},
+    },
+    ignoreTestCaseTags: {
+      enabled: false,
+      tags: [],
+    },
+    tagTextMapTransformation: {
+      enabled: false,
+      textMap: {},
+    },
+  },
+  publishTestResults: {
+    testResult: {
+      sources: [],
+    },
+    testConfiguration: {
+      name: '',
+    },
+    testRunSettings: {
+      name: '',
+    },
   },
 };
 

@@ -36,11 +36,158 @@ export interface TestPlanEntry {
   exclude?: string | string[];
 }
 
+// ─── State configuration ─────────────────────────────────────────────────────
+
+export interface StateConfig {
+  /** Set the TC State field to this value when the scenario has changed. e.g. "Design" */
+  setValueOnChangeTo?: string;
+  /** Optional tag expression to limit which scenarios trigger the state change. */
+  condition?: string;
+}
+
+// ─── Field update configuration ──────────────────────────────────────────────
+
+export type FieldUpdateEvent = 'always' | 'onCreate' | 'onChange';
+
+export interface FieldUpdateValue {
+  /** The value to set. May contain placeholders like {scenario-name}, {feature-name}. */
+  value?: string;
+  /** When to apply the update. Default: 'always'. */
+  update?: FieldUpdateEvent;
+  /** Tag expression condition. Update only when this condition matches. */
+  condition?: string;
+  /** Whether to remove matching tags from the tags list. Default: true. */
+  removeMatchingTags?: boolean;
+  /** Switch-style conditional values. Keys are tag expressions, values are field values. */
+  conditionalValue?: Record<string, string>;
+}
+
+/** Each key is a field name/reference, value is either a simple string or an update specifier. */
+export type FieldUpdates = Record<string, string | FieldUpdateValue>;
+
+// ─── Customizations configuration ────────────────────────────────────────────
+
+export interface FieldDefaultsConfig {
+  enabled: boolean;
+  /** Field reference name → default value. Applied only on create. */
+  defaultValues: Record<string, string>;
+}
+
+export interface IgnoreTestCaseTagsConfig {
+  enabled: boolean;
+  /** Tag names or patterns with trailing wildcard. e.g. ["mytag", "ado-tag*"] */
+  tags: string[];
+}
+
+export interface TagTextMapConfig {
+  enabled: boolean;
+  /** Character/substring replacements applied to tags before push. e.g. { "_": " " } */
+  textMap: Record<string, string>;
+}
+
+export interface CustomizationsConfig {
+  fieldDefaults?: FieldDefaultsConfig;
+  ignoreTestCaseTags?: IgnoreTestCaseTagsConfig;
+  tagTextMapTransformation?: TagTextMapConfig;
+}
+
+// ─── Format configuration ────────────────────────────────────────────────────
+
+export interface FormatConfig {
+  /** When true, Then steps are put in the Expected Result column. Default: false. */
+  useExpectedResult?: boolean;
+  /** Value to use when a step action is empty. Default: undefined (blank). */
+  emptyActionValue?: string;
+  /** Value to use when step expected result is empty. Default: undefined (blank). */
+  emptyExpectedResultValue?: string;
+  /** When true, data tables are synced as plain text instead of sub-steps. Default: false. */
+  syncDataTableAsText?: boolean;
+  /** When true, background steps get a "Background:" prefix. Default: true. */
+  prefixBackgroundSteps?: boolean;
+  /** When true, TC title gets "Scenario:" or "Scenario Outline:" prefix. Default: true. */
+  prefixTitle?: boolean;
+  /** Control parameter list step: 'whenUnusedParameters' | 'always' | 'never'. Default: 'whenUnusedParameters'. */
+  showParameterListStep?: 'whenUnusedParameters' | 'always' | 'never';
+}
+
+// ─── Attachment configuration ────────────────────────────────────────────────
+
+export interface AttachmentsConfig {
+  enabled: boolean;
+  /** Additional tag prefixes beyond the default 'attachment'. e.g. ['wireframe','specification'] */
+  tagPrefixes?: string[];
+  /** Base folder for attached files (relative to config dir). When omitted, relative to feature file. */
+  baseFolder?: string;
+}
+
+// ─── Pull configuration ──────────────────────────────────────────────────────
+
+export interface PullConfig {
+  enabled?: boolean;
+  /** When true, pull creates new local test case files for TCs not yet linked. */
+  enableCreatingNewLocalTestCases?: boolean;
+  /** Folder for newly created local files (relative to config dir). Defaults to '.'. */
+  targetFolder?: string;
+}
+
+// ─── Publish test results configuration ──────────────────────────────────────
+
+export interface TestResultSource {
+  /** Path to test result file (relative to config dir or absolute). */
+  value: string;
+  /** Format of the result file. e.g. 'trx', 'junit', 'cucumberJson'. */
+  format?: string;
+}
+
+export interface PublishTestResultsConfig {
+  testResult?: {
+    sources: TestResultSource[];
+  };
+  /** Map inconclusive test outcomes to another value (e.g. 'Failed', 'NotExecuted'). */
+  treatInconclusiveAs?: string;
+  /** How to handle flaky tests. Default: 'lastAttemptOutcome'. */
+  flakyTestOutcome?: 'lastAttemptOutcome' | 'firstAttemptOutcome' | 'worstOutcome';
+  testConfiguration?: {
+    name?: string;
+    id?: number;
+  };
+  testSuite?: {
+    name?: string;
+    id?: number;
+    testPlan?: string;
+  };
+  testRunSettings?: {
+    name?: string;
+    comment?: string;
+    runType?: 'Automated' | 'Manual';
+  };
+  testResultSettings?: {
+    comment?: string;
+  };
+  /** Controls which attachments are published for passing tests. */
+  publishAttachmentsForPassingTests?: 'none' | 'files' | 'all';
+}
+
+// ─── Tool settings configuration ─────────────────────────────────────────────
+
+export interface ToolSettings {
+  licensePath?: string;
+  disableStats?: boolean;
+  outputLevel?: 'normal' | 'verbose' | 'quiet';
+  /** Path to a parent config file for hierarchical configuration. */
+  parentConfig?: string;
+  ignoreParentConfig?: boolean;
+}
+
+// ─── Main config ─────────────────────────────────────────────────────────────
+
 export interface SyncConfig {
   /** Azure DevOps organisation URL, e.g. https://dev.azure.com/myorg */
   orgUrl: string;
   /** Azure DevOps project name */
   project: string;
+  /** A unique identifier for this config within the ADO project. Prevents multi-config conflicts. */
+  configurationKey?: string;
   /** Authentication */
   auth: {
     type: AuthType;
@@ -67,7 +214,18 @@ export interface SyncConfig {
     include: string | string[];
     /** Glob pattern(s) to exclude */
     exclude?: string | string[];
+    /**
+     * Tag expression condition to filter which scenarios are included in sync.
+     * e.g. "@done and not (@ignored or @planned)"
+     */
+    condition?: string;
   };
+  /** Tool settings */
+  toolSettings?: ToolSettings;
+  /** Customizations */
+  customizations?: CustomizationsConfig;
+  /** Publish test results configuration */
+  publishTestResults?: PublishTestResultsConfig;
   /** Sync behaviour */
   sync?: {
     /** Prefix used in tags/comments to store the Azure test case ID. Default: 'tc' */
@@ -115,6 +273,16 @@ export interface SyncConfig {
      *     - suite: "All Tests"
      */
     suiteConditions?: SuiteCondition[];
+    /** State field configuration: set TC state when scenario changes. */
+    state?: StateConfig;
+    /** Field update rules applied on push. Keys are field names/references. */
+    fieldUpdates?: FieldUpdates;
+    /** Format configuration for how test case content is structured. */
+    format?: FormatConfig;
+    /** Attachment sync configuration: attach files to TCs via tags. */
+    attachments?: AttachmentsConfig;
+    /** Pull-specific configuration. */
+    pull?: PullConfig;
   };
 }
 
@@ -154,6 +322,11 @@ export interface ParsedTest {
    * e.g. @story:123 → { prefix: 'story', id: 123 }
    */
   linkRefs?: Array<{ prefix: string; id: number }>;
+  /**
+   * Attachment file references extracted from tags matching attachment config.
+   * e.g. @attachment:screen.png → { prefix: 'attachment', filePath: 'screen.png' }
+   */
+  attachmentRefs?: Array<{ prefix: string; filePath: string }>;
 }
 
 // ─── Azure Test Case (normalised) ────────────────────────────────────────────
