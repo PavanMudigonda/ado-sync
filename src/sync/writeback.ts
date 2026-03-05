@@ -106,12 +106,66 @@ export function writebackMarkdown(test: ParsedTest, id: number, tagPrefix: strin
   fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
 }
 
+// ─── C# writeback ─────────────────────────────────────────────────────────────
+
+/**
+ * Write (or update) [TestProperty("tc", "ID")] in a .cs file for a given [TestMethod].
+ *
+ * Strategy:
+ *  1. Locate [TestMethod] at test.line (1-based).
+ *  2. Scan forward up to 20 lines for an existing [TestProperty("<tagPrefix>", "...")] — replace it.
+ *  3. If not found, insert immediately after the [TestMethod] line, matching indentation.
+ *
+ * Only the value is replaced on an existing attribute; all other attributes are untouched.
+ */
+export function writebackCsharp(test: ParsedTest, id: number, tagPrefix: string): void {
+  const raw = fs.readFileSync(test.filePath, 'utf8');
+  const lines = raw.split('\n');
+
+  const testMethodLineIdx = test.line - 1; // 0-based
+
+  // Re-detect framework from the marker line so we use the correct attribute form.
+  // MSTest uses [TestProperty("key","val")], NUnit uses [Property("key","val")].
+  const markerTrimmed = (lines[testMethodLineIdx] ?? '').trim();
+  const isNUnit = /^\[Test[\]( ]/.test(markerTrimmed) && !/^\[TestMethod[\]( ]/.test(markerTrimmed);
+  const propAttrName = isNUnit ? 'Property' : 'TestProperty';
+
+  const newAttr = `[${propAttrName}("${tagPrefix}", "${id}")]`;
+  // Match either form so a pre-existing attribute written by a different tool is also replaced
+  const existingRe = new RegExp(`\\[(?:Test)?Property\\("${tagPrefix}",\\s*"\\d+"\\)\\]`);
+
+  // Detect indentation from the [TestMethod] / [Test] line
+  const indentMatch = (lines[testMethodLineIdx] ?? '').match(/^(\s*)/);
+  const indent = indentMatch ? indentMatch[1] : '        ';
+
+  // Scan forward for an existing property attribute within the attribute block
+  const scanEnd = Math.min(testMethodLineIdx + 20, lines.length);
+  let replaced = false;
+  for (let i = testMethodLineIdx + 1; i < scanEnd; i++) {
+    const trimmed = lines[i].trim();
+    // Stop once we reach the method signature or body
+    if (/^(public|private|protected|internal)\s/.test(trimmed) || trimmed === '{') break;
+    if (existingRe.test(trimmed)) {
+      lines[i] = lines[i].replace(existingRe, newAttr);
+      replaced = true;
+      break;
+    }
+  }
+
+  if (!replaced) {
+    // Insert on the line immediately after [TestMethod] / [Test]
+    lines.splice(testMethodLineIdx + 1, 0, `${indent}${newAttr}`);
+  }
+
+  fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+}
+
 // ─── Dispatcher ──────────────────────────────────────────────────────────────
 
 export async function writebackId(
   test: ParsedTest,
   id: number,
-  localType: 'gherkin' | 'markdown' | 'csv' | 'excel',
+  localType: 'gherkin' | 'markdown' | 'csv' | 'excel' | 'csharp',
   tagPrefix: string
 ): Promise<void> {
   switch (localType) {
@@ -126,6 +180,9 @@ export async function writebackId(
       break;
     case 'excel':
       await writebackExcel(test.filePath, test.title, id);
+      break;
+    case 'csharp':
+      writebackCsharp(test, id, tagPrefix);
       break;
   }
 }
