@@ -57,10 +57,19 @@ const STEP_TYPE_KEYWORD: Record<string, string> = {
 // ─── Syntax-coloured description builder ─────────────────────────────────────
 
 // Colour palette (works on white Azure DevOps background)
-const C_KEYWORD  = '#0070C1'; // blue  — Feature / Scenario / Background / Examples
-const C_STEP_KW  = '#22863A'; // green — Given / When / Then / And / But / *
-const C_TAG      = '#6F42C1'; // purple — @tags
-const C_GREY     = '#6A737D'; // grey  — feature description, table borders
+const C_KEYWORD = '#0070C1'; // blue   — Feature / Scenario / Background / Examples
+const C_TAG     = '#6F42C1'; // purple — @tags
+const C_GREY    = '#6A737D'; // grey   — feature description, table borders
+
+// Per-keyword step colours
+const STEP_KW_COLOR: Record<string, string> = {
+  Given:  '#0078D4', // blue
+  When:   '#E8830A', // orange
+  Then:   '#22863A', // green
+  And:    '#9B59B6', // violet
+  But:    '#D73A49', // red
+  '*':    '#6A737D', // grey
+};
 
 function esc(s: string): string {
   return s
@@ -78,12 +87,18 @@ function tag(text: string): string {
   return `<span style="color:${C_TAG}">${esc(text)}</span>`;
 }
 
+/** Return the display colour for a Gherkin step keyword. */
+function stepKwColor(keyword: string): string {
+  const bare = keyword.trim();
+  return STEP_KW_COLOR[bare] ?? STEP_KW_COLOR['*'];
+}
+
 /** Render one AST Step (plus any attached data table or doc string) as HTML lines. */
 function stepToHtmlLines(step: Step, indent: string): string[] {
   const lines: string[] = [];
-  const stepKeyword = step.keyword.trimEnd(); // e.g. "Given", "When", "  And"
+  const stepKeyword = step.keyword.trimEnd(); // e.g. "Given", "When", "And"
   const stepText    = step.text.trim();
-  lines.push(`${indent}${kw(stepKeyword, C_STEP_KW)} ${esc(stepText)}`);
+  lines.push(`${indent}${kw(stepKeyword, stepKwColor(stepKeyword))} ${esc(stepText)}`);
 
   if (step.dataTable) {
     for (const row of step.dataTable.rows) {
