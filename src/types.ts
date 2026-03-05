@@ -292,6 +292,13 @@ export interface ParsedStep {
   keyword: string; // Given / When / Then / And / But / *
   text: string;
   expected?: string; // Used by markdown steps that have an expected result inline
+  /** True when this step came from a Background block (Scenario Outline path only). */
+  isBackground?: boolean;
+  /**
+   * Data table attached to this step. Each element is one row of cell values.
+   * Present when the step has an inline Gherkin data table.
+   */
+  dataTable?: string[][];
 }
 
 export interface ParsedTest {
