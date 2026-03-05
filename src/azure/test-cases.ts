@@ -113,41 +113,34 @@ function buildParameterDataXml(headers: string[], rows: string[][]): string {
 
   const safeNames = headers.map(escapeXmlName);
 
-  // xs:schema — one xs:element per column
-  const schemaColumns = safeNames
-    .map((n) => `        <xs:element name="${n}" type="xs:string" minOccurs="0" />`)
-    .join('\n');
+  // Column schema elements
+  const colElements = safeNames
+    .map((n) => `<xs:element name="${n}" type="xs:string" minOccurs="0" />`)
+    .join('');
 
-  const schema = [
-    '<xs:schema id="NewDataSet" xmlns:xs="http://www.w3.org/2001/XMLSchema"',
-    '           xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">',
-    '  <xs:element name="NewDataSet" msdata:IsDataSet="true" msdata:UseCurrentLocale="true">',
-    '    <xs:complexType>',
-    '      <xs:choice minOccurs="0" maxOccurs="unbounded">',
-    '        <xs:element name="Table1">',
-    '          <xs:complexType>',
-    '            <xs:sequence>',
-    schemaColumns,
-    '            </xs:sequence>',
-    '          </xs:complexType>',
-    '        </xs:element>',
-    '      </xs:choice>',
-    '    </xs:complexType>',
-    '  </xs:element>',
-    '</xs:schema>',
-  ].join('\n');
+  // Full ADO.NET DataSet schema.  xmlns="" on xs:schema is required — it resets
+  // the default namespace so Azure's DataSet parser can match the column element
+  // names in the schema to those in the data rows.
+  const schema =
+    `<xs:schema id="NewDataSet" xmlns="" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">` +
+    `<xs:element name="NewDataSet" msdata:IsDataSet="true" msdata:UseCurrentLocale="true">` +
+    `<xs:complexType><xs:choice minOccurs="0" maxOccurs="unbounded">` +
+    `<xs:element name="Table1"><xs:complexType><xs:sequence>` +
+    colElements +
+    `</xs:sequence></xs:complexType></xs:element>` +
+    `</xs:choice></xs:complexType></xs:element></xs:schema>`;
 
-  // Data rows — one <Table1> per example row
-  const rowsXml = rows
+  // Data rows — one <Table1> per example row, compact (no whitespace nodes)
+  const dataRows = rows
     .map((row) => {
       const cells = safeNames
-        .map((n, i) => `  <${n}>${escapeHtml(row[i] ?? '')}</${n}>`)
-        .join('\n');
-      return `<Table1>\n${cells}\n</Table1>`;
+        .map((n, i) => `<${n}>${escapeHtml(row[i] ?? '')}</${n}>`)
+        .join('');
+      return `<Table1>${cells}</Table1>`;
     })
-    .join('\n');
+    .join('');
 
-  return `<NewDataSet>\n${schema}\n${rowsXml}\n</NewDataSet>`;
+  return `<NewDataSet>${schema}${dataRows}</NewDataSet>`;
 }
 
 /**
