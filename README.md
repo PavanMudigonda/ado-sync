@@ -2,7 +2,7 @@
 
 Bidirectional sync between local test specs and Azure DevOps Test Cases.
 
-Supports **Cucumber / Gherkin** `.feature` files, **prose Markdown** `.md` spec files (including Playwright test-plan markdown), and **Azure DevOps tabular exports** in **CSV** and **Excel** (`.xlsx`) format.
+Supports **Cucumber / Gherkin** `.feature` files, **prose Markdown** `.md` spec files (including Playwright test-plan markdown), **C# MSTest** `.cs` test files, and **Azure DevOps tabular exports** in **CSV** and **Excel** (`.xlsx`) format.
 Inspired by [SpecSync](https://docs.specsolutions.eu/specsync/).
 
 ---
@@ -14,13 +14,16 @@ Local files                   ado-sync              Azure DevOps
 ──────────────                ─────────────────     ────────────────
 .feature files  ── push ──►  create / update  ──►  Test Cases
 .md spec files  ◄── pull ──  apply changes    ◄──  (Work Items)
+.cs files       ── push ──►  (push-only)      ──►  + Associated Automation
 .csv files      ── push ──►  (push-only)
 .xlsx files     ── push ──►  (push-only)
                               write ID back
-                              @tc:12345 / col A (csv/xlsx)
+                              @tc:12345 / [TestProperty("tc","…")] / col A
+TRX / JUnit /   ── publish-test-results ──►   Test Run results (linked to TCs)
+Cucumber JSON
 ```
 
-On the **first push** of a scenario, a new Test Case is created in Azure DevOps and its ID is written back into the local file as a tag. Every subsequent push uses that ID to update the existing Test Case. Pulling fetches the latest title and steps from Azure and overwrites the local file.
+On the **first push**, a new Test Case is created in Azure DevOps and its ID is written back into the local file. Every subsequent push uses that ID to update the existing Test Case. For C# MSTest tests, the ID is written as `[TestProperty("tc", "12345")]` so TRX results published via `publish-test-results` can be linked back to the right Test Cases.
 
 ---
 
@@ -163,7 +166,7 @@ ado-sync push --config-override sync.disableLocalChanges=true
 | Topic | Link |
 |-------|------|
 | Full configuration reference | [docs/configuration.md](docs/configuration.md) |
-| Spec file formats (Gherkin, Markdown, CSV, Excel) | [docs/spec-formats.md](docs/spec-formats.md) |
+| Spec file formats (Gherkin, Markdown, C# MSTest, CSV, Excel) | [docs/spec-formats.md](docs/spec-formats.md) |
 | Advanced features (format, state, fieldUpdates, customizations, attachments, CI mode) | [docs/advanced.md](docs/advanced.md) |
 | Publishing test results | [docs/publish-test-results.md](docs/publish-test-results.md) |
 
@@ -183,6 +186,40 @@ ado-sync push
 ```bash
 # Someone edited a Test Case in the Azure DevOps UI
 ado-sync pull
+```
+
+### C# MSTest: create TCs, run tests, publish results
+
+```bash
+# 1. Create TCs from [TestMethod] methods and write IDs back into .cs files
+ado-sync push --dry-run   # preview
+ado-sync push             # writes [TestProperty("tc","ID")] into each method
+
+# 2. Run tests and capture results
+dotnet test --logger "trx;LogFileName=results.trx"
+
+# 3. Publish results to Azure Test Plans (linked to TCs via Associated Automation)
+ado-sync publish-test-results --testResult results/results.trx
+```
+
+Recommended `ado-sync.json` for C# MSTest:
+
+```json
+{
+  "orgUrl": "https://dev.azure.com/my-org",
+  "project": "MyProject",
+  "auth": { "type": "pat", "token": "$AZURE_DEVOPS_TOKEN" },
+  "testPlan": { "id": 1234 },
+  "local": {
+    "type": "csharp",
+    "include": ["**/RegressionTests/**/*.cs"],
+    "exclude": ["**/*BaseTest.cs", "**/*Helper.cs"]
+  },
+  "sync": {
+    "markAutomated": true,
+    "format": { "useExpectedResult": true }
+  }
+}
 ```
 
 ### CI pipeline
@@ -250,3 +287,12 @@ ado-sync looks for `xl/worksheets/sheet.xml` or `xl/worksheets/sheet1.xml` insid
 
 **Pull has no effect on CSV/Excel files**
 Pull is not supported for CSV and Excel — only push. These formats are managed by external tools.
+
+**C# categories show as constant names instead of values**
+ado-sync resolves `const string` declarations in the same file. Constants defined in a base class are not resolved — use string literals in `[TestCategory("...")]` for reliable tagging.
+
+**C# test methods not detected**
+Ensure the method has `[TestMethod]` on its own line. Nested classes or abstract base methods are not parsed. Add base class files to `local.exclude`.
+
+**TRX results not linked to Test Cases**
+Ensure `sync.markAutomated: true` is set in config so the TC's Associated Automation is populated with the fully-qualified method name. The TRX `testName` must match `Namespace.ClassName.MethodName`.
