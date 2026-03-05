@@ -18,13 +18,12 @@
  *   e.g.  specs/@smoke/@regression/login.feature  →  tags: ['smoke', 'regression']
  *
  * Description:
- *   Every ParsedTest gets a `description` field rendered as HTML for the
- *   Azure Test Case Summary tab. It includes:
- *     • Feature name + description
- *     • Background steps (if any)
- *     • Scenario tags (excluding the tc: ID tag)
- *     • Scenario / Scenario Outline steps (with any data tables or doc strings)
- *     • Examples tables with test data rows (Scenario Outline only)
+ *   Every ParsedTest gets a `description` field rendered as syntax-coloured HTML
+ *   for the Azure Test Case Summary tab. Colours mirror the VS Code Gherkin theme:
+ *     • Feature / Scenario / Background / Examples keywords — blue
+ *     • Given / When / Then / And / But step keywords       — green
+ *     • Tags (@smoke, @regression, …)                      — purple
+ *     • Feature description text                            — grey
  */
 
 import { generateMessages } from '@cucumber/gherkin';
@@ -55,9 +54,15 @@ const STEP_TYPE_KEYWORD: Record<string, string> = {
   Unknown: 'Step',
 };
 
-// ─── Description builder ──────────────────────────────────────────────────────
+// ─── Syntax-coloured description builder ─────────────────────────────────────
 
-function escapeHtmlDesc(s: string): string {
+// Colour palette (works on white Azure DevOps background)
+const C_KEYWORD  = '#0070C1'; // blue  — Feature / Scenario / Background / Examples
+const C_STEP_KW  = '#22863A'; // green — Given / When / Then / And / But / *
+const C_TAG      = '#6F42C1'; // purple — @tags
+const C_GREY     = '#6A737D'; // grey  — feature description, table borders
+
+function esc(s: string): string {
   return s
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -65,41 +70,44 @@ function escapeHtmlDesc(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-/** Return the Background step nodes from a GherkinDocument, if any. */
-function extractBackgroundSteps(doc: GherkinDocument): Step[] {
-  for (const child of doc.feature?.children ?? []) {
-    if (child.background) return child.background.steps as Step[];
-  }
-  return [];
+function kw(text: string, color: string): string {
+  return `<span style="color:${color};font-weight:bold">${esc(text)}</span>`;
+}
+
+function tag(text: string): string {
+  return `<span style="color:${C_TAG}">${esc(text)}</span>`;
 }
 
 /** Render one AST Step (plus any attached data table or doc string) as HTML lines. */
 function stepToHtmlLines(step: Step, indent: string): string[] {
   const lines: string[] = [];
-  lines.push(`${indent}${escapeHtmlDesc((step.keyword + step.text).trim())}`);
+  const stepKeyword = step.keyword.trimEnd(); // e.g. "Given", "When", "  And"
+  const stepText    = step.text.trim();
+  lines.push(`${indent}${kw(stepKeyword, C_STEP_KW)} ${esc(stepText)}`);
 
   if (step.dataTable) {
     for (const row of step.dataTable.rows) {
+      const cells = row.cells.map((c) => esc(c.value));
       lines.push(
-        `${indent}&nbsp;&nbsp;| ${row.cells.map((c) => escapeHtmlDesc(c.value)).join(' | ')} |`
+        `${indent}&nbsp;&nbsp;<span style="color:${C_GREY}">| ${cells.join(' | ')} |</span>`
       );
     }
   }
 
   if (step.docString) {
-    lines.push(`${indent}&nbsp;&nbsp;\`\`\``);
+    lines.push(`${indent}&nbsp;&nbsp;<span style="color:${C_GREY}">\`\`\`</span>`);
     for (const line of step.docString.content.split('\n')) {
-      lines.push(`${indent}&nbsp;&nbsp;${escapeHtmlDesc(line)}`);
+      lines.push(`${indent}&nbsp;&nbsp;${esc(line)}`);
     }
-    lines.push(`${indent}&nbsp;&nbsp;\`\`\``);
+    lines.push(`${indent}&nbsp;&nbsp;<span style="color:${C_GREY}">\`\`\`</span>`);
   }
 
   return lines;
 }
 
 /**
- * Build an HTML description for the Azure Test Case Summary tab.
- * Includes Feature header, Background steps, Scenario block, and
+ * Build a syntax-coloured HTML description for the Azure Test Case Summary tab.
+ * Includes Feature header, Background steps, Scenario block (with tags), and
  * Examples tables with test data for Scenario Outlines.
  */
 function buildGherkinDescription(
@@ -112,33 +120,32 @@ function buildGherkinDescription(
   const parts: string[] = [];
 
   // ── Feature ──────────────────────────────────────────────────────────────
-  parts.push(`<strong>Feature: ${escapeHtmlDesc(feature.name)}</strong>`);
+  parts.push(`${kw('Feature:', C_KEYWORD)} ${esc(feature.name)}`);
   if (feature.description?.trim()) {
     for (const line of feature.description.trim().split('\n')) {
-      parts.push(`<em>${escapeHtmlDesc(line.trim())}</em>`);
+      parts.push(`<span style="color:${C_GREY}">${esc(line.trim())}</span>`);
     }
   }
 
   // ── Background ───────────────────────────────────────────────────────────
   if (bgSteps.length) {
     parts.push('');
-    parts.push('<strong>Background:</strong>');
+    parts.push(kw('Background:', C_KEYWORD));
     for (const step of bgSteps) parts.push(...stepToHtmlLines(step, indent));
   }
 
   // ── Scenario tags (exclude the tc: ID tag) ────────────────────────────────
-  const scenarioTagStr = scenario.tags
+  const scenarioTags = scenario.tags
     .map((t) => stripAt(t.name))
-    .filter((t) => !t.startsWith(tagPrefix + ':'))
-    .map((t) => `@${t}`)
-    .join(' ');
+    .filter((t) => !t.startsWith(tagPrefix + ':'));
 
   parts.push('');
-  if (scenarioTagStr) parts.push(`<em>${escapeHtmlDesc(scenarioTagStr)}</em>`);
+  if (scenarioTags.length) {
+    parts.push(scenarioTags.map((t) => tag(`@${t}`)).join(' '));
+  }
 
-  parts.push(
-    `<strong>${escapeHtmlDesc(scenario.keyword.trim())}: ${escapeHtmlDesc(scenario.name)}</strong>`
-  );
+  const scenarioKeyword = scenario.keyword.trim(); // 'Scenario' or 'Scenario Outline'
+  parts.push(`${kw(scenarioKeyword + ':', C_KEYWORD)} ${esc(scenario.name)}`);
 
   // ── Steps ─────────────────────────────────────────────────────────────────
   for (const step of scenario.steps as Step[]) parts.push(...stepToHtmlLines(step, indent));
@@ -147,14 +154,18 @@ function buildGherkinDescription(
   for (const ex of scenario.examples ?? []) {
     parts.push('');
     const exTitle = ex.name ? `Examples: ${ex.name}` : 'Examples:';
-    parts.push(`&nbsp;&nbsp;<strong>${escapeHtmlDesc(exTitle)}</strong>`);
+    parts.push(`&nbsp;&nbsp;${kw(exTitle, C_KEYWORD)}`);
     if (ex.tableHeader) {
-      const headers = ex.tableHeader.cells.map((c) => escapeHtmlDesc(c.value));
-      parts.push(`&nbsp;&nbsp;| ${headers.join(' | ')} |`);
+      const headers = ex.tableHeader.cells.map((c) => esc(c.value));
+      parts.push(
+        `&nbsp;&nbsp;<span style="color:${C_GREY}">| ${headers.join(' | ')} |</span>`
+      );
     }
     for (const row of (ex.tableBody ?? []) as TableRow[]) {
-      const cells = row.cells.map((c) => escapeHtmlDesc(c.value));
-      parts.push(`&nbsp;&nbsp;| ${cells.join(' | ')} |`);
+      const cells = row.cells.map((c) => esc(c.value));
+      parts.push(
+        `&nbsp;&nbsp;<span style="color:${C_GREY}">| </span>${cells.join(`<span style="color:${C_GREY}"> | </span>`)}<span style="color:${C_GREY}"> |</span>`
+      );
     }
   }
 
@@ -213,6 +224,14 @@ function findScenarioNode(doc: GherkinDocument, pickle: Pickle): Scenario | unde
     }
   }
   return undefined;
+}
+
+/** Return the Background step nodes from a GherkinDocument, if any. */
+function extractBackgroundSteps(doc: GherkinDocument): Step[] {
+  for (const child of doc.feature?.children ?? []) {
+    if (child.background) return child.background.steps as Step[];
+  }
+  return [];
 }
 
 function pickleStepToParsedStep(step: PickleStep): ParsedStep {
@@ -369,7 +388,7 @@ export function parseGherkinFile(
     const pickleTags = pickle.tags.map((t) => stripAt(t.name));
     const allTags = [...new Set([...pathTags, ...pickleTags])];
 
-    // Find the AST scenario node to build the full description
+    // Find the AST scenario node to build the full syntax-coloured description
     const scenarioNode = findScenarioNode(doc, pickle);
 
     results.push({
