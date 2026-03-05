@@ -202,8 +202,13 @@ async function pushSingle(
         const localTags = new Set(test.tags.filter((t) => !t.startsWith(tagPrefix + ':')));
         const remoteTags = new Set(remote.tags);
         const tagsChanged = [...localTags].some((t) => !remoteTags.has(t));
+        // Description: compare local hash against what we last pushed (cache), not what
+        // Azure returns (which may have been reformatted by Azure's rich-text editor).
+        const localDescHash = hashString(test.description);
+        const cachedDescHash = cached?.descriptionHash ?? '';
+        const descriptionChanged = localDescHash !== cachedDescHash;
 
-        if (!titleChanged && !stepsChanged && !tagsChanged) {
+        if (!titleChanged && !stepsChanged && !tagsChanged && !descriptionChanged) {
           // Update cache entry even on skip (changedDate may differ due to other fields)
           updateCacheEntry(cache, test, remote);
           results.push({ action: 'skipped', filePath: test.filePath, title: test.title, azureId: test.azureId });
@@ -429,7 +434,9 @@ function updateCacheEntry(cache: SyncCache, test: ParsedTest, remote: { id: numb
   cache[remote.id] = {
     title: remote.title,
     stepsHash: hashSteps(remote.steps),
-    descriptionHash: hashString(remote.description),
+    // Store the LOCAL description hash so we compare against what we pushed,
+    // not Azure's potentially-reformatted version of the HTML.
+    descriptionHash: hashString(test.description),
     changedDate: remote.changedDate,
     filePath: test.filePath,
   } as CacheEntry;
