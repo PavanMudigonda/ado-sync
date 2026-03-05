@@ -89,7 +89,7 @@ program
       const onProgress = createProgressCallback(isTTY);
       const results = await push(config, configDir, { dryRun: opts.dryRun, tags: opts.tags, onProgress });
       if (isTTY) clearProgressLine();
-      printResults(results);
+      printResults(results, config.toolSettings?.outputLevel);
     } catch (err: any) {
       console.error(chalk.red(err.message));
       process.exit(1);
@@ -122,7 +122,7 @@ program
       const onProgress = createProgressCallback(isTTY);
       const results = await pull(config, configDir, { dryRun: opts.dryRun, tags: opts.tags, onProgress });
       if (isTTY) clearProgressLine();
-      printResults(results);
+      printResults(results, config.toolSettings?.outputLevel);
     } catch (err: any) {
       console.error(chalk.red(err.message));
       process.exit(1);
@@ -153,7 +153,7 @@ program
       const onProgress = createProgressCallback(isTTY);
       const results = await status(config, configDir, { tags: opts.tags, onProgress });
       if (isTTY) clearProgressLine();
-      printResults(results);
+      printResults(results, config.toolSettings?.outputLevel);
     } catch (err: any) {
       console.error(chalk.red(err.message));
       process.exit(1);
@@ -250,11 +250,15 @@ function clearProgressLine(): void {
 
 // ─── Output helpers ───────────────────────────────────────────────────────────
 
-function printResults(results: SyncResult[]): void {
+function printResults(results: SyncResult[], outputLevel?: string): void {
   const counts = { created: 0, updated: 0, pulled: 0, skipped: 0, conflict: 0, removed: 0, error: 0 };
+  const quiet = outputLevel === 'quiet';
 
   for (const r of results) {
     counts[r.action]++;
+    // In quiet mode, only print actionable results (skip the '= skipped' lines)
+    if (quiet && r.action === 'skipped') continue;
+
     const idStr = r.azureId ? chalk.dim(` [#${r.azureId}]`) : '';
     const detailStr = r.detail ? chalk.dim(` — ${r.detail}`) : '';
     const filePart = r.filePath
