@@ -1,5 +1,14 @@
 #!/usr/bin/env node
 
+// Suppress the url.parse() deprecation warning emitted by azure-devops-node-api internals.
+// This is DEP0169 and cannot be fixed on our side.
+const originalEmit = process.emit;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(process as any).emit = function (event: string, ...args: any[]) {
+  if (event === 'warning' && args[0]?.code === 'DEP0169') return false;
+  return originalEmit.apply(process, [event, ...args] as any);
+};
+
 import 'dotenv/config';
 
 import chalk from 'chalk';
