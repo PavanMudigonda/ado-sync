@@ -490,33 +490,78 @@ function buildFieldDefaultPatches(
 
 /**
  * Apply format configuration to step conversion.
- * Handles useExpectedResult, prefixTitle, emptyActionValue, etc.
+ * Handles useExpectedResult, prefixBackgroundSteps, syncDataTableAsText, emptyActionValue, etc.
  */
 function applyFormatToSteps(
-  steps: { keyword: string; text: string; expected?: string }[],
+  steps: { keyword: string; text: string; expected?: string; isBackground?: boolean; dataTable?: string[][] }[],
   formatConfig: FormatConfig | undefined
 ): AzureStep[] {
   const useExpected = formatConfig?.useExpectedResult ?? false;
   const emptyAction = formatConfig?.emptyActionValue;
   const emptyExpected = formatConfig?.emptyExpectedResultValue;
+  const prefixBg = formatConfig?.prefixBackgroundSteps ?? true;
+  const dataTableAsText = formatConfig?.syncDataTableAsText ?? false;
 
-  return steps.map((s) => {
-    const rawAction = `${s.keyword} ${s.text}`.trim();
-    let action = rawAction || emptyAction || '';
-    let expected = s.expected ?? '';
+  return steps
+    .filter((s) => {
+      // When prefixBackgroundSteps is false, exclude background steps entirely
+      if (s.isBackground && !prefixBg) return false;
+      return true;
+    })
+    .map((s) => {
+      const bgPrefix = s.isBackground ? 'Background: ' : '';
+      const rawAction = `${bgPrefix}${s.keyword} ${s.text}`.trim();
+      let action = rawAction || emptyAction || '';
+      let expected = s.expected ?? '';
 
-    // When useExpectedResult is true, Then/Verify steps go to expected column
-    if (useExpected && (s.keyword === 'Then' || s.keyword === 'Verify')) {
-      expected = s.text;
-      action = emptyAction || '';
-    }
+      // When useExpectedResult is true, Then/Verify steps go to expected column
+      // (background steps are not subject to this transformation)
+      if (useExpected && !s.isBackground && (s.keyword === 'Then' || s.keyword === 'Verify')) {
+        expected = s.text;
+        action = emptyAction || '';
+      }
 
-    if (!expected && emptyExpected) {
-      expected = emptyExpected;
-    }
+      if (!expected && emptyExpected) {
+        expected = emptyExpected;
+      }
 
-    return { action, expected };
-  });
+      // Append data table rows as plain text when syncDataTableAsText is enabled
+      if (dataTableAsText && s.dataTable?.length) {
+        const tableText = s.dataTable.map((row) => `| ${row.join(' | ')} |`).join('\n');
+        action = action ? `${action}\n${tableText}` : tableText;
+      }
+
+      return { action, expected };
+    });
+}
+
+/**
+ * Optionally append a "Parameters: @p1@, @p2@, ..." step for parametrized TCs.
+ * The step is appended in-place to the steps array.
+ *
+ * - 'always'               → always append
+ * - 'never'                → never append
+ * - 'whenUnusedParameters' → append only when at least one header has no @param@ reference in any step (default)
+ */
+function applyShowParameterListStep(
+  steps: AzureStep[],
+  outlineParameters: { headers: string[]; rows: string[][] } | undefined,
+  formatConfig: FormatConfig | undefined
+): void {
+  if (!outlineParameters?.headers.length) return;
+
+  const mode = formatConfig?.showParameterListStep ?? 'whenUnusedParameters';
+  if (mode === 'never') return;
+
+  const { headers } = outlineParameters;
+  const shouldAppend =
+    mode === 'always' ||
+    headers.some((h) => !steps.some((s) => s.action.includes(`@${h}@`)));
+
+  if (shouldAppend) {
+    const paramsList = headers.map((h) => `@${h}@`).join(', ');
+    steps.push({ action: `Parameters: ${paramsList}`, expected: '' });
+  }
 }
 
 /**
@@ -852,6 +897,7 @@ export async function createTestCase(
     action: isParametrized ? gherkinParamsToAzure(s.action) : s.action,
     expected: s.expected,
   }));
+  applyShowParameterListStep(steps, test.outlineParameters, formatConfig);
 
   // Apply format prefixTitle
   const title = formatTitle(test.title, test, formatConfig);
@@ -940,6 +986,7 @@ export async function updateTestCase(
     action: isParametrized ? gherkinParamsToAzure(s.action) : s.action,
     expected: s.expected,
   }));
+  applyShowParameterListStep(steps, test.outlineParameters, formatConfig);
 
   // Apply format prefixTitle
   const title = formatTitle(test.title, test, formatConfig);

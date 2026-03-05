@@ -469,13 +469,7 @@ async function pullSingle(
 
       for (const tc of unlinked) {
         try {
-          const newFilePath = createLocalFileFromRemote(tc, config, configDir, tagPrefix);
-          if (!opts.dryRun) {
-            // file was already written by createLocalFileFromRemote
-          } else {
-            // In dry-run, still report but don't write (function already wrote above,
-            // so in real dry-run we skip the call)
-          }
+          const newFilePath = createLocalFileFromRemote(tc, config, configDir, tagPrefix, !opts.dryRun);
           if (!opts.dryRun) {
             updateCacheEntry(cache, { filePath: newFilePath, title: tc.title, description: tc.description, steps: tc.steps.map((s) => ({ keyword: 'Step', text: s.action, expected: s.expected })), tags: tc.tags, line: 1, azureId: tc.id }, tc);
           }
@@ -692,59 +686,63 @@ function applyRemoteToMarkdown(
 
 /**
  * Create a new local .feature or .md file for an Azure TC that has no local counterpart.
- * Returns the absolute path of the created file.
+ * Returns the absolute path of the (would-be) file.
+ * Pass write=false in dry-run mode to compute the path without touching the filesystem.
  */
 function createLocalFileFromRemote(
   tc: AzureTestCase,
   config: SyncConfig,
   configDir: string,
-  tagPrefix: string
+  tagPrefix: string,
+  write = true
 ): string {
   const localType = config.local.type;
   const safeTitle = tc.title.replace(/[<>:"/\\|?*]/g, '_').replace(/\s+/g, '_');
   const ext = localType === 'gherkin' ? '.feature' : '.md';
   const baseDir = path.resolve(configDir, config.sync?.pull?.targetFolder ?? '.');
-  fs.mkdirSync(baseDir, { recursive: true });
+  if (write) fs.mkdirSync(baseDir, { recursive: true });
   const filePath = path.join(baseDir, `${safeTitle}${ext}`);
 
-  if (localType === 'gherkin') {
-    const lines: string[] = [];
-    lines.push(`@${tagPrefix}:${tc.id}`);
-    for (const tag of tc.tags) {
-      if (!tag.startsWith(`${tagPrefix}:`)) lines.push(`@${tag}`);
-    }
-    lines.push(`Feature: ${tc.title}`);
-    lines.push('');
-    lines.push(`  Scenario: ${tc.title}`);
-    for (const step of tc.steps) {
-      lines.push(`    ${step.action}`);
-    }
-    lines.push('');
-    fs.writeFileSync(filePath, lines.join('\n'), 'utf8');
-  } else {
-    const lines: string[] = [];
-    lines.push(`### ${tc.title}`);
-    lines.push(`@${tagPrefix}:${tc.id}`);
-    for (const tag of tc.tags) {
-      if (!tag.startsWith(`${tagPrefix}:`)) lines.push(`@${tag}`);
-    }
-    if (tc.description) {
+  if (write) {
+    if (localType === 'gherkin') {
+      const lines: string[] = [];
+      lines.push(`@${tagPrefix}:${tc.id}`);
+      for (const tag of tc.tags) {
+        if (!tag.startsWith(`${tagPrefix}:`)) lines.push(`@${tag}`);
+      }
+      lines.push(`Feature: ${tc.title}`);
       lines.push('');
-      lines.push(stripHtml(tc.description));
-    }
-    lines.push('');
-    lines.push('Steps:');
-    tc.steps.forEach((step, idx) => {
-      lines.push(`${idx + 1}. ${step.action}`);
-    });
-    if (tc.steps.some((s) => s.expected)) {
+      lines.push(`  Scenario: ${tc.title}`);
+      for (const step of tc.steps) {
+        lines.push(`    ${step.action}`);
+      }
       lines.push('');
-      lines.push('Expected results:');
-      const lastExpected = [...tc.steps].reverse().find((s) => s.expected)?.expected;
-      if (lastExpected) lines.push(`- ${lastExpected}`);
+      fs.writeFileSync(filePath, lines.join('\n'), 'utf8');
+    } else {
+      const lines: string[] = [];
+      lines.push(`### ${tc.title}`);
+      lines.push(`@${tagPrefix}:${tc.id}`);
+      for (const tag of tc.tags) {
+        if (!tag.startsWith(`${tagPrefix}:`)) lines.push(`@${tag}`);
+      }
+      if (tc.description) {
+        lines.push('');
+        lines.push(stripHtml(tc.description));
+      }
+      lines.push('');
+      lines.push('Steps:');
+      tc.steps.forEach((step, idx) => {
+        lines.push(`${idx + 1}. ${step.action}`);
+      });
+      if (tc.steps.some((s) => s.expected)) {
+        lines.push('');
+        lines.push('Expected results:');
+        const lastExpected = [...tc.steps].reverse().find((s) => s.expected)?.expected;
+        if (lastExpected) lines.push(`- ${lastExpected}`);
+      }
+      lines.push('');
+      fs.writeFileSync(filePath, lines.join('\n'), 'utf8');
     }
-    lines.push('');
-    fs.writeFileSync(filePath, lines.join('\n'), 'utf8');
   }
 
   return filePath;
