@@ -1,8 +1,23 @@
 /**
  * Publish test results to Azure DevOps test runs.
  *
- * Parses TRX, JUnit, and Cucumber JSON result files then creates a test run
- * with results mapped back to Azure DevOps test cases via the sync tag.
+ * Parses TRX, JUnit, NUnit XML, and Cucumber JSON result files then creates a
+ * test run with results mapped back to Azure DevOps test cases.
+ *
+ * TC ID extraction strategy (in priority order):
+ *
+ *   1. Direct TC ID from result file:
+ *      - TRX (MSTest):   [TestProperty("tc","12345")] → TestDefinitions/UnitTest/Properties/Property
+ *      - NUnit XML:      [Property("tc","12345")]     → test-case/properties/property[@name="tc"]
+ *      - Cucumber JSON:  @tc:12345 tag on scenario
+ *
+ *   2. AutomatedTestName matching (fallback):
+ *      When no TC ID is found, the result is published with automatedTestName set to the
+ *      FQMN (testName). Azure DevOps links it to a TC via AutomatedTestName if markAutomated
+ *      was used on push.
+ *
+ * NUnit TRX (via NUnit3TestAdapter) does NOT include [Property] values in the TRX format.
+ * Use `--logger "nunit3;LogFileName=results.xml"` to get the native NUnit XML with properties.
  */
 
 import { XMLParser } from 'fast-xml-parser';
@@ -15,13 +30,13 @@ import { SyncConfig } from '../types';
 // ─── Result file parsing ──────────────────────────────────────────────────────
 
 export interface ParsedResult {
-  /** automatedTestName — used to correlate back to a TC */
+  /** automatedTestName — used to correlate back to a TC via AutomatedTestName */
   testName: string;
   outcome: string;
   durationMs: number;
   errorMessage?: string;
   stackTrace?: string;
-  /** Azure TC id if we can map it */
+  /** Azure TC id if extracted directly from the result file */
   testCaseId?: number;
 }
 
@@ -35,15 +50,67 @@ function normaliseOutcome(raw: string, treatInconclusiveAs?: string): string {
   return raw;
 }
 
-// ─── TRX parser ───────────────────────────────────────────────────────────────
+// ─── TRX parser (MSTest) ──────────────────────────────────────────────────────
+//
+// TRX structure relevant to TC ID extraction:
+//
+//   <TestRun>
+//     <TestDefinitions>
+//       <UnitTest name="..." id="GUID">
+//         <Properties>
+//           <Property><Key>tc</Key><Value>12345</Value></Property>
+//         </Properties>
+//         <TestMethod className="Namespace.ClassName" name="MethodName" />
+//       </UnitTest>
+//     </TestDefinitions>
+//     <Results>
+//       <UnitTestResult testId="GUID" testName="..." outcome="Passed" .../>
+//     </Results>
+//   </TestRun>
+//
+// UnitTestResult.testId → UnitTest.id → Properties → tc value
 
-function parseTrx(content: string, treatInconclusiveAs?: string): ParsedResult[] {
-  const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
+function parseTrx(content: string, tagPrefix: string, treatInconclusiveAs?: string): ParsedResult[] {
+  const parser = new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: '@_',
+    isArray: (name) => ['UnitTest', 'UnitTestResult', 'Property'].includes(name),
+  });
   const doc = parser.parse(content);
 
   const testRun = doc.TestRun ?? doc.testRun;
   if (!testRun) return [];
 
+  // Build map: testId (GUID) → Azure TC id, from [TestProperty("tc","...")] values
+  const testIdToTcId = new Map<string, number>();
+  const definitions = testRun.TestDefinitions ?? testRun.testDefinitions;
+  if (definitions) {
+    let unitTests = definitions.UnitTest ?? definitions.unitTest ?? [];
+    if (!Array.isArray(unitTests)) unitTests = [unitTests];
+
+    for (const ut of unitTests) {
+      const testId: string = ut['@_id'] ?? '';
+      if (!testId) continue;
+
+      const propsNode = ut.Properties ?? ut.properties;
+      if (!propsNode) continue;
+
+      let props = propsNode.Property ?? propsNode.property ?? [];
+      if (!Array.isArray(props)) props = [props];
+
+      for (const prop of props) {
+        const key = String(prop.Key ?? prop.key ?? '');
+        const val = String(prop.Value ?? prop.value ?? '');
+        if (key === tagPrefix) {
+          const id = parseInt(val, 10);
+          if (!isNaN(id)) testIdToTcId.set(testId, id);
+          break;
+        }
+      }
+    }
+  }
+
+  // Parse UnitTestResult entries
   const resultsNode = testRun.Results ?? testRun.results;
   if (!resultsNode) return [];
 
@@ -60,14 +127,98 @@ function parseTrx(content: string, treatInconclusiveAs?: string): ParsedResult[]
     const output = r.Output ?? r.output;
     const errorInfo = output?.ErrorInfo ?? output?.errorInfo;
 
+    // Look up TC id by testId → TestDefinitions → Properties
+    const testId: string = r['@_testId'] ?? '';
+    const testCaseId = testId ? testIdToTcId.get(testId) : undefined;
+
     return {
       testName: r['@_testName'] ?? '',
       outcome: normaliseOutcome(r['@_outcome'] ?? 'Unspecified', treatInconclusiveAs),
       durationMs: Math.round(durationMs),
       errorMessage: errorInfo?.Message ?? errorInfo?.message,
       stackTrace: errorInfo?.StackTrace ?? errorInfo?.stackTrace,
+      testCaseId,
     };
   });
+}
+
+// ─── NUnit XML parser ─────────────────────────────────────────────────────────
+//
+// NUnit's native XML format (produced by --logger "nunit3;LogFileName=results.xml")
+// includes [Property] values in each <test-case>, unlike the TRX format via NUnit3TestAdapter.
+//
+//   <test-run>
+//     <test-suite type="TestFixture" fullname="Ns.Fixture">
+//       <test-case fullname="Ns.Fixture.MethodName" result="Passed" duration="0.123">
+//         <properties>
+//           <property name="tc" value="12345" />
+//         </properties>
+//       </test-case>
+//       <test-case fullname="Ns.Fixture.FailTest" result="Failed" duration="0.001">
+//         <failure>
+//           <message>Expected 1 but was 2</message>
+//           <stack-trace>...</stack-trace>
+//         </failure>
+//       </test-case>
+//     </test-suite>
+//   </test-run>
+
+function parseNUnitXml(content: string, tagPrefix: string, treatInconclusiveAs?: string): ParsedResult[] {
+  const parser = new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: '@_',
+    isArray: (name) => ['test-suite', 'test-case', 'property'].includes(name),
+  });
+  const doc = parser.parse(content);
+
+  const results: ParsedResult[] = [];
+
+  function walkNode(node: any): void {
+    // Collect test-cases at this level
+    const cases: any[] = node['test-case'] ?? [];
+    for (const tc of cases) {
+      const fullName: string = tc['@_fullname'] ?? tc['@_name'] ?? '';
+      const result: string  = tc['@_result'] ?? 'Inconclusive';
+      const duration = parseFloat(tc['@_duration'] ?? '0');
+
+      // Extract TC id from <properties>/<property name="tc" value="..."/>
+      let testCaseId: number | undefined;
+      const props: any[] = tc.properties?.property ?? [];
+      for (const prop of props) {
+        if (String(prop['@_name'] ?? '') === tagPrefix) {
+          const id = parseInt(String(prop['@_value'] ?? ''), 10);
+          if (!isNaN(id)) { testCaseId = id; break; }
+        }
+      }
+
+      // Failure / error details
+      let errorMessage: string | undefined;
+      let stackTrace: string | undefined;
+      const failure = tc.failure;
+      if (failure) {
+        errorMessage = String(failure.message ?? '');
+        stackTrace   = String(failure['stack-trace'] ?? '');
+      }
+
+      results.push({
+        testName: fullName,
+        outcome: normaliseOutcome(result, treatInconclusiveAs),
+        durationMs: Math.round(duration * 1000),
+        errorMessage: errorMessage || undefined,
+        stackTrace: stackTrace || undefined,
+        testCaseId,
+      });
+    }
+
+    // Recurse into nested test-suites
+    const suites: any[] = node['test-suite'] ?? [];
+    for (const suite of suites) walkNode(suite);
+  }
+
+  const testRunNode = doc['test-run'];
+  if (testRunNode) walkNode(testRunNode);
+
+  return results;
 }
 
 // ─── JUnit parser ─────────────────────────────────────────────────────────────
@@ -117,7 +268,7 @@ function parseJUnit(content: string, treatInconclusiveAs?: string): ParsedResult
 
 // ─── Cucumber JSON parser ─────────────────────────────────────────────────────
 
-function parseCucumberJson(content: string, treatInconclusiveAs?: string): ParsedResult[] {
+function parseCucumberJson(content: string, tagPrefix: string, treatInconclusiveAs?: string): ParsedResult[] {
   const features = JSON.parse(content);
   const results: ParsedResult[] = [];
 
@@ -142,11 +293,14 @@ function parseCucumberJson(content: string, treatInconclusiveAs?: string): Parse
         }
       }
 
-      // Extract tc id from tags if present
+      // Extract TC id from @tc:NNN tag on the scenario
       let testCaseId: number | undefined;
+      const tcPrefix = `@${tagPrefix}:`;
       for (const tag of element.tags ?? []) {
-        const match = tag.name?.match(/@tc:(\d+)/);
-        if (match) { testCaseId = parseInt(match[1]); break; }
+        if (tag.name?.startsWith(tcPrefix)) {
+          const id = parseInt(tag.name.slice(tcPrefix.length), 10);
+          if (!isNaN(id)) { testCaseId = id; break; }
+        }
       }
 
       results.push({
@@ -168,12 +322,12 @@ function detectFormat(filePath: string, content: string): string {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === '.trx') return 'trx';
   if (ext === '.json') return 'cucumberJson';
-  // Try XML detection
   if (content.trimStart().startsWith('<')) {
     if (content.includes('<TestRun') || content.includes('<testRun')) return 'trx';
+    if (content.includes('<test-run'))  return 'nunitXml';
     if (content.includes('<testsuites') || content.includes('<testsuite')) return 'junit';
   }
-  return 'junit'; // default
+  return 'junit';
 }
 
 // ─── Publish orchestration ────────────────────────────────────────────────────
@@ -192,7 +346,6 @@ export async function publishTestResults(
   configDir: string,
   opts: {
     dryRun?: boolean;
-    /** Override result sources from CLI */
     resultFiles?: string[];
     resultFormat?: string;
     runName?: string;
@@ -204,9 +357,10 @@ export async function publishTestResults(
     throw new Error('No publishTestResults configuration and no --testResult files specified.');
   }
 
+  const tagPrefix = config.sync?.tagPrefix ?? 'tc';
+
   // Gather result files
   const sources: Array<{ filePath: string; format?: string }> = [];
-
   if (opts.resultFiles?.length) {
     for (const f of opts.resultFiles) {
       sources.push({ filePath: path.resolve(configDir, f), format: opts.resultFormat });
@@ -230,13 +384,16 @@ export async function publishTestResults(
 
     switch (format) {
       case 'trx':
-        allResults.push(...parseTrx(content, treatInconclusiveAs));
+        allResults.push(...parseTrx(content, tagPrefix, treatInconclusiveAs));
+        break;
+      case 'nunitXml':
+        allResults.push(...parseNUnitXml(content, tagPrefix, treatInconclusiveAs));
         break;
       case 'junit':
         allResults.push(...parseJUnit(content, treatInconclusiveAs));
         break;
       case 'cucumberJson':
-        allResults.push(...parseCucumberJson(content, treatInconclusiveAs));
+        allResults.push(...parseCucumberJson(content, tagPrefix, treatInconclusiveAs));
         break;
       default:
         throw new Error(`Unsupported test result format: ${format}`);
@@ -249,7 +406,7 @@ export async function publishTestResults(
 
   const passed = allResults.filter((r) => r.outcome === 'Passed').length;
   const failed = allResults.filter((r) => r.outcome === 'Failed').length;
-  const other = allResults.length - passed - failed;
+  const other  = allResults.length - passed - failed;
 
   if (opts.dryRun) {
     return { runId: 0, runUrl: '', totalResults: allResults.length, passed, failed, other };
@@ -261,21 +418,18 @@ export async function publishTestResults(
   const runSettings = pubConfig?.testRunSettings;
   const runName = opts.runName ?? runSettings?.name ?? `ado-sync ${new Date().toISOString()}`;
 
-  // Create test run
   const runModel: any = {
     name: runName,
     plan: { id: String(config.testPlan.id) },
     automated: runSettings?.runType === 'Manual' ? false : true,
     configurationIds: pubConfig?.testConfiguration?.id ? [pubConfig.testConfiguration.id] : [],
   };
-
   if (runSettings?.comment) runModel.comment = runSettings.comment;
   if (opts.buildId) runModel.build = { id: String(opts.buildId) };
 
   const run = await testApi.createTestRun(runModel, config.project);
   const runId = run.id!;
 
-  // Add results
   const testCaseResults = allResults.map((r) => {
     const result: any = {
       automatedTestName: r.testName,
@@ -285,18 +439,18 @@ export async function publishTestResults(
       durationInMs: r.durationMs,
     };
     if (r.errorMessage) result.errorMessage = r.errorMessage;
-    if (r.stackTrace) result.stackTrace = r.stackTrace;
-    if (r.testCaseId) result.testCase = { id: String(r.testCaseId) };
+    if (r.stackTrace)   result.stackTrace   = r.stackTrace;
+    // When a TC id was extracted from the result file, link directly by id.
+    // This is more reliable than AutomatedTestName matching and works even when
+    // the FQMN has changed since the TC was last pushed.
+    if (r.testCaseId)   result.testCase = { id: String(r.testCaseId) };
     if (pubConfig?.testResultSettings?.comment) result.comment = pubConfig.testResultSettings.comment;
     return result;
   });
 
   await testApi.addTestResultsToTestRun(testCaseResults, config.project, runId);
-
-  // Complete the run
   await testApi.updateTestRun({ state: 'Completed' } as any, config.project, runId);
 
   const runUrl = `${config.orgUrl}/${config.project}/_testManagement/runs?runId=${runId}`;
-
   return { runId, runUrl, totalResults: allResults.length, passed, failed, other };
 }

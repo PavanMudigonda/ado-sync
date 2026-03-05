@@ -188,18 +188,20 @@ ado-sync push
 ado-sync pull
 ```
 
-### C# MSTest: create TCs, run tests, publish results
+### C# MSTest / NUnit: create TCs, run tests, publish results
 
 ```bash
-# 1. Create TCs from [TestMethod] methods and write IDs back into .cs files
+# 1. Create TCs and write IDs back into .cs files
 ado-sync push --dry-run   # preview
-ado-sync push             # writes [TestProperty("tc","ID")] into each method
+ado-sync push             # writes [TestProperty("tc","ID")] / [Property("tc","ID")]
 
-# 2. Run tests and capture results
+# 2a. MSTest — TRX contains [TestProperty] values; TC IDs extracted automatically
 dotnet test --logger "trx;LogFileName=results.trx"
-
-# 3. Publish results to Azure Test Plans (linked to TCs via Associated Automation)
 ado-sync publish-test-results --testResult results/results.trx
+
+# 2b. NUnit — use native XML logger so [Property("tc","ID")] values are included
+dotnet test --logger "nunit3;LogFileName=results.xml"
+ado-sync publish-test-results --testResult results/results.xml
 ```
 
 Recommended `ado-sync.json` for C# MSTest:
@@ -295,4 +297,4 @@ ado-sync resolves `const string` declarations in the same file. Constants define
 Ensure the method has `[TestMethod]` on its own line. Nested classes or abstract base methods are not parsed. Add base class files to `local.exclude`.
 
 **TRX results not linked to Test Cases**
-Ensure `sync.markAutomated: true` is set in config so the TC's Associated Automation is populated with the fully-qualified method name. The TRX `testName` must match `Namespace.ClassName.MethodName`.
+For MSTest, TC IDs are read directly from `[TestProperty("tc","ID")]` embedded in the TRX — no further config needed. For NUnit, use `--logger "nunit3;LogFileName=results.xml"` (native XML format) instead of TRX so `[Property("tc","ID")]` values are included. If neither is available, set `sync.markAutomated: true` and rely on `AutomatedTestName` FQMN matching.
