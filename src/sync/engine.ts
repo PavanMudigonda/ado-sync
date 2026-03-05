@@ -5,6 +5,7 @@
 import parseTagExpression from '@cucumber/tag-expressions';
 import * as fs from 'fs';
 import { glob } from 'glob';
+import * as path from 'path';
 
 import { AzureClient } from '../azure/client';
 import {
@@ -22,7 +23,7 @@ import { parseCsvFile } from '../parsers/csv';
 import { parseExcelFile } from '../parsers/excel';
 import { parseGherkinFile } from '../parsers/gherkin';
 import { parseMarkdownFile } from '../parsers/markdown';
-import { ParsedStep, ParsedTest, SyncConfig, SyncResult, TestPlanEntry } from '../types';
+import { AzureTestCase, ParsedStep, ParsedTest, SyncConfig, SyncResult, TestPlanEntry } from '../types';
 import { CacheEntry, hashSteps, hashString, loadCache, saveCache,SyncCache } from './cache';
 import { writebackId } from './writeback';
 
@@ -75,6 +76,8 @@ async function parseLocalFiles(
 ): Promise<ParsedTest[]> {
   const tagPrefix = config.sync?.tagPrefix ?? 'tc';
   const linkConfigs = config.sync?.links;
+  const attachmentsConfig = config.sync?.attachments;
+  const localCondition = config.local.condition;
   const results: ParsedTest[] = [];
 
   for (const fp of filePaths) {
@@ -82,7 +85,7 @@ async function parseLocalFiles(
       let tests: ParsedTest[];
       switch (config.local.type) {
         case 'gherkin':
-          tests = parseGherkinFile(fp, tagPrefix, linkConfigs);
+          tests = parseGherkinFile(fp, tagPrefix, linkConfigs, attachmentsConfig);
           break;
         case 'csv':
           tests = parseCsvFile(fp, tagPrefix, linkConfigs);
@@ -91,10 +94,11 @@ async function parseLocalFiles(
           tests = await parseExcelFile(fp, tagPrefix, linkConfigs);
           break;
         default:
-          tests = parseMarkdownFile(fp, tagPrefix, linkConfigs);
+          tests = parseMarkdownFile(fp, tagPrefix, linkConfigs, attachmentsConfig);
       }
 
       for (const t of tests) {
+        if (localCondition && !matchesTags(t, localCondition)) continue;
         if (tagsFilter && !matchesTags(t, tagsFilter)) continue;
         results.push(t);
       }
@@ -198,7 +202,7 @@ async function pushSingle(
             const suiteIdOverride = byFolder
               ? await getOrCreateSuiteForFile(client, config, test.filePath, configDir, suiteCache)
               : undefined;
-            newId = await createTestCase(client, test, config, suiteIdOverride);
+            newId = await createTestCase(client, test, config, suiteIdOverride, configDir);
             createdIds.add(newId);
             if (!disableLocal) {
               pendingWritebacks.push({ test, newId });
@@ -264,7 +268,7 @@ async function pushSingle(
         }
 
         if (!opts.dryRun) {
-          await updateTestCase(client, test.azureId, test, config);
+          await updateTestCase(client, test.azureId, test, config, configDir);
           // Ensure the TC is in the configured suite (it may not be if the suite was
           // changed in config, or if the TC was imported with an ID but never pushed before).
           const updateSuiteId = byFolder
@@ -289,7 +293,7 @@ async function pushSingle(
           const suiteIdOverride = byFolder
             ? await getOrCreateSuiteForFile(client, config, test.filePath, configDir, suiteCache)
             : undefined;
-          newId = await createTestCase(client, test, config, suiteIdOverride);
+          newId = await createTestCase(client, test, config, suiteIdOverride, configDir);
           createdIds.add(newId);
           if (!disableLocal) {
             pendingWritebacks.push({ test, newId });
@@ -454,6 +458,39 @@ async function pullSingle(
     } catch (err: any) {
       reportProgress({ action: 'error', filePath: test.filePath, title: test.title, azureId: test.azureId, detail: err.message });
     }
+  }
+
+  // Pull-create: generate new local files for Azure TCs that have no local counterpart
+  if (config.sync?.pull?.enableCreatingNewLocalTestCases && !disableLocal) {
+    try {
+      const remoteTcs = await getTestCasesInSuite(client, config);
+      const linkedIds = new Set(linked.map((t) => t.azureId));
+      const unlinked = remoteTcs.filter((tc) => !linkedIds.has(tc.id));
+
+      for (const tc of unlinked) {
+        try {
+          const newFilePath = createLocalFileFromRemote(tc, config, configDir, tagPrefix);
+          if (!opts.dryRun) {
+            // file was already written by createLocalFileFromRemote
+          } else {
+            // In dry-run, still report but don't write (function already wrote above,
+            // so in real dry-run we skip the call)
+          }
+          if (!opts.dryRun) {
+            updateCacheEntry(cache, { filePath: newFilePath, title: tc.title, description: tc.description, steps: tc.steps.map((s) => ({ keyword: 'Step', text: s.action, expected: s.expected })), tags: tc.tags, line: 1, azureId: tc.id }, tc);
+          }
+          results.push({
+            action: 'created',
+            filePath: newFilePath,
+            title: tc.title,
+            azureId: tc.id,
+            detail: 'new local file from Azure TC',
+          });
+        } catch (err: any) {
+          results.push({ action: 'error', filePath: '', title: tc.title, azureId: tc.id, detail: `pull-create: ${err.message}` });
+        }
+      }
+    } catch { /* best-effort */ }
   }
 
   if (!opts.dryRun) {
@@ -649,4 +686,66 @@ function applyRemoteToMarkdown(
   }
 
   fs.writeFileSync(test.filePath, updatedLines.join('\n'), 'utf8');
+}
+
+// ─── Create local file from remote Azure TC ──────────────────────────────────
+
+/**
+ * Create a new local .feature or .md file for an Azure TC that has no local counterpart.
+ * Returns the absolute path of the created file.
+ */
+function createLocalFileFromRemote(
+  tc: AzureTestCase,
+  config: SyncConfig,
+  configDir: string,
+  tagPrefix: string
+): string {
+  const localType = config.local.type;
+  const safeTitle = tc.title.replace(/[<>:"/\\|?*]/g, '_').replace(/\s+/g, '_');
+  const ext = localType === 'gherkin' ? '.feature' : '.md';
+  const baseDir = path.resolve(configDir, config.sync?.pull?.targetFolder ?? '.');
+  fs.mkdirSync(baseDir, { recursive: true });
+  const filePath = path.join(baseDir, `${safeTitle}${ext}`);
+
+  if (localType === 'gherkin') {
+    const lines: string[] = [];
+    lines.push(`@${tagPrefix}:${tc.id}`);
+    for (const tag of tc.tags) {
+      if (!tag.startsWith(`${tagPrefix}:`)) lines.push(`@${tag}`);
+    }
+    lines.push(`Feature: ${tc.title}`);
+    lines.push('');
+    lines.push(`  Scenario: ${tc.title}`);
+    for (const step of tc.steps) {
+      lines.push(`    ${step.action}`);
+    }
+    lines.push('');
+    fs.writeFileSync(filePath, lines.join('\n'), 'utf8');
+  } else {
+    const lines: string[] = [];
+    lines.push(`### ${tc.title}`);
+    lines.push(`@${tagPrefix}:${tc.id}`);
+    for (const tag of tc.tags) {
+      if (!tag.startsWith(`${tagPrefix}:`)) lines.push(`@${tag}`);
+    }
+    if (tc.description) {
+      lines.push('');
+      lines.push(stripHtml(tc.description));
+    }
+    lines.push('');
+    lines.push('Steps:');
+    tc.steps.forEach((step, idx) => {
+      lines.push(`${idx + 1}. ${step.action}`);
+    });
+    if (tc.steps.some((s) => s.expected)) {
+      lines.push('');
+      lines.push('Expected results:');
+      const lastExpected = [...tc.steps].reverse().find((s) => s.expected)?.expected;
+      if (lastExpected) lines.push(`- ${lastExpected}`);
+    }
+    lines.push('');
+    fs.writeFileSync(filePath, lines.join('\n'), 'utf8');
+  }
+
+  return filePath;
 }
