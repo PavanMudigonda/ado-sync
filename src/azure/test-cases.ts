@@ -103,21 +103,51 @@ function parseStepsXml(xml: string): AzureStep[] {
 
 /**
  * Build the NewDataSet XML for Microsoft.VSTS.TCM.LocalDataSource.
- * Used for Scenario Outline / parametrized test cases.
+ *
+ * Azure DevOps Test Plans requires the full ADO.NET DataSet XML format —
+ * i.e. an embedded xs:schema section followed by the data rows. Without
+ * the schema, the parameter grid shows column names but leaves values empty.
  */
 function buildParameterDataXml(headers: string[], rows: string[][]): string {
   if (!headers.length || !rows.length) return '';
 
+  const safeNames = headers.map(escapeXmlName);
+
+  // xs:schema — one xs:element per column
+  const schemaColumns = safeNames
+    .map((n) => `        <xs:element name="${n}" type="xs:string" minOccurs="0" />`)
+    .join('\n');
+
+  const schema = [
+    '<xs:schema id="NewDataSet" xmlns:xs="http://www.w3.org/2001/XMLSchema"',
+    '           xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">',
+    '  <xs:element name="NewDataSet" msdata:IsDataSet="true" msdata:UseCurrentLocale="true">',
+    '    <xs:complexType>',
+    '      <xs:choice minOccurs="0" maxOccurs="unbounded">',
+    '        <xs:element name="Table1">',
+    '          <xs:complexType>',
+    '            <xs:sequence>',
+    schemaColumns,
+    '            </xs:sequence>',
+    '          </xs:complexType>',
+    '        </xs:element>',
+    '      </xs:choice>',
+    '    </xs:complexType>',
+    '  </xs:element>',
+    '</xs:schema>',
+  ].join('\n');
+
+  // Data rows — one <Table1> per example row
   const rowsXml = rows
     .map((row) => {
-      const cells = headers
-        .map((h, i) => `<${escapeXmlName(h)}>${escapeHtml(row[i] ?? '')}</${escapeXmlName(h)}>`)
-        .join('');
-      return `<Table1>${cells}</Table1>`;
+      const cells = safeNames
+        .map((n, i) => `  <${n}>${escapeHtml(row[i] ?? '')}</${n}>`)
+        .join('\n');
+      return `<Table1>\n${cells}\n</Table1>`;
     })
-    .join('');
+    .join('\n');
 
-  return `<NewDataSet>${rowsXml}</NewDataSet>`;
+  return `<NewDataSet>\n${schema}\n${rowsXml}\n</NewDataSet>`;
 }
 
 /**
