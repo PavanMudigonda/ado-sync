@@ -9,6 +9,8 @@ import { glob } from 'glob';
 import { AzureClient } from '../azure/client';
 import {
   addTestCaseToConditionSuites,
+  addTestCaseToRootSuite,
+  addTestCaseToSuite,
   createTestCase,
   getOrCreateSuiteForFile,
   getTestCase,
@@ -48,6 +50,11 @@ async function discoverFiles(
 
   const all: string[] = [];
   for (const pattern of patterns) {
+    if (pattern.startsWith('/')) {
+      throw new Error(
+        `local.include pattern "${pattern}" is an absolute path. Use a relative glob (e.g. "**/*.csv") — patterns are resolved relative to the config file directory.`
+      );
+    }
     const matches = await glob(pattern, {
       cwd: configDir,
       absolute: true,
@@ -258,6 +265,16 @@ async function pushSingle(
 
         if (!opts.dryRun) {
           await updateTestCase(client, test.azureId, test, config);
+          // Ensure the TC is in the configured suite (it may not be if the suite was
+          // changed in config, or if the TC was imported with an ID but never pushed before).
+          const updateSuiteId = byFolder
+            ? await getOrCreateSuiteForFile(client, config, test.filePath, configDir, suiteCache)
+            : config.testPlan.suiteId;
+          if (updateSuiteId) {
+            await addTestCaseToSuite(client, config, test.azureId, updateSuiteId);
+          } else {
+            await addTestCaseToRootSuite(client, config, test.azureId);
+          }
           await addTestCaseToConditionSuites(client, config, test.azureId, test, conditionSuiteCache);
           updateCacheEntry(cache, test, remote);
         }
