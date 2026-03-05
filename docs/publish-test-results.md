@@ -1,6 +1,6 @@
 # publish-test-results
 
-Parses test result files (TRX, JUnit, Cucumber JSON) and publishes them to an Azure DevOps Test Run, linking results back to Test Cases via the sync tag.
+Parses test result files (TRX, NUnit XML, JUnit, Cucumber JSON) and publishes them to an Azure DevOps Test Run, linking results back to Test Cases either directly by TC ID (when available in the result file) or by `AutomatedTestName` matching.
 
 ---
 
@@ -31,7 +31,7 @@ ado-sync publish-test-results \
 | Option | Description |
 |--------|-------------|
 | `--testResult <path>` | Path to a result file. Repeatable. |
-| `--testResultFormat <format>` | `trx` · `junit` · `cucumberJson`. Auto-detected from file extension/content when omitted. |
+| `--testResultFormat <format>` | `trx` · `nunitXml` · `junit` · `cucumberJson`. Auto-detected from file extension/content when omitted. |
 | `--runName <name>` | Name for the Test Run in Azure DevOps. Defaults to `ado-sync <ISO timestamp>`. |
 | `--buildId <id>` | Build ID to associate with the Test Run. |
 | `--dry-run` | Parse results and print summary without creating a run in Azure. |
@@ -41,11 +41,27 @@ ado-sync publish-test-results \
 
 ## Supported formats
 
-| Format | Extension | Auto-detected |
-|--------|-----------|---------------|
-| TRX (Visual Studio / .NET) | `.trx` | Yes (XML root `<TestRun>`) |
-| JUnit XML | `.xml` | Yes (XML root `<testsuites>` or `<testsuite>`) |
-| Cucumber JSON | `.json` | Yes (JSON array of feature objects) |
+| Format | Extension | Auto-detected | TC ID in file? |
+|--------|-----------|---------------|----------------|
+| TRX (MSTest / VSTest) | `.trx` | Yes (`<TestRun>` root) | Yes — via `[TestProperty("tc","ID")]` in `TestDefinitions` |
+| NUnit XML (native) | `.xml` | Yes (`<test-run>` root) | Yes — via `[Property("tc","ID")]` on each `test-case` |
+| JUnit XML | `.xml` | Yes (`<testsuites>` / `<testsuite>` root) | No — uses `AutomatedTestName` fallback |
+| Cucumber JSON | `.json` | Yes (JSON array) | Yes — via `@tc:ID` tag on scenario |
+
+> **NUnit via TRX**: when NUnit tests are run through the VSTest adapter (`--logger trx`), `[Property]` values are **not** included in the TRX output. Use `--logger "nunit3;LogFileName=results.xml"` to get the native NUnit XML format, which does include property values.
+
+### How TC linking works
+
+Results are linked to Azure Test Cases in priority order:
+
+1. **TC ID from file** (preferred) — when the result file contains a TC ID (`[TestProperty]`, `[Property]`, or `@tc:` tag), the result is posted with `testCase.id` set directly. This is robust to class/method renames.
+2. **AutomatedTestName matching** (fallback) — when no TC ID is found, the result is posted with `automatedTestName` = the fully-qualified method name. Azure DevOps links it to a TC whose `AutomatedTestName` field matches. Requires `sync.markAutomated: true` on push.
+
+| Scenario | Recommended approach |
+|----------|---------------------|
+| MSTest + TRX | `--logger trx` — TC IDs extracted automatically from `[TestProperty("tc","ID")]` |
+| NUnit + TC IDs | `--logger "nunit3;LogFileName=results.xml"` — TC IDs extracted from `[Property("tc","ID")]` |
+| NUnit + TRX only | `--logger trx` + `sync.markAutomated: true` — uses FQMN matching, no TC IDs in file |
 
 ---
 
