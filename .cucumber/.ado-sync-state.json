@@ -2,281 +2,281 @@
   "32870": {
     "title": "Check title",
     "stepsHash": "749dbcfb9ada4426e9a4f63eb3869fbdf94bbc54a260923c5c5553dfa519baec",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:30:13.687Z",
+    "descriptionHash": "7682f93ccdeee2b6e0f6796f1ce960ed3805bfa0875db20c3317d8dea3273dec",
+    "changedDate": "2026-03-05T00:48:41.847Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/homepage.feature"
   },
   "32871": {
     "title": "Add a single item to the cart",
     "stepsHash": "e0d108a156b4be1af0469762eb01fe958b88ab5a59c6872b5c32d2b255e2f07f",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:31.693Z",
+    "descriptionHash": "d6deeb1f033af1180398c798ce9e97e5a1446cc20a3d5981a7af3b63636908fb",
+    "changedDate": "2026-03-05T00:48:27.607Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/cart.feature"
   },
   "32872": {
     "title": "Add multiple items to the cart",
     "stepsHash": "577e89adc9c3ce9e0b1a82d5fce5b33e3f6e12e74970c434eeaf2a82d445ca1a",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:32.75Z",
+    "descriptionHash": "9cd5119735cd214e28262bbf5cbf27dc99cb916e365e7a0f745b89a1ceb21852",
+    "changedDate": "2026-03-05T00:48:29.053Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/cart.feature"
   },
   "32873": {
     "title": "Remove an item from the cart",
     "stepsHash": "05a2f345f60b291824f2fd4fb764a244668c2900d927ce40ebdae43f4f589eae",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:33.633Z",
+    "descriptionHash": "62c6002683773e740a2d73653b2c05a668986ad8cc69e6dcd5e1efa1eeba934a",
+    "changedDate": "2026-03-05T00:48:29.957Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/cart.feature"
   },
   "32874": {
     "title": "Remove all items from the cart",
     "stepsHash": "6e6b57fb6c1db8e9a5477ed6c44c8065476e70d55ffda001d1e4fa47d8a322ae",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:34.42Z",
+    "descriptionHash": "3fe0a07fdb49a5489536fc7477e0cad6633c6b713d03dc16e3558d6c9502c5a5",
+    "changedDate": "2026-03-05T00:48:30.42Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/cart.feature"
   },
   "32875": {
     "title": "Cart persists after navigating back to inventory",
     "stepsHash": "c0086d5f040869b32a1e1faf912331935aa89ba38e495ec215774670ebf8fa0b",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:35.697Z",
+    "descriptionHash": "df61c06abb3613f6c3de0d27cd079c1a43b2693e659367af3e85d0d3e3495a09",
+    "changedDate": "2026-03-05T00:48:31.407Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/cart.feature"
   },
   "32876": {
     "title": "Add to cart button changes to Remove after adding",
     "stepsHash": "b12441bcb8281af4a83ec28453db27f13a5d928c9c27e75b3fb61ab7c30a7791",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:36.507Z",
+    "descriptionHash": "f74866737445d917c40fdcd1301568bb24ff85c6b3e75c9b8a05790f588c4921",
+    "changedDate": "2026-03-05T00:48:32.26Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/cart.feature"
   },
   "32877": {
     "title": "Cart badge increments correctly for each added item",
     "stepsHash": "6765b41eee1a73ecc02dbd657e92b9260c75c7781272851ae3d12526343b390c",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:37.157Z",
+    "descriptionHash": "73bdf2d11eb08ed2330a4ee8021d4655c91d7993839b8db8141d1152564db12a",
+    "changedDate": "2026-03-05T00:48:33.513Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/cart.feature"
   },
   "32878": {
     "title": "Correct item price is shown in the cart",
     "stepsHash": "188b58dd40ac6972996104c98aa7cb59ac82ff3b368df2ae0d33fe09c9da6f3a",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:38.08Z",
+    "descriptionHash": "3f533c91aa84170f47595a30ae6ca351c664618e6ec686c3968f677c888d0a4f",
+    "changedDate": "2026-03-05T00:48:34.037Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/cart.feature"
   },
   "32879": {
     "title": "Complete checkout with a single item (happy path)",
     "stepsHash": "a616f6294cab019b8d29209621089c171c3d1f9a20fe1f83af85ea4aaec173f2",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:38.723Z",
+    "descriptionHash": "0d55f6a2b8dd5f7a1358ffb1a61ec5d4656192784262e7770b39548071c21887",
+    "changedDate": "2026-03-05T00:48:34.78Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/checkout.feature"
   },
   "32880": {
     "title": "Checkout with multiple items verifies totals",
     "stepsHash": "e86198403a06463387e7bb3f1227a0ad861f2aea48d63bd54d76494529551325",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:39.57Z",
+    "descriptionHash": "73bd48f91b813ee78873619c35b70286b191ff068bfd77d7521a7439ad402a43",
+    "changedDate": "2026-03-05T00:48:35.97Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/checkout.feature"
   },
   "32881": {
     "title": "Checkout is blocked when First Name is missing",
     "stepsHash": "292fae63e17f58d6db86d1c46b88a072afcfdad6865a31d94bae7fbba6c8aee9",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:40.673Z",
+    "descriptionHash": "9b5b0e88f29e8219ca256d6575c88beba30a8ba419671cc5ac199cf38d2389e4",
+    "changedDate": "2026-03-05T00:48:36.873Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/checkout.feature"
   },
   "32882": {
     "title": "Checkout is blocked when Last Name is missing",
     "stepsHash": "16620ac4c8629561cf2b61f65bbf5fda5da5662e15dc0c8a5bf5a13021470e5e",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:41.307Z",
+    "descriptionHash": "f35a4ade47d4687df9e7043b09cf520f5407aa58952affff5453e24fc385ce4f",
+    "changedDate": "2026-03-05T00:48:37.313Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/checkout.feature"
   },
   "32883": {
     "title": "Checkout is blocked when Postal Code is missing",
     "stepsHash": "ad32587e5d977c022a23f62416b2a07c9b8e385ff556a822a059426ba943283f",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:42.277Z",
+    "descriptionHash": "3dedfb9a69f978c030c749ffcb134a046083128bbdd0c9b0a8d385a161d1e946",
+    "changedDate": "2026-03-05T00:48:38.017Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/checkout.feature"
   },
   "32884": {
     "title": "Cancelling checkout returns to cart",
     "stepsHash": "c0df633c5d626e2a31c020092919f33a11eaa11de3982315f866e8e64e4cdfd0",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:43.09Z",
+    "descriptionHash": "f7d31d1a04267242c7649dde04ed8e88775534430f5c16be6aa616e116cc6d21",
+    "changedDate": "2026-03-05T00:48:38.713Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/checkout.feature"
   },
   "32885": {
     "title": "Cancelling overview returns to inventory",
     "stepsHash": "07401f228352b0b01ab38bff823c4952f791103a418e72ee1c94a7c628b9f4e6",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:43.833Z",
+    "descriptionHash": "3533ae51e171419e15ebada5a855468b8d88ce9c7d05683c07c17e64476abe52",
+    "changedDate": "2026-03-05T00:48:39.143Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/checkout.feature"
   },
   "32886": {
     "title": "Direct navigation to checkout step without items",
     "stepsHash": "9898238912698b4f9c77079db3ba4abaf9988650a5fa69d6ddb5b2f7b99acf86",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:44.65Z",
+    "descriptionHash": "f590e32b65953660cfa090fca81a325839608bd12290157e82396b6cdf01325d",
+    "changedDate": "2026-03-05T00:48:39.937Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/checkout.feature"
   },
   "32887": {
     "title": "Cart is cleared after a successful order",
     "stepsHash": "85859b803c223407bd12f7261ff9fead8b397ef943342c7ded9dcdc6c104b5d4",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:45.53Z",
+    "descriptionHash": "082d0bc9d7d90bbfb72301e6ae859337638b423a148ab31bb09d2ad4401ed794",
+    "changedDate": "2026-03-05T00:48:40.48Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/checkout.feature"
   },
   "32888": {
     "title": "Checkout summary shows correct tax calculation",
     "stepsHash": "17e338c6efa1af64488247eaa22a73938c4581af35777c6672d926d3134cc99d",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:46.28Z",
+    "descriptionHash": "b401e41e2ebc02a85dc6de69582e0843d6dd7ad8f79335ee4a18fee1e23be4e6",
+    "changedDate": "2026-03-05T00:48:40.913Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/checkout.feature"
   },
   "32889": {
     "title": "Checkout with different valid user accounts",
     "stepsHash": "caa1ec977d1a8c6b5661f18cca43b13ba024ef37f02981d0e4591fe8aa66292e",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:47.16Z",
+    "descriptionHash": "edaa3786aa3b32d492bc50b1dbc933d19d6dba77fa323029cd123a4f6d1f2a47",
+    "changedDate": "2026-03-05T00:48:41.417Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/checkout.feature"
   },
   "32890": {
     "title": "Inventory page displays products",
     "stepsHash": "a86d0e44f6b74a19f36eea60ea4c28cb9fe7a9e696d10a622005626b48384b73",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:48.267Z",
+    "descriptionHash": "af99606489cc27c1890d2b5622841b78082f02fc8a96cef244d2131feb41caec",
+    "changedDate": "2026-03-05T00:48:42.523Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/inventory.feature"
   },
   "32891": {
     "title": "Sort products by name A to Z",
     "stepsHash": "45aa9db7026c9354bec1579658e03521c4c0128737be1e19110e02abe1b512e3",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:48.873Z",
+    "descriptionHash": "fc6e5e1b1c94d107f0859a3421e025878b65082555be2813dde22a889d053eef",
+    "changedDate": "2026-03-05T00:48:42.96Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/inventory.feature"
   },
   "32892": {
     "title": "Sort products by name Z to A",
     "stepsHash": "073795b3097b0435f516eb2bba235beb9f7474c27b1ce5729bb272953a72b151",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:49.813Z",
+    "descriptionHash": "bda58ef951b984f859971cd1eba207a53274dd795698740295c549262ac8f1eb",
+    "changedDate": "2026-03-05T00:48:43.353Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/inventory.feature"
   },
   "32893": {
     "title": "Sort products by price low to high",
     "stepsHash": "a4254c7066f0467bd5be1c7c720bd1c8da890128a1e8651b1a054d85acbb3f40",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:50.6Z",
+    "descriptionHash": "778fc8eb95dbfd1575c59b04d23aa221f868f7f66af0f2b2bd238df03dff7d71",
+    "changedDate": "2026-03-05T00:48:44.003Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/inventory.feature"
   },
   "32894": {
     "title": "Sort products by price high to low",
     "stepsHash": "05389335cdff56d43b260f1550f8f04718bdd0e74e654498049aabdc113d2b86",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:51.313Z",
+    "descriptionHash": "e906ae9b955e48fdee552c9333f70218297d47b7414f876ebfc5d314ea77130a",
+    "changedDate": "2026-03-05T00:48:44.8Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/inventory.feature"
   },
   "32895": {
     "title": "Navigate to product detail page",
     "stepsHash": "5e14c430b47e8cda13e81b2846ebd3febc0c401fd1a25f63d82b15cb6700f86b",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:52.06Z",
+    "descriptionHash": "e683feb66069e8edfc98ee99d63d5726699eff33ac8d173033b7afe15284d888",
+    "changedDate": "2026-03-05T00:48:45.29Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/inventory.feature"
   },
   "32896": {
     "title": "Add to cart from product detail page",
     "stepsHash": "c2878de6f68cf8b2c784fd871afa3ab22687c51acf8641bd532672acc830dd1a",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:52.637Z",
+    "descriptionHash": "b73f6010de56ed211e41dc44daabfc752108f34fbed6e4241373b1ba143df8b5",
+    "changedDate": "2026-03-05T00:48:45.753Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/inventory.feature"
   },
   "32897": {
     "title": "Navigate back to inventory from product detail",
     "stepsHash": "3fa4fb626b8d09bb6ec9dd8477af6c259b38a338a0dcd195d0d3a1c17d95161e",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:53.333Z",
+    "descriptionHash": "a52eb80556613f2eaa86ef3b271fadad131339da90b697625d10bd4e36eb9d13",
+    "changedDate": "2026-03-05T00:48:46.2Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/inventory.feature"
   },
   "32898": {
     "title": "All six products are displayed",
     "stepsHash": "ba4d6d2503e2284287df30034e0c6577b4f4107814ee1c70f072c3729c213480",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:53.94Z",
+    "descriptionHash": "963ca36ad841e2283dddbd70c12c4540a0a2b5089d570c9d56efb91a3ac52719",
+    "changedDate": "2026-03-05T00:48:46.723Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/inventory.feature"
   },
   "32899": {
     "title": "Logout from inventory page",
     "stepsHash": "14df455587ef22dc184f43785c60c6e199ccb47b03ef49d7e8f03e6322c85804",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:54.58Z",
+    "descriptionHash": "e148288c667a6006c93d56e9d81fa01a4774682fda588959e60edba80f1d165f",
+    "changedDate": "2026-03-05T00:48:47.143Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/inventory.feature"
   },
   "32900": {
     "title": "Successful login with valid credentials",
     "stepsHash": "7541b83908fb54a7824b10c00bd294db9f7099e1359841df22d98ae3f6f93910",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:55.23Z",
+    "descriptionHash": "a09d78e8529bb0d8acd3bcebe96f57ea9a4d37bcc9f1b25cc73c0b3828d889a1",
+    "changedDate": "2026-03-05T00:48:47.693Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/login.feature"
   },
   "32901": {
     "title": "Login fails with locked out user",
     "stepsHash": "9b57cb6b95f55246fb91e40f46515efa7d461a95b09e75c65369f48c39f88a16",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:55.863Z",
+    "descriptionHash": "eb93b0611e3d7ec1b0691c9d37bb02fe9c2f0cbf524a4cf89c444efd323cf6f1",
+    "changedDate": "2026-03-05T00:48:48.23Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/login.feature"
   },
   "32902": {
     "title": "Login fails with invalid username",
     "stepsHash": "e9cbf71f19820750dba7b7c9191b507797b06da1d00447e4c267c1a1f476148e",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:56.71Z",
+    "descriptionHash": "d8efce45545b824de9a7efddab101b2b1ac3cae5227227725afde45b997ca0bc",
+    "changedDate": "2026-03-05T00:48:48.967Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/login.feature"
   },
   "32903": {
     "title": "Login fails with invalid password",
     "stepsHash": "f17d770f4ea01fd7e56d95be29572f6e29af207ceec97a3f073ce82bd1bd00d6",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:57.52Z",
+    "descriptionHash": "48438eb31e5f27ce8e524fefb5d6ff6c053afa9432cee34128c61ca4ac413a24",
+    "changedDate": "2026-03-05T00:48:49.413Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/login.feature"
   },
   "32904": {
     "title": "Login fails with empty username",
     "stepsHash": "da8247da3e4e529e9a50cfc9c4cb2f2e0d3899e28423e2029e2a3613ba9cdbe0",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:58.143Z",
+    "descriptionHash": "5baf5cc8c2e1c34cf1bd6b85d27a20046e5e25bf8378e4279fc3c80900b4b103",
+    "changedDate": "2026-03-05T00:48:49.937Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/login.feature"
   },
   "32905": {
     "title": "Login fails with empty password",
     "stepsHash": "2093604ecb06929efebca49456cfc2c8e26491ba1f98188809778e185f40b6af",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:58.807Z",
+    "descriptionHash": "626d8e72522daec50d5101187e84dbaf4374a487db921b4f84b421b9ccf416fc",
+    "changedDate": "2026-03-05T00:48:50.72Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/login.feature"
   },
   "32906": {
     "title": "Login fails with both fields empty",
     "stepsHash": "8288f24de78e3413c714d31f471167d5b2952c1d78e68771e4b499d638e61e28",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:34:59.497Z",
+    "descriptionHash": "1ca748556b1b69dcb96ef7604b812eba315f73febfe83dcde083390445a81fc9",
+    "changedDate": "2026-03-05T00:48:51.37Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/login.feature"
   },
   "32907": {
     "title": "Login with all valid test user accounts",
     "stepsHash": "fcfb6cd5bce9f25b73d04053b2c65d76ec02aa157cf831212fa7c401612d683f",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:35:00.08Z",
+    "descriptionHash": "c08105e83a417e56f0db5eadc298a10f5bcff16a4c6eb34d6b5fe0a37d143d45",
+    "changedDate": "2026-03-05T00:48:51.797Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/login.feature"
   },
   "32908": {
     "title": "Problem user can log in but may have UI anomalies",
     "stepsHash": "2642250ef95309896d1a230f04f596812da5c80b2adf428e4570ce72f9920597",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:35:00.687Z",
+    "descriptionHash": "5a0271959a3302d0bc5ca7ab95207e4d18c25000704184e96081060dadc5a399",
+    "changedDate": "2026-03-05T00:48:52.34Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/login.feature"
   },
   "32909": {
     "title": "Performance glitch user experiences slow login",
     "stepsHash": "7d132f4129a98079e551e2fee5ac67fd66bbf7d2e742a2a700ebe3cf970be4d2",
-    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "changedDate": "2026-03-05T00:35:01.36Z",
+    "descriptionHash": "23c8fa16b9aa5ab64087f4bb5519903fc6411249b42671809200ae91a0bbf8a1",
+    "changedDate": "2026-03-05T00:48:52.76Z",
     "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.cucumber/features/login.feature"
   }
 }
