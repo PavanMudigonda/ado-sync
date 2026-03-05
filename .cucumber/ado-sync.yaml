@@ -1,0 +1,21 @@
+orgUrl: https://dev.azure.com/tr-ihn-sandbox
+project: Azure-DevOps-Training
+auth:
+  type: pat
+  token: $AZURE_DEVOPS_TOKEN
+testPlan:
+  id: 32868
+  suiteId: 32869
+  suiteMapping: flat
+local:
+  type: gherkin
+  include: features/**/*.feature
+  exclude: []
+sync:
+  tagPrefix: tc
+  titleField: System.Title
+  areaPath: ''
+  iterationPath: ''
+  disableLocalChanges: false
+  conflictAction: overwrite
+  links: []
