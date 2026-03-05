@@ -5,12 +5,12 @@
  * with results mapped back to Azure DevOps test cases via the sync tag.
  */
 
+import { XMLParser } from 'fast-xml-parser';
 import * as fs from 'fs';
 import * as path from 'path';
-import { XMLParser } from 'fast-xml-parser';
 
 import { AzureClient } from '../azure/client';
-import { PublishTestResultsConfig, SyncConfig } from '../types';
+import { SyncConfig } from '../types';
 
 // ─── Result file parsing ──────────────────────────────────────────────────────
 
