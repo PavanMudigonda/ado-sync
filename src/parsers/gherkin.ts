@@ -16,6 +16,15 @@
  * Path-based auto-tagging:
  *   Directory segments prefixed with @ are added as tags automatically.
  *   e.g.  specs/@smoke/@regression/login.feature  →  tags: ['smoke', 'regression']
+ *
+ * Description:
+ *   Every ParsedTest gets a `description` field rendered as HTML for the
+ *   Azure Test Case Summary tab. It includes:
+ *     • Feature name + description
+ *     • Background steps (if any)
+ *     • Scenario tags (excluding the tc: ID tag)
+ *     • Scenario / Scenario Outline steps (with any data tables or doc strings)
+ *     • Examples tables with test data rows (Scenario Outline only)
  */
 
 import { generateMessages } from '@cucumber/gherkin';
@@ -45,6 +54,112 @@ const STEP_TYPE_KEYWORD: Record<string, string> = {
   Outcome: 'Then',
   Unknown: 'Step',
 };
+
+// ─── Description builder ──────────────────────────────────────────────────────
+
+function escapeHtmlDesc(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/** Return the Background step nodes from a GherkinDocument, if any. */
+function extractBackgroundSteps(doc: GherkinDocument): Step[] {
+  for (const child of doc.feature?.children ?? []) {
+    if (child.background) return child.background.steps as Step[];
+  }
+  return [];
+}
+
+/** Render one AST Step (plus any attached data table or doc string) as HTML lines. */
+function stepToHtmlLines(step: Step, indent: string): string[] {
+  const lines: string[] = [];
+  lines.push(`${indent}${escapeHtmlDesc((step.keyword + step.text).trim())}`);
+
+  if (step.dataTable) {
+    for (const row of step.dataTable.rows) {
+      lines.push(
+        `${indent}&nbsp;&nbsp;| ${row.cells.map((c) => escapeHtmlDesc(c.value)).join(' | ')} |`
+      );
+    }
+  }
+
+  if (step.docString) {
+    lines.push(`${indent}&nbsp;&nbsp;\`\`\``);
+    for (const line of step.docString.content.split('\n')) {
+      lines.push(`${indent}&nbsp;&nbsp;${escapeHtmlDesc(line)}`);
+    }
+    lines.push(`${indent}&nbsp;&nbsp;\`\`\``);
+  }
+
+  return lines;
+}
+
+/**
+ * Build an HTML description for the Azure Test Case Summary tab.
+ * Includes Feature header, Background steps, Scenario block, and
+ * Examples tables with test data for Scenario Outlines.
+ */
+function buildGherkinDescription(
+  feature: NonNullable<GherkinDocument['feature']>,
+  bgSteps: Step[],
+  scenario: Scenario,
+  tagPrefix: string,
+): string {
+  const indent = '&nbsp;&nbsp;&nbsp;&nbsp;';
+  const parts: string[] = [];
+
+  // ── Feature ──────────────────────────────────────────────────────────────
+  parts.push(`<strong>Feature: ${escapeHtmlDesc(feature.name)}</strong>`);
+  if (feature.description?.trim()) {
+    for (const line of feature.description.trim().split('\n')) {
+      parts.push(`<em>${escapeHtmlDesc(line.trim())}</em>`);
+    }
+  }
+
+  // ── Background ───────────────────────────────────────────────────────────
+  if (bgSteps.length) {
+    parts.push('');
+    parts.push('<strong>Background:</strong>');
+    for (const step of bgSteps) parts.push(...stepToHtmlLines(step, indent));
+  }
+
+  // ── Scenario tags (exclude the tc: ID tag) ────────────────────────────────
+  const scenarioTagStr = scenario.tags
+    .map((t) => stripAt(t.name))
+    .filter((t) => !t.startsWith(tagPrefix + ':'))
+    .map((t) => `@${t}`)
+    .join(' ');
+
+  parts.push('');
+  if (scenarioTagStr) parts.push(`<em>${escapeHtmlDesc(scenarioTagStr)}</em>`);
+
+  parts.push(
+    `<strong>${escapeHtmlDesc(scenario.keyword.trim())}: ${escapeHtmlDesc(scenario.name)}</strong>`
+  );
+
+  // ── Steps ─────────────────────────────────────────────────────────────────
+  for (const step of scenario.steps as Step[]) parts.push(...stepToHtmlLines(step, indent));
+
+  // ── Examples tables (Scenario Outline only) ───────────────────────────────
+  for (const ex of scenario.examples ?? []) {
+    parts.push('');
+    const exTitle = ex.name ? `Examples: ${ex.name}` : 'Examples:';
+    parts.push(`&nbsp;&nbsp;<strong>${escapeHtmlDesc(exTitle)}</strong>`);
+    if (ex.tableHeader) {
+      const headers = ex.tableHeader.cells.map((c) => escapeHtmlDesc(c.value));
+      parts.push(`&nbsp;&nbsp;| ${headers.join(' | ')} |`);
+    }
+    for (const row of (ex.tableBody ?? []) as TableRow[]) {
+      const cells = row.cells.map((c) => escapeHtmlDesc(c.value));
+      parts.push(`&nbsp;&nbsp;| ${cells.join(' | ')} |`);
+    }
+  }
+
+  return parts.join('<br>\n');
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -86,6 +201,20 @@ function findScenarioLine(doc: GherkinDocument, pickle: Pickle): number {
   return 1;
 }
 
+/** Find the AST Scenario node that produced a given pickle. */
+function findScenarioNode(doc: GherkinDocument, pickle: Pickle): Scenario | undefined {
+  const scenarioId = pickle.astNodeIds[0];
+  for (const child of doc.feature?.children ?? []) {
+    if (child.scenario?.id === scenarioId) return child.scenario;
+    if (child.rule) {
+      for (const rc of child.rule.children ?? []) {
+        if (rc.scenario?.id === scenarioId) return rc.scenario;
+      }
+    }
+  }
+  return undefined;
+}
+
 function pickleStepToParsedStep(step: PickleStep): ParsedStep {
   return {
     keyword: STEP_TYPE_KEYWORD[step.type ?? 'Unknown'] ?? 'Step',
@@ -103,7 +232,9 @@ function scenarioOutlineToParsedTest(
   filePath: string,
   pathTags: string[],
   tagPrefix: string,
-  linkConfigs: LinkConfig[] | undefined
+  linkConfigs: LinkConfig[] | undefined,
+  feature: NonNullable<GherkinDocument['feature']>,
+  bgSteps: Step[],
 ): ParsedTest {
   const scenarioTags = scenario.tags.map((t) => stripAt(t.name));
   const allTags = [...new Set([...pathTags, ...scenarioTags])];
@@ -130,6 +261,7 @@ function scenarioOutlineToParsedTest(
   return {
     filePath,
     title: scenario.name.trim(),
+    description: buildGherkinDescription(feature, bgSteps, scenario, tagPrefix),
     steps,
     tags: allTags,
     azureId: extractAzureId(allTags, tagPrefix),
@@ -177,12 +309,16 @@ export function parseGherkinFile(
   if (!docEnvelope?.gherkinDocument?.feature) return [];
 
   const doc = docEnvelope.gherkinDocument;
+  const feature = doc.feature!;
   const pickles: Pickle[] = messages
     .filter((m) => m.pickle)
     .map((m) => m.pickle!);
 
   // Tags from directory path segments (e.g. specs/@smoke/ → 'smoke')
   const pathTags = extractPathTags(filePath);
+
+  // Background steps (shared across all scenarios in this file)
+  const bgSteps = extractBackgroundSteps(doc);
 
   const results: ParsedTest[] = [];
 
@@ -208,7 +344,7 @@ export function parseGherkinFile(
   for (const scenario of allScenarios) {
     if (outlineIds.has(scenario.id)) {
       results.push(
-        scenarioOutlineToParsedTest(scenario, filePath, pathTags, tagPrefix, linkConfigs)
+        scenarioOutlineToParsedTest(scenario, filePath, pathTags, tagPrefix, linkConfigs, feature, bgSteps)
       );
     }
   }
@@ -233,9 +369,15 @@ export function parseGherkinFile(
     const pickleTags = pickle.tags.map((t) => stripAt(t.name));
     const allTags = [...new Set([...pathTags, ...pickleTags])];
 
+    // Find the AST scenario node to build the full description
+    const scenarioNode = findScenarioNode(doc, pickle);
+
     results.push({
       filePath,
       title: pickle.name.trim(),
+      description: scenarioNode
+        ? buildGherkinDescription(feature, bgSteps, scenarioNode, tagPrefix)
+        : undefined,
       steps: pickle.steps.map(pickleStepToParsedStep),
       tags: allTags,
       azureId: extractAzureId(allTags, tagPrefix),
