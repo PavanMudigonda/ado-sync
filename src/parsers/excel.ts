@@ -17,7 +17,6 @@
  */
 
 import * as fs from 'fs';
-
 import JSZip from 'jszip';
 
 import { LinkConfig, ParsedTest } from '../types';
