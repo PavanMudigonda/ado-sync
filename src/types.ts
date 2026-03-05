@@ -208,8 +208,8 @@ export interface SyncConfig {
   testPlans?: TestPlanEntry[];
   /** Local spec sources */
   local: {
-    /** 'gherkin' for .feature files, 'markdown' for .md spec files */
-    type: 'gherkin' | 'markdown' | 'csv' | 'excel';
+    /** 'gherkin' for .feature files, 'markdown' for .md spec files, 'csharp' for MSTest .cs files */
+    type: 'gherkin' | 'markdown' | 'csv' | 'excel' | 'csharp';
     /** Glob pattern(s) relative to config file location */
     include: string | string[];
     /** Glob pattern(s) to exclude */
@@ -324,6 +324,12 @@ export interface ParsedTest {
     headers: string[];
     rows: string[][];
   };
+  /**
+   * Fully-qualified automated test name. For C# tests this is "Namespace.Class.Method"
+   * and is used to populate Microsoft.VSTS.TCM.AutomatedTestName when markAutomated is true.
+   * When absent, the name is derived from file basename + scenario title.
+   */
+  automatedTestName?: string;
   /**
    * Work item link references extracted from tags matching sync.links config.
    * e.g. @story:123 → { prefix: 'story', id: 123 }

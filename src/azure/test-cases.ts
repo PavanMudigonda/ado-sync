@@ -216,7 +216,9 @@ function buildAutomationPatches(test: ParsedTest, config: SyncConfig, op: 'add' 
   const ext = path.extname(test.filePath);
   const fileBase = sanitizeTestName(path.basename(test.filePath, ext));
   const scenarioName = sanitizeTestName(test.title);
-  const automatedTestName = `${fileBase}.${scenarioName}`;
+  // For C# tests, automatedTestName is the FQMN (Namespace.Class.Method) provided by the parser.
+  // For other types it falls back to the file-basename.scenario-title convention.
+  const automatedTestName = test.automatedTestName ?? `${fileBase}.${scenarioName}`;
   const automatedTestStorage = path.basename(test.filePath);
   const automatedTestId = deterministicGuid(`${test.filePath}::${test.title}`);
 
