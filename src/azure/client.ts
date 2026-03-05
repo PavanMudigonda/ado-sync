@@ -3,8 +3,8 @@ import * as azdev from 'azure-devops-node-api';
 import { WebApi } from 'azure-devops-node-api';
 import * as CoreApi from 'azure-devops-node-api/CoreApi';
 import { IRequestHandler } from 'azure-devops-node-api/interfaces/common/VsoBaseInterfaces';
-import * as TestPlanApi from 'azure-devops-node-api/TestPlanApi';
 import * as TestApi from 'azure-devops-node-api/TestApi';
+import * as TestPlanApi from 'azure-devops-node-api/TestPlanApi';
 import * as WorkItemTrackingApi from 'azure-devops-node-api/WorkItemTrackingApi';
 
 import { SyncConfig } from '../types';
