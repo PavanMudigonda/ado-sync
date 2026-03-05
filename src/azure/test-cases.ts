@@ -606,7 +606,7 @@ export async function tagTestCaseAsRemoved(
   ], id);
 }
 
-async function addTestCaseToSuite(
+export async function addTestCaseToSuite(
   client: AzureClient,
   config: SyncConfig,
   testCaseId: number,
@@ -621,7 +621,7 @@ async function addTestCaseToSuite(
   );
 }
 
-async function addTestCaseToRootSuite(
+export async function addTestCaseToRootSuite(
   client: AzureClient,
   config: SyncConfig,
   testCaseId: number
