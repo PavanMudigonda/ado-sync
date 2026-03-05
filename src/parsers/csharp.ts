@@ -34,6 +34,8 @@ import { extractLinkRefs, extractPathTags } from './shared';
 
 // ─── Framework detection ──────────────────────────────────────────────────────
 
+type CsTestFramework = 'mstest' | 'nunit';
+
 /**
  * Check whether a (trimmed) line is a [TestMethod] (MSTest) or [Test] / [Test(...)] (NUnit)
  * attribute marker. Returns the detected framework, or null if neither.
