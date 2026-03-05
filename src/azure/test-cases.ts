@@ -17,11 +17,12 @@
  *   Microsoft.VSTS.TCM.LocalDataSource  (NewDataSet XML)
  */
 
+import parseTagExpression from '@cucumber/tag-expressions';
 import * as crypto from 'crypto';
 import { XMLBuilder, XMLParser } from 'fast-xml-parser';
 import * as path from 'path';
 
-import { AzureStep, AzureTestCase, LinkConfig, ParsedTest, SyncConfig } from '../types';
+import { AzureStep, AzureTestCase, LinkConfig, ParsedTest, SuiteCondition, SyncConfig } from '../types';
 import { AzureClient } from './client';
 
 // ─── XML helpers ─────────────────────────────────────────────────────────────
@@ -636,6 +637,46 @@ async function addTestCaseToRootSuite(
     config.testPlan.id,
     rootSuiteId
   );
+}
+
+/**
+ * Add a test case to every suite whose condition matches the given test.
+ * Suites are created under the plan root if they don't already exist.
+ * Uses conditionSuiteCache to avoid redundant API calls across TCs.
+ * Adding a TC that is already in a suite is a no-op on the Azure side.
+ */
+export async function addTestCaseToConditionSuites(
+  client: AzureClient,
+  config: SyncConfig,
+  testCaseId: number,
+  test: ParsedTest,
+  conditionSuiteCache: Map<string, number>
+): Promise<void> {
+  const conditions: SuiteCondition[] = config.sync?.suiteConditions ?? [];
+  if (!conditions.length) return;
+
+  const tagsWithAt = test.tags.map((t) => (t.startsWith('@') ? t : `@${t}`));
+
+  for (const condition of conditions) {
+    // Tag filter — skip if expression doesn't match
+    if (condition.tags) {
+      const node = parseTagExpression(condition.tags);
+      if (!node.evaluate(tagsWithAt)) continue;
+    }
+
+    // Resolve or create the named suite (cached per suite name)
+    const cacheKey = `condition:${config.testPlan.id}:${condition.suite}`;
+    let suiteId: number;
+    if (conditionSuiteCache.has(cacheKey)) {
+      suiteId = conditionSuiteCache.get(cacheKey)!;
+    } else {
+      const rootSuiteId = await resolveRootSuiteId(client, config);
+      suiteId = await getOrCreateChildSuite(client, config, rootSuiteId, condition.suite);
+      conditionSuiteCache.set(cacheKey, suiteId);
+    }
+
+    await addTestCaseToSuite(client, config, testCaseId, suiteId);
+  }
 }
 
 export async function getTestCasesInSuite(
