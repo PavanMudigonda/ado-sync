@@ -201,7 +201,16 @@ async function pushSingle(
           continue;
         }
 
-        const localStepsText = test.steps.map((s) => s.keyword + ' ' + s.text).join('\n');
+        // For Scenario Outlines, local steps use <param> but Azure stores @param@.
+        // Normalise local to @param@ before comparing so outlines don't report
+        // stepsChanged on every push after the first successful sync.
+        const isOutline = !!test.outlineParameters?.headers.length;
+        const localStepsText = test.steps
+          .map((s) => {
+            const raw = `${s.keyword} ${s.text}`;
+            return isOutline ? raw.replace(/<([^>]+)>/g, '@$1@') : raw;
+          })
+          .join('\n');
         const remoteStepsText = remote.steps.map((s) => s.action).join('\n');
         const titleChanged = remote.title !== test.title;
         const stepsChanged = localStepsText !== remoteStepsText;
