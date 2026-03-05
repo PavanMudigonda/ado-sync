@@ -8,6 +8,7 @@ import { glob } from 'glob';
 
 import { AzureClient } from '../azure/client';
 import {
+  addTestCaseToConditionSuites,
   createTestCase,
   getOrCreateSuiteForFile,
   getTestCase,
@@ -162,6 +163,7 @@ async function pushSingle(
   const disableLocal = config.sync?.disableLocalChanges ?? false;
   const byFolder = config.testPlan.suiteMapping === 'byFolder';
   const suiteCache = new Map<string, number>();
+  const conditionSuiteCache = new Map<string, number>();
   const results: SyncResult[] = [];
   const conflicts: SyncResult[] = [];
   const createdIds = new Set<number>();
@@ -194,6 +196,7 @@ async function pushSingle(
             if (!disableLocal) {
               pendingWritebacks.push({ test, newId });
             }
+            await addTestCaseToConditionSuites(client, config, newId, test, conditionSuiteCache);
             const created = await getTestCase(client, newId, titleField);
             if (created) updateCacheEntry(cache, test, created);
           }
@@ -255,6 +258,7 @@ async function pushSingle(
 
         if (!opts.dryRun) {
           await updateTestCase(client, test.azureId, test, config);
+          await addTestCaseToConditionSuites(client, config, test.azureId, test, conditionSuiteCache);
           updateCacheEntry(cache, test, remote);
         }
         reportProgress({ action: 'updated', filePath: test.filePath, title: test.title, azureId: test.azureId });
@@ -273,6 +277,7 @@ async function pushSingle(
           if (!disableLocal) {
             pendingWritebacks.push({ test, newId });
           }
+          await addTestCaseToConditionSuites(client, config, newId, test, conditionSuiteCache);
           // Fetch back to get changedDate for cache
           const created = await getTestCase(client, newId, titleField);
           if (created) updateCacheEntry(cache, test, created);

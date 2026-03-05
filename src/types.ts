@@ -15,6 +15,16 @@ export interface LinkConfig {
   workItemType?: string;
 }
 
+export interface SuiteCondition {
+  /** Name of the static suite to add matching TCs to (created if absent). */
+  suite: string;
+  /**
+   * Tag expression filter using Gherkin tag syntax (e.g. '@smoke and not @wip').
+   * When omitted, all test cases match this condition.
+   */
+  tags?: string;
+}
+
 export interface TestPlanEntry {
   id: number;
   suiteId?: number;
@@ -93,6 +103,18 @@ export interface SyncConfig {
      * (e.g. @story:123) will create/maintain ADO work item relations.
      */
     links?: LinkConfig[];
+    /**
+     * Condition-based suite assignment. Each entry specifies a static suite name
+     * and an optional tag filter. Matching test cases are added to that suite after
+     * being created or updated. Suites are created automatically if they don't exist.
+     *
+     * Example:
+     *   suiteConditions:
+     *     - suite: "Smoke Tests"
+     *       tags: "@smoke"
+     *     - suite: "All Tests"
+     */
+    suiteConditions?: SuiteCondition[];
   };
 }
 
