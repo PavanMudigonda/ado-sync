@@ -84,7 +84,10 @@ program
       if (opts.configOverride?.length) console.log(chalk.dim(`Overrides: ${opts.configOverride.join(', ')}`));
       console.log('');
 
-      const results = await push(config, configDir, { dryRun: opts.dryRun, tags: opts.tags });
+      const isTTY = process.stdout.isTTY ?? false;
+      const onProgress = createProgressCallback(isTTY);
+      const results = await push(config, configDir, { dryRun: opts.dryRun, tags: opts.tags, onProgress });
+      if (isTTY) clearProgressLine();
       printResults(results);
     } catch (err: any) {
       console.error(chalk.red(err.message));
@@ -114,7 +117,10 @@ program
       if (opts.tags) console.log(chalk.dim(`Tags:    ${opts.tags}`));
       console.log('');
 
-      const results = await pull(config, configDir, { dryRun: opts.dryRun, tags: opts.tags });
+      const isTTY = process.stdout.isTTY ?? false;
+      const onProgress = createProgressCallback(isTTY);
+      const results = await pull(config, configDir, { dryRun: opts.dryRun, tags: opts.tags, onProgress });
+      if (isTTY) clearProgressLine();
       printResults(results);
     } catch (err: any) {
       console.error(chalk.red(err.message));
@@ -142,13 +148,60 @@ program
       if (opts.tags) console.log(chalk.dim(`Tags:   ${opts.tags}`));
       console.log('');
 
-      const results = await status(config, configDir, { tags: opts.tags });
+      const isTTY = process.stdout.isTTY ?? false;
+      const onProgress = createProgressCallback(isTTY);
+      const results = await status(config, configDir, { tags: opts.tags, onProgress });
+      if (isTTY) clearProgressLine();
       printResults(results);
     } catch (err: any) {
       console.error(chalk.red(err.message));
       process.exit(1);
     }
   });
+
+// ─── Progress bar ─────────────────────────────────────────────────────────────
+
+const ACTION_SYMBOL: Record<string, string> = {
+  created:  chalk.green('+'),
+  updated:  chalk.blue('~'),
+  pulled:   chalk.cyan('↓'),
+  skipped:  chalk.dim('='),
+  conflict: chalk.yellow('!'),
+  removed:  chalk.magenta('−'),
+  error:    chalk.red('✗'),
+};
+
+const PROGRESS_WIDTH = 20;
+
+/**
+ * Returns an onProgress callback if stdout is a TTY, otherwise undefined.
+ * The callback overwrites the current line with a live progress bar.
+ * Call clearProgressLine() after the operation finishes.
+ */
+function createProgressCallback(
+  isTTY: boolean
+): ((done: number, total: number, result: SyncResult) => void) | undefined {
+  if (!isTTY) return undefined;
+
+  return (done: number, total: number, result: SyncResult) => {
+    const filled = total > 0 ? Math.round((done / total) * PROGRESS_WIDTH) : 0;
+    const bar = '█'.repeat(filled) + '░'.repeat(PROGRESS_WIDTH - filled);
+    const symbol = ACTION_SYMBOL[result.action] ?? ' ';
+    const idStr = result.azureId ? chalk.dim(` [#${result.azureId}]`) : '';
+    const maxTitle = 38;
+    const title = result.title.length > maxTitle
+      ? result.title.slice(0, maxTitle - 1) + '…'
+      : result.title;
+    const line = `  [${bar}] ${done}/${total}  ${symbol} ${title}${idStr}`;
+    // \r returns to start of line; pad to overwrite any previous longer line
+    process.stdout.write(`\r${line.padEnd(process.stdout.columns ?? 80)}`);
+  };
+}
+
+/** Erase the progress bar line (call once before printing results). */
+function clearProgressLine(): void {
+  process.stdout.write(`\r${' '.repeat(process.stdout.columns ?? 80)}\r`);
+}
 
 // ─── Output helpers ───────────────────────────────────────────────────────────
 
