@@ -24,9 +24,8 @@
 
 import { XMLParser } from 'fast-xml-parser';
 import * as fs from 'fs';
-import * as path from 'path';
-
 import { glob } from 'glob';
+import * as path from 'path';
 
 import { AzureClient } from '../azure/client';
 import { SyncConfig } from '../types';
