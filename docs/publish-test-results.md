@@ -1,6 +1,6 @@
 # publish-test-results
 
-Parses test result files (TRX, NUnit XML, JUnit, Cucumber JSON) and publishes them to an Azure DevOps Test Run, linking results back to Test Cases either directly by TC ID (when available in the result file) or by `AutomatedTestName` matching.
+Parses test result files (TRX, NUnit XML, JUnit, Cucumber JSON, Playwright JSON) and publishes them to an Azure DevOps Test Run, linking results back to Test Cases either directly by TC ID (when available in the result file) or by `AutomatedTestName` matching.
 
 ---
 
@@ -44,13 +44,21 @@ ado-sync publish-test-results \
 
 | Format | Extension | Auto-detected | TC ID in file? | Attachments extracted |
 |--------|-----------|---------------|----------------|----------------------|
-| TRX (MSTest / VSTest) | `.trx` | Yes (`<TestRun>` root) | Yes — via `[TestProperty("tc","ID")]` | `<Output><StdOut>` + `<ResultFiles>` |
+| TRX (MSTest / SpecFlow / VSTest) | `.trx` | Yes (`<TestRun>` root) | Yes — via `[TestProperty("tc","ID")]` | `<Output><StdOut>` + `<Output><ResultFiles>` |
 | NUnit XML (native) | `.xml` | Yes (`<test-run>` root) | Yes — via `[Property("tc","ID")]` | `<output>` + `<attachments>` |
 | JUnit XML | `.xml` | Yes (`<testsuites>` / `<testsuite>` root) | Optional — via `<property name="tc" value="ID"/>` | `<system-out>`, `<system-err>`, `[[ATTACHMENT\|path]]` (Playwright) |
 | Cucumber JSON | `.json` | Yes (JSON array, Cucumber format) | Yes — via `@tc:ID` tag on scenario | `step.embeddings[]` (base64 screenshots/video) |
 | Playwright JSON | `.json` | Yes (JSON object with `suites` key) | Via `@tc:ID` in test title | `test.results[].attachments[]` (screenshots, videos, traces) |
 
 > **NUnit via TRX**: when NUnit tests are run through the VSTest adapter (`--logger trx`), `[Property]` values are **not** included in the TRX output. Use `--logger "nunit3;LogFileName=results.xml"` to get the native NUnit XML format, which does include property values.
+
+> **TRX `<ResultFiles>` nesting**: In TRX format, `<ResultFiles>` is a child of `<Output>`, not a direct child of `<UnitTestResult>`. ado-sync reads from `UnitTestResult > Output > ResultFiles > ResultFile` — paths are resolved relative to the result file's directory.
+
+> **Attachment paths**: All file paths embedded in result files (`<ResultFile path="...">` in TRX, `<filePath>` in NUnit XML, `[[ATTACHMENT|path]]` in JUnit, `attachments[].path` in Playwright JSON) are resolved **relative to the result file's directory**, not the working directory. Ensure screenshots and other artifacts stay in the same folder hierarchy as your test runner produces.
+
+> **Automated vs planned runs**: ado-sync creates **standalone automated runs** without a test plan association. Do not add `plan.id` to the run model — doing so makes Azure DevOps treat the run as "planned", requiring `testPointId` and `testCaseRevision` for every result (which ado-sync doesn't provide). TC linking is done via `testCase.id` on individual results, which works for automated runs without a plan association.
+
+> **Valid attachment types**: Azure DevOps only accepts `GeneralAttachment` and `ConsoleLog` as `attachmentType` values. ado-sync maps screenshots, images, and binary files to `GeneralAttachment`; plain text and log files to `ConsoleLog`. Other type names (e.g. `Screenshot`, `Log`, `VideoLog`) will cause a 400 error.
 
 ### How TC linking works
 
@@ -85,6 +93,25 @@ ado-sync publish-test-results --testResult results/results.xml
 dotnet test --logger "trx;LogFileName=results.trx"
 ado-sync publish-test-results --testResult results/results.trx
 ```
+
+---
+
+### C# SpecFlow
+
+SpecFlow generates TRX output via the VSTest adapter. ado-sync reads `@tc:ID` tags from the Gherkin `@tc:ID` tag embedded as `[TestProperty("tc","ID")]` in the TRX by SpecFlow's runner.
+
+```bash
+# 1. Push feature files to create TCs — @tc:ID is written back into .feature files
+ado-sync push
+
+# 2. Run SpecFlow tests (generates TRX)
+dotnet test --logger "trx;LogFileName=results.trx"
+
+# 3. Publish results
+ado-sync publish-test-results --testResult results/results.trx
+```
+
+SpecFlow uses `local.type: gherkin` (same as Cucumber). TC IDs are `@tc:ID` Gherkin tags, which SpecFlow embeds into the TRX as `TestProperty` values automatically.
 
 ---
 
@@ -276,18 +303,19 @@ ado-sync publish-test-results \
 
 ---
 
-| Framework | Result format | TC ID in file | Attachments uploaded |
-|-----------|---------------|---------------|----------------------|
-| C# MSTest | TRX | ✅ `[TestProperty("tc","ID")]` | `<Output><StdOut>` + `TestContext.AddResultFile()` files |
-| C# NUnit | NUnit XML | ✅ `[Property("tc","ID")]` | `<output>` text + `TestContext.AddAttachment()` files |
-| Java JUnit 4/5 | JUnit XML | ⚠️ optional | `<system-out>`, `<system-err>` |
-| Java TestNG | JUnit XML | ⚠️ optional | `<system-out>`, `<system-err>` |
-| Python pytest | JUnit XML | ⚠️ optional (conftest.py) | `<system-out>`, `<system-err>` |
-| Jest | JUnit XML | ❌ | `<system-out>`, `<system-err>` |
-| WebdriverIO | JUnit XML | ❌ | `<system-out>`, `<system-err>` |
-| Cucumber JS | Cucumber JSON | ✅ `@tc:ID` tag | `step.embeddings[]` (Selenium screenshots/video) |
-| Playwright | Playwright JSON | Via `@tc:ID` in title | Screenshots, videos, traces from `attachments[]` |
-| Playwright | JUnit XML | Via `@tc:ID` in title | `[[ATTACHMENT\|path]]` referenced files |
+| Framework | Result format | TC ID in file | Attachments uploaded | Live-tested |
+|-----------|---------------|---------------|----------------------|-------------|
+| C# MSTest | TRX | ✅ `[TestProperty("tc","ID")]` | `<Output><StdOut>` + `<Output><ResultFiles>` files | ✅ |
+| C# NUnit | NUnit XML | ✅ `[Property("tc","ID")]` | `<output>` text + `<attachments><filePath>` files | ✅ |
+| C# SpecFlow | TRX | ✅ `@tc:ID` → `[TestProperty]` | `<Output><StdOut>` + `<Output><ResultFiles>` files | ✅ |
+| Java JUnit 4/5 | JUnit XML | ⚠️ optional `<property name="tc">` | `<system-out>`, `<system-err>` | ✅ |
+| Java TestNG | JUnit XML | ⚠️ optional `<property name="tc">` | `<system-out>`, `<system-err>` | ✅ |
+| Python pytest | JUnit XML | ⚠️ optional (conftest.py hook) | `<system-out>`, `<system-err>` | ✅ |
+| Jest | JUnit XML | ⚠️ optional `<property name="tc">` | `<system-out>`, `<system-err>` | ✅ |
+| WebdriverIO / Jasmine | JUnit XML | ⚠️ optional `<property name="tc">` | `<system-out>`, `<system-err>` | ✅ |
+| Cucumber JS | Cucumber JSON | ✅ `@tc:ID` tag | `step.embeddings[]` (base64 screenshots/video) | ✅ |
+| Playwright | Playwright JSON | Via `@tc:ID` in test title | Files from `attachments[].path` (screenshots, videos, traces) | ✅ |
+| Playwright | JUnit XML | Via `@tc:ID` in test title | `[[ATTACHMENT\|path]]` referenced files | ✅ |
 
 ---
 
@@ -299,11 +327,15 @@ ado-sync uploads screenshots, videos, and logs from test results to the correspo
 
 | Format | Extracted automatically |
 |--------|------------------------|
-| TRX | `<Output><StdOut>` → console log; `<ResultFiles><ResultFile>` → files on disk |
+| TRX | `<Output><StdOut>` → console log; `<Output><ResultFiles><ResultFile path="...">` → files on disk |
 | NUnit XML | `<output>` → console log; `<attachments><attachment><filePath>` → files on disk |
 | JUnit XML | `<system-out>` → log; `<system-err>` → log; `[[ATTACHMENT\|path]]` → Playwright files |
 | Cucumber JSON | `step.embeddings[]` → base64-encoded screenshots/video |
-| Playwright JSON | `results[].attachments[]` → files on disk (screenshots, videos, traces) |
+| Playwright JSON | `results[].attachments[].path` → files on disk (screenshots, videos, traces) |
+
+> **Note**: All file paths are resolved relative to the result file's directory, not the process working directory. This matches how test runners (Playwright, MSTest, NUnit) write relative paths in their output.
+
+> **Attachment types**: Azure DevOps accepts only `GeneralAttachment` (images, videos, binary files) and `ConsoleLog` (text, logs) as attachment type values. ado-sync maps all file types to one of these two automatically.
 
 ### `--attachmentsFolder` — folder-based attachment upload
 
