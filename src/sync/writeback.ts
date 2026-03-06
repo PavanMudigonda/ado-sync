@@ -16,6 +16,7 @@ import * as fs from 'fs';
 
 import { writebackCsv } from '../parsers/csv';
 import { writebackExcel } from '../parsers/excel';
+import { detectJavaFramework } from '../parsers/java';
 import { ParsedTest } from '../types';
 
 // ─── Gherkin writeback ────────────────────────────────────────────────────────
@@ -160,12 +161,218 @@ export function writebackCsharp(test: ParsedTest, id: number, tagPrefix: string)
   fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
 }
 
+// ─── JavaScript writeback ─────────────────────────────────────────────────────
+
+/**
+ * Write (or update) the TC ID comment in a .js / .ts file for a given
+ * it() / test() call (Jest, Jasmine, WebdriverIO).
+ *
+ * Format:  // @tc:12345  inserted immediately above the it() / test() line.
+ * No extra dependency required.
+ *
+ * Strategy:
+ *  1. Locate the it()/test() line at test.line (1-based).
+ *  2. Scan backward (up to 25 lines) for an existing // @{tagPrefix}:N comment.
+ *  3. If found, replace in place.
+ *  4. If not found, insert immediately above the it()/test() line.
+ */
+export function writebackJavaScript(test: ParsedTest, id: number, tagPrefix: string): void {
+  const raw = fs.readFileSync(test.filePath, 'utf8');
+  const lines = raw.split('\n');
+
+  const itLineIdx = test.line - 1; // 0-based
+
+  const indentMatch = (lines[itLineIdx] ?? '').match(/^(\s*)/);
+  const indent = indentMatch ? indentMatch[1] : '  ';
+
+  const comment    = `// @${tagPrefix}:${id}`;
+  const existingRe = new RegExp(`//\\s*@${tagPrefix}:\\d+`);
+
+  let replaced = false;
+  for (let i = itLineIdx - 1; i >= 0 && i >= itLineIdx - 25; i--) {
+    const trimmed = lines[i].trim();
+
+    if (existingRe.test(trimmed)) {
+      lines[i] = lines[i].replace(existingRe, comment.trim());
+      replaced = true;
+      break;
+    }
+
+    // Stop at blank lines — the ID comment must be adjacent to the test
+    if (trimmed === '') break;
+  }
+
+  if (!replaced) {
+    lines.splice(itLineIdx, 0, `${indent}${comment}`);
+  }
+
+  fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+}
+
+// ─── Python writeback ─────────────────────────────────────────────────────────
+
+/**
+ * Write (or update) the TC ID in a .py file for a given def test_* function.
+ *
+ * Format:  @pytest.mark.{tagPrefix}(12345)  inserted immediately above the
+ * def line, below any other existing marks.
+ *
+ * No extra Python dependency — pytest is already on the test path.
+ *
+ * Strategy:
+ *  1. Locate the def line at test.line (1-based).
+ *  2. Scan backward (up to 30 lines) for an existing @pytest.mark.{tagPrefix}(N).
+ *     Also recognises the comment fallback  # @tc:N  and replaces it with the mark.
+ *  3. If found, update in place.
+ *  4. If not found, insert @pytest.mark.{tagPrefix}(N) immediately above the def line.
+ */
+export function writebackPython(test: ParsedTest, id: number, tagPrefix: string): void {
+  const raw = fs.readFileSync(test.filePath, 'utf8');
+  const lines = raw.split('\n');
+
+  const defLineIdx = test.line - 1; // 0-based
+
+  const indentMatch = (lines[defLineIdx] ?? '').match(/^(\s*)/);
+  const indent = indentMatch ? indentMatch[1] : '';
+
+  const newMark     = `${indent}@pytest.mark.${tagPrefix}(${id})`;
+  const existMarkRe = new RegExp(`^\\s*@pytest\\.mark\\.${tagPrefix}\\(\\d+\\)\\s*$`);
+  const commentIdRe = new RegExp(`#\\s*@${tagPrefix}:\\d+`);
+
+  // Scan backward for an existing ID mark or comment
+  let replaced = false;
+  for (let i = defLineIdx - 1; i >= 0 && i >= defLineIdx - 30; i--) {
+    const trimmed = lines[i].trim();
+
+    if (existMarkRe.test(lines[i])) {
+      lines[i] = newMark;
+      replaced = true;
+      break;
+    }
+
+    // Replace a legacy comment-style ID with the proper mark
+    if (commentIdRe.test(trimmed)) {
+      lines[i] = newMark;
+      replaced = true;
+      break;
+    }
+
+    // Stop at blank lines or non-decorator lines
+    if (trimmed === '' || (!trimmed.startsWith('@') && !trimmed.startsWith('#'))) break;
+  }
+
+  if (!replaced) {
+    // Insert immediately above the def line
+    lines.splice(defLineIdx, 0, newMark);
+  }
+
+  fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+}
+
+// ─── Java writeback ───────────────────────────────────────────────────────────
+
+/**
+ * Write (or update) the TC ID in a .java file for a given @Test method.
+ *
+ * Strategy by framework (detected from import statements):
+ *
+ *   JUnit 5  →  @Tag("tc:12345")  inserted/updated in the annotation block above @Test.
+ *               @Tag is already in junit-jupiter-api — no extra dependency.
+ *               Scans both above and below @Test for an existing @Tag("tc:N") to update.
+ *
+ *   JUnit 4  →  // @tc:12345  comment inserted/updated immediately above @Test.
+ *   TestNG   →  // @tc:12345  comment inserted/updated immediately above @Test.
+ *               Note: @Test(tc="...") is not valid TestNG syntax.
+ *   unknown  →  comment fallback (same as JUnit 4/TestNG).
+ */
+export function writebackJava(test: ParsedTest, id: number, tagPrefix: string): void {
+  const raw = fs.readFileSync(test.filePath, 'utf8');
+  const lines = raw.split('\n');
+
+  const testAnnotationLineIdx = test.line - 1; // 0-based
+
+  const indentMatch = (lines[testAnnotationLineIdx] ?? '').match(/^(\s*)/);
+  const indent = indentMatch ? indentMatch[1] : '    ';
+
+  const framework = detectJavaFramework(lines);
+
+  if (framework === 'junit5') {
+    // ── JUnit 5: use @Tag("tc:12345") ──────────────────────────────────────
+    const newTag = `@Tag("${tagPrefix}:${id}")`;
+    const existingTagRe = new RegExp(`^@Tag\\(\\s*"${tagPrefix}:\\d+"\\s*\\)$`);
+
+    // Scan ABOVE @Test first (up to 25 lines)
+    let replaced = false;
+    for (let i = testAnnotationLineIdx - 1; i >= 0 && i >= testAnnotationLineIdx - 25; i--) {
+      const trimmed = lines[i].trim();
+      if (existingTagRe.test(trimmed)) {
+        lines[i] = lines[i].replace(existingTagRe, newTag);
+        replaced = true;
+        break;
+      }
+      if (trimmed === '}' || /^\s*(?:(?:public|protected|private|abstract|final)\s+)*class\s+/.test(trimmed)) break;
+    }
+
+    // Scan BELOW @Test (annotation block, up to 25 lines) if not found above
+    if (!replaced) {
+      for (let i = testAnnotationLineIdx + 1; i < lines.length && i < testAnnotationLineIdx + 25; i++) {
+        const trimmed = lines[i].trim();
+        if (existingTagRe.test(trimmed)) {
+          lines[i] = lines[i].replace(existingTagRe, newTag);
+          replaced = true;
+          break;
+        }
+        // Stop at method signature or body
+        if (!trimmed.startsWith('@') && trimmed.includes('(')) break;
+        if (trimmed === '{') break;
+      }
+    }
+
+    if (!replaced) {
+      // Insert immediately above the @Test line
+      lines.splice(testAnnotationLineIdx, 0, `${indent}${newTag}`);
+    }
+
+    // Also remove any stale comment-style ID that may have been written previously
+    const staleCommentRe = new RegExp(`//\\s*@${tagPrefix}:\\d+`);
+    for (let i = testAnnotationLineIdx; i >= 0 && i >= testAnnotationLineIdx - 25; i--) {
+      if (staleCommentRe.test(lines[i])) {
+        lines.splice(i, 1);
+        break;
+      }
+      const t = lines[i]?.trim() ?? '';
+      if (t === '}' || /^\s*(?:(?:public|protected|private|abstract|final)\s+)*class\s+/.test(t)) break;
+    }
+  } else {
+    // ── JUnit 4 / TestNG / unknown: use // @tc:12345 comment ───────────────
+    const comment = `// @${tagPrefix}:${id}`;
+    const existingCommentRe = new RegExp(`//\\s*@${tagPrefix}:\\d+`);
+
+    let replaced = false;
+    for (let i = testAnnotationLineIdx - 1; i >= 0 && i >= testAnnotationLineIdx - 25; i--) {
+      const trimmed = lines[i].trim();
+      if (existingCommentRe.test(trimmed)) {
+        lines[i] = lines[i].replace(existingCommentRe, comment.trim());
+        replaced = true;
+        break;
+      }
+      if (trimmed === '}' || /^\s*(?:(?:public|protected|private|abstract|final)\s+)*class\s+/.test(trimmed)) break;
+    }
+
+    if (!replaced) {
+      lines.splice(testAnnotationLineIdx, 0, `${indent}${comment}`);
+    }
+  }
+
+  fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+}
+
 // ─── Dispatcher ──────────────────────────────────────────────────────────────
 
 export async function writebackId(
   test: ParsedTest,
   id: number,
-  localType: 'gherkin' | 'markdown' | 'csv' | 'excel' | 'csharp',
+  localType: 'gherkin' | 'markdown' | 'csv' | 'excel' | 'csharp' | 'java' | 'python' | 'javascript',
   tagPrefix: string
 ): Promise<void> {
   switch (localType) {
@@ -183,6 +390,15 @@ export async function writebackId(
       break;
     case 'csharp':
       writebackCsharp(test, id, tagPrefix);
+      break;
+    case 'java':
+      writebackJava(test, id, tagPrefix);
+      break;
+    case 'python':
+      writebackPython(test, id, tagPrefix);
+      break;
+    case 'javascript':
+      writebackJavaScript(test, id, tagPrefix);
       break;
   }
 }

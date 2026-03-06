@@ -182,6 +182,275 @@ With `useExpectedResult: true`, `Check:` lines go into the Expected Result colum
 
 ---
 
+## Java JUnit / TestNG `.java`
+
+Set `local.type: "java"`. Supports **JUnit 4**, **JUnit 5**, and **TestNG** (including Selenium-based tests). Each `@Test`-annotated method becomes one Test Case.
+
+### Framework attribute mapping
+
+| Concern | JUnit 4 | JUnit 5 | TestNG |
+|---------|---------|---------|--------|
+| Test marker | `@Test` (`org.junit.Test`) | `@Test` (`org.junit.jupiter.api.Test`) | `@Test` (`org.testng.annotations.Test`) |
+| Tag / category | `@Category(Smoke.class)` | `@Tag("smoke")` | `groups = {"smoke"}` in `@Test` |
+| TC ID writeback | `// @tc:ID` above `@Test` | `@Tag("tc:ID")` above `@Test` | `// @tc:ID` above `@Test` |
+
+The framework is auto-detected per file from import statements — no config required.
+
+### Source mapping (all frameworks)
+
+| Java source | Azure TC field |
+|-------------|---------------|
+| Javadoc `/** ... */` first non-numbered line | TC **Title** |
+| Numbered lines `N. text` in Javadoc | TC **Steps** (action) |
+| Numbered lines `N. Check: text` in Javadoc | TC **Steps** (expected result, when `useExpectedResult: true`) |
+| `@Category`, `@Tag`, `groups` in `@Test` | TC **Tags** |
+| `// @tc:ID` or `@Tag("tc:ID")` | TC ID (written back after first push) |
+| `com.example.MyClass.myMethod` | `AutomatedTestName` (for JUnit XML result linking) |
+
+### JUnit 5 example
+
+```java
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+
+class CheckoutTests {
+
+    /**
+     * Add item and complete checkout
+     * 1. Sign in as standard_user
+     * 2. Add "Sauce Labs Backpack" to cart
+     * 3. Proceed through checkout
+     * 4. Check: Order confirmation page is shown
+     */
+    @Tag("tc:1041")        // written back by ado-sync after first push
+    @Tag("smoke")
+    @Test
+    void addItemAndCompleteCheckout() {
+        // ...
+    }
+}
+```
+
+### JUnit 4 example
+
+```java
+import org.junit.Test;
+import org.junit.experimental.categories.Category;
+
+public class LoginTests {
+
+    /**
+     * Login with valid credentials
+     * 1. Navigate to the login page
+     * 2. Enter username and password
+     * 3. Check: Dashboard page is shown
+     */
+    // @tc:1042               // written back by ado-sync after first push
+    @Test
+    @Category(Smoke.class)
+    public void loginWithValidCredentials() {
+        // ...
+    }
+}
+```
+
+### TestNG example
+
+```java
+import org.testng.annotations.Test;
+
+public class SearchTests {
+
+    /**
+     * Search returns relevant results
+     * 1. Open the search page
+     * 2. Enter "junit 5" in the search box
+     * 3. Check: Results list contains at least one entry
+     */
+    // @tc:1043               // written back by ado-sync after first push
+    @Test(groups = {"regression", "search"})
+    public void searchReturnsRelevantResults() {
+        // ...
+    }
+}
+```
+
+### Recommended config
+
+```json
+{
+  "local": {
+    "type": "java",
+    "include": ["**/src/test/**/*.java"],
+    "exclude": ["**/*BaseTest.java", "**/*Helper.java", "**/*Utils.java"]
+  },
+  "sync": {
+    "markAutomated": true
+  }
+}
+```
+
+### Notes
+
+- **`pull` is not supported** for Java files. Only `push` and `publish-test-results` apply.
+- **Abstract base test classes** — exclude them from `local.include` to avoid treating base methods as test cases.
+- **JUnit 5 `@Tag`** — the `org.junit.jupiter.api.Tag` import must be present or the file must already use Jupiter annotations; ado-sync adds the tag annotation but not the import if it's missing.
+- **TestNG `groups`** — `groups = {"smoke", "regression"}` inside `@Test(...)` are extracted as TC tags.
+- **`@ParameterizedTest` / `@DataProvider`** — parameterised data rows are not expanded into separate TCs; only the method definition is treated as the test case.
+
+---
+
+## Python pytest `.py`
+
+Set `local.type: "python"`. Each `def test_*` function — at module level or inside a class — becomes one Test Case. No extra dependencies required beyond `pytest` itself.
+
+### Source mapping
+
+| Python source | Azure TC field |
+|---------------|---------------|
+| Docstring first non-numbered line | TC **Title** |
+| Numbered lines `N. text` in docstring | TC **Steps** (action) |
+| Numbered lines `N. Check: text` in docstring | TC **Steps** (expected result, when `useExpectedResult: true`) |
+| `@pytest.mark.<tag>` decorators | TC **Tags** (built-in pytest marks excluded) |
+| `@pytest.mark.tc(ID)` | TC ID (written back after first push) |
+| `module.path.ClassName.test_method` | `AutomatedTestName` (for JUnit XML result linking) |
+
+### Example
+
+```python
+import pytest
+
+class TestCheckout:
+
+    @pytest.mark.tc(1041)      # written back by ado-sync after first push
+    @pytest.mark.smoke
+    def test_add_item_and_complete_checkout(self):
+        """
+        Add item and complete checkout
+        1. Sign in as standard_user
+        2. Add Sauce Labs Backpack to cart
+        3. Proceed through checkout
+        4. Check: Order confirmation page is shown
+        """
+        # ...
+
+    @pytest.mark.tc(1042)
+    @pytest.mark.regression
+    def test_checkout_with_invalid_card(self):
+        """
+        Checkout fails with invalid card
+        1. Add an item to the cart
+        2. Enter an invalid credit card number
+        3. Click Place Order
+        4. Check: Error message is displayed
+        """
+        # ...
+```
+
+### Recommended config
+
+```json
+{
+  "local": {
+    "type": "python",
+    "include": ["tests/**/*.py"],
+    "exclude": ["tests/conftest.py", "tests/**/fixtures.py"]
+  },
+  "sync": {
+    "markAutomated": true
+  }
+}
+```
+
+### Notes
+
+- **`pull` is not supported** for Python files. Only `push` and `publish-test-results` apply.
+- **Built-in pytest marks** (`parametrize`, `skip`, `skipif`, `xfail`, `usefixtures`, `filterwarnings`) are not pushed as TC tags.
+- **`@pytest.mark.parametrize`** — parameterised data rows are not expanded into separate TCs; only the function definition is treated as the test case.
+- **Class hierarchy** — only the immediately enclosing class is used for the `automatedTestName`. Nested classes are supported.
+
+---
+
+## JavaScript / TypeScript (Jest, Jasmine, WebdriverIO) `.js` / `.ts`
+
+Set `local.type: "javascript"`. Supports **Jest**, **Jasmine**, and **WebdriverIO** (which uses Jest or Jasmine as its runner). All three share the same `describe()`/`it()`/`test()` API, so a single parser handles all of them.
+
+> **Cucumber `.feature` files** are handled by `local.type: "gherkin"` — not this type.
+
+### Detected test functions
+
+| Function | Description |
+|----------|-------------|
+| `it(title, fn)` | Standard test |
+| `test(title, fn)` | Alias for `it` |
+| `it.only` / `test.only` | Focused test |
+| `it.skip` / `test.skip` | Skipped test (still synced) |
+| `xit` / `xtest` | Jasmine-style skip |
+| `it.concurrent` / `test.concurrent` | Concurrent test |
+
+### Source mapping
+
+| JavaScript/TS source | Azure TC field |
+|----------------------|---------------|
+| JSDoc `/** ... */` first non-numbered line | TC **Title** |
+| Numbered lines `N. text` in JSDoc | TC **Steps** (action) |
+| Numbered lines `N. Check: text` in JSDoc | TC **Steps** (expected result, when `useExpectedResult: true`) |
+| `// @tags: smoke, regression` above `it()` | TC **Tags** (comma-separated list) |
+| `// @smoke` above `it()` (single-word) | TC **Tag** |
+| `// @tc:ID` above `it()` | TC ID (written back after first push) |
+| `{basename} > {describe} > {it title}` | `AutomatedTestName` (Jest report format) |
+
+### Example
+
+```typescript
+describe('Checkout', () => {
+
+  /**
+   * Add item and complete checkout
+   * 1. Sign in as standard_user
+   * 2. Add Sauce Labs Backpack to cart
+   * 3. Proceed through checkout
+   * 4. Check: Order confirmation page is shown
+   */
+  // @tc:1041               // written back by ado-sync after first push
+  // @tags: smoke, regression
+  it('adds item and completes checkout', async () => {
+    // ...
+  });
+
+  // @tc:1042
+  // @smoke
+  it('shows error on invalid card', async () => {
+    // ...
+  });
+
+});
+```
+
+### Recommended config
+
+```json
+{
+  "local": {
+    "type": "javascript",
+    "include": ["src/**/*.spec.ts", "tests/**/*.test.js"],
+    "exclude": ["**/*.helper.ts", "**/*.fixture.ts"]
+  },
+  "sync": {
+    "markAutomated": true
+  }
+}
+```
+
+### Notes
+
+- **`pull` is not supported** for JavaScript/TypeScript files. Only `push` applies.
+- **Dynamic titles** — `it` / `test` calls with template literals or computed values are skipped. Use string literals for reliable syncing.
+- **`describe` nesting** — arbitrarily deep `describe()` nesting is supported. All enclosing describe titles are included in the `automatedTestName`.
+- **Path-based auto-tagging** — directory segments starting with `@` (e.g. `tests/@smoke/`) are automatically applied as tags on all tests inside.
+
+---
+
 ## CSV `.csv`
 
 Set `local.type: "csv"` to parse Azure DevOps / SpecSync tabular CSV exports.
@@ -220,6 +489,12 @@ After a first push, ado-sync writes the Azure TC ID back into the local file.
 |--------|----------|
 | Gherkin | `@tc:12345` tag on its own line above the `Scenario:` line |
 | Markdown | `@tc:12345` tag on the line immediately after the `### heading` |
+| C# MSTest | `[TestProperty("tc", "12345")]` attribute on the test method |
+| C# NUnit | `[Property("tc", "12345")]` attribute on the test method |
+| Java JUnit 5 | `@Tag("tc:12345")` annotation above `@Test` |
+| Java JUnit 4 / TestNG | `// @tc:12345` comment on the line above `@Test` |
+| Python pytest | `@pytest.mark.tc(12345)` decorator above `def test_*` |
+| JavaScript/TS | `// @tc:12345` comment on the line above `it()`/`test()` |
 | CSV | Numeric ID in column A of the matching title row |
 | Excel | Numeric ID in cell A of the matching title row |
 
