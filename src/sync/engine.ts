@@ -20,13 +20,13 @@ import {
   updateTestCase,
 } from '../azure/test-cases';
 import { parseCsharpFile } from '../parsers/csharp';
-import { parseJavaFile } from '../parsers/java';
-import { parseJavaScriptFile } from '../parsers/javascript';
-import { parsePythonFile } from '../parsers/python';
 import { parseCsvFile } from '../parsers/csv';
 import { parseExcelFile } from '../parsers/excel';
 import { parseGherkinFile } from '../parsers/gherkin';
+import { parseJavaFile } from '../parsers/java';
+import { parseJavaScriptFile } from '../parsers/javascript';
 import { parseMarkdownFile } from '../parsers/markdown';
+import { parsePythonFile } from '../parsers/python';
 import { AzureTestCase, ParsedStep, ParsedTest, SyncConfig, SyncResult, TestPlanEntry } from '../types';
 import { CacheEntry, hashSteps, hashString, loadCache, saveCache,SyncCache } from './cache';
 import { writebackId } from './writeback';
