@@ -164,8 +164,33 @@ export interface PublishTestResultsConfig {
   testResultSettings?: {
     comment?: string;
   };
-  /** Controls which attachments are published for passing tests. */
+  /**
+   * Controls which attachments are published for passing tests.
+   * 'none' (default): no attachments for passing tests.
+   * 'files': screenshots/videos only (no console logs) for passing tests.
+   * 'all': all attachments including logs for passing tests.
+   * Failing tests always get all attachments.
+   */
   publishAttachmentsForPassingTests?: 'none' | 'files' | 'all';
+  /**
+   * Scan a directory for screenshots/videos/logs to attach to test results.
+   * Files are matched to individual results by method name; unmatched files
+   * are attached at run level.
+   */
+  attachments?: {
+    /** Folder to scan (relative to config file or absolute). */
+    folder: string;
+    /**
+     * Glob patterns within the folder.
+     * Default: '**\/*.{png,jpg,jpeg,gif,webp,mp4,webm,avi,mov,log,txt,html,zip}'
+     */
+    include?: string | string[];
+    /**
+     * Match files to test results by method name in the filename.
+     * Default: true. Set false to attach all files at run level.
+     */
+    matchByTestName?: boolean;
+  };
 }
 
 // ─── Tool settings configuration ─────────────────────────────────────────────
