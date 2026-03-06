@@ -194,9 +194,9 @@ function extractMethodInfo(lines: string[], testLineIdx: number): MethodInfo {
   let methodName = '';
   let endLine = testLineIdx;
 
-  // TestNG groups on the @Test line itself
+  // TestNG groups on the @Test line itself — push into tagValues so they surface as TC tags
   const { groups } = parseTestAnnotationAttrs(lines[testLineIdx] ?? '');
-  // Groups are handled separately; don't put them in tagValues
+  tagValues.push(...groups);
 
   for (let i = testLineIdx + 1; i < lines.length && i < testLineIdx + 30; i++) {
     const trimmed = lines[i].trim();
