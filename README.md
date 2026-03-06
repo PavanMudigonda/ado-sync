@@ -217,12 +217,12 @@ ado-sync push
 ado-sync pull
 ```
 
-### C# MSTest / NUnit: create TCs, run tests, publish results
+### C# MSTest / NUnit / SpecFlow: create TCs, run tests, publish results
 
 ```bash
-# 1. Create TCs and write IDs back into .cs files
+# 1. Create TCs and write IDs back into .cs / .feature files
 ado-sync push --dry-run   # preview
-ado-sync push             # writes [TestProperty("tc","ID")] / [Property("tc","ID")]
+ado-sync push             # writes [TestProperty("tc","ID")] / [Property("tc","ID")] / @tc:ID
 
 # 2a. MSTest — TRX contains [TestProperty] values; TC IDs extracted automatically
 dotnet test --logger "trx;LogFileName=results.trx"
@@ -231,6 +231,10 @@ ado-sync publish-test-results --testResult results/results.trx
 # 2b. NUnit — use native XML logger so [Property("tc","ID")] values are included
 dotnet test --logger "nunit3;LogFileName=results.xml"
 ado-sync publish-test-results --testResult results/results.xml
+
+# 2c. SpecFlow — TRX format (SpecFlow writes @tc:ID into TestProperty automatically)
+dotnet test --logger "trx;LogFileName=results.trx"
+ado-sync publish-test-results --testResult results/results.trx
 ```
 
 Recommended `ado-sync.json` for C# MSTest:
@@ -249,6 +253,25 @@ Recommended `ado-sync.json` for C# MSTest:
   "sync": {
     "markAutomated": true,
     "format": { "useExpectedResult": true }
+  }
+}
+```
+
+Recommended `ado-sync.json` for C# SpecFlow:
+
+```json
+{
+  "orgUrl": "https://dev.azure.com/my-org",
+  "project": "MyProject",
+  "auth": { "type": "pat", "token": "$AZURE_DEVOPS_TOKEN" },
+  "testPlan": { "id": 1234 },
+  "local": {
+    "type": "gherkin",
+    "include": ["Features/**/*.feature"]
+  },
+  "sync": {
+    "tagPrefix": "tc",
+    "markAutomated": true
   }
 }
 ```
@@ -336,6 +359,40 @@ npx jest --reporters=default --reporters=jest-junit
 ado-sync publish-test-results --testResult results/junit.xml --testResultFormat junit
 ```
 
+### Playwright: create TCs and publish results with screenshots
+
+```bash
+# 1. Create TCs and write IDs back into .ts spec files
+ado-sync push --dry-run   # preview
+ado-sync push             # writes // @tc:ID above each test()
+
+# 2. Add @tc:ID tag to test title and run Playwright with JSON reporter
+#    playwright.config.ts: reporter: [['json', { outputFile: 'results/playwright.json' }]]
+npx playwright test
+
+# 3. Publish — TC IDs from @tc:ID in test title; screenshots/videos from attachments[]
+ado-sync publish-test-results --testResult results/playwright.json
+```
+
+Recommended `ado-sync.json` for Playwright:
+
+```json
+{
+  "orgUrl": "https://dev.azure.com/my-org",
+  "project": "MyProject",
+  "auth": { "type": "pat", "token": "$AZURE_DEVOPS_TOKEN" },
+  "testPlan": { "id": 1234 },
+  "local": {
+    "type": "javascript",
+    "include": ["tests/**/*.spec.ts"],
+    "exclude": ["**/*.helper.ts"]
+  },
+  "sync": {
+    "markAutomated": true
+  }
+}
+```
+
 Recommended `ado-sync.json` for Jest/Jasmine/WebdriverIO:
 
 ```json
@@ -413,13 +470,16 @@ The comparison uses title + steps + description. Touch any step to force an upda
 Delete `.ado-sync-state.json` to reset the cache. The next push re-populates it from Azure.
 
 **CSV/Excel IDs not written back**
-Ensure the file is not open in another application. Check that `sync.disableLocalChanges` is not `true`.
+Ensure the file is not open in another application and that `sync.disableLocalChanges` is not `true`. If a TC was deleted from Azure and re-created on push, the old ID in column A is now replaced with the new ID automatically.
 
 **Excel file not parsed / `No worksheet found`**
-ado-sync looks for `xl/worksheets/sheet.xml` or `xl/worksheets/sheet1.xml` inside the xlsx ZIP. Re-export from Azure DevOps to get a compatible file.
+ado-sync searches for the first worksheet by reading `xl/_rels/workbook.xml.rels` from the xlsx ZIP, falling back to common names (`sheet.xml`, `sheet1.xml`). Non-standard sheet names and multi-sheet workbooks are handled automatically. If parsing still fails, re-export from Azure DevOps.
 
-**Pull has no effect on CSV/Excel files**
-Pull is not supported for CSV and Excel — only push. These formats are managed by external tools.
+**Pull has no effect on CSV files**
+CSV pull is now supported — `ado-sync pull` updates the Title and step rows in CSV files to match the current Azure DevOps Test Case. Run `ado-sync pull --dry-run` first to preview changes.
+
+**Pull has no effect on Excel files**
+Excel (xlsx) pull is not yet supported — only push. Use CSV export instead if bidirectional sync is needed, or pull the changes manually and re-export.
 
 **C# categories show as constant names instead of values**
 ado-sync resolves `const string` declarations in the same file. Constants defined in a base class are not resolved — use string literals in `[TestCategory("...")]` for reliable tagging.
@@ -447,3 +507,15 @@ ado-sync detects `it()`, `test()`, `xit()`, `xtest()`, and `.only`/`.skip`/`.con
 
 **JavaScript ID not written back**
 ado-sync inserts `// @tc:ID` immediately above the `it()`/`test()` line. There must be no blank line between the comment and the test function call.
+
+**`publish-test-results` — "TestPointId, testCaseId must be specified for planned test results"**
+This error means the Test Run was created as a "planned" run (tied to a test plan), which requires test point IDs for each result. ado-sync creates standalone automated runs — do not pass `plan.id` in `runModel`. This is handled automatically; if you see this error, ensure you are on the latest version.
+
+**TRX screenshots / `<ResultFiles>` not attached**
+In TRX format, `<ResultFiles>` is a child of `<Output>`, not a direct child of `<UnitTestResult>`. Make sure `TestContext.AddResultFile("path/to/screenshot.png")` is called in your test code. ado-sync reads from the correct nested path automatically.
+
+**Attachment paths resolve incorrectly**
+Attachment paths embedded in result files (TRX `<ResultFiles>`, NUnit `<filePath>`, JUnit `[[ATTACHMENT|path]]`, Playwright `attachments[].path`) are resolved **relative to the result file's directory**, not the working directory. Keep result files and screenshots in the same output folder hierarchy as your test runner produces them.
+
+**"Invalid AttachmentType specified" from Azure DevOps API**
+Azure DevOps only accepts `GeneralAttachment` and `ConsoleLog` as attachment types. Screenshot and video files are uploaded as `GeneralAttachment` automatically — no special type is needed.
