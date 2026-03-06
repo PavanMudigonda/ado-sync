@@ -9,6 +9,8 @@
  *   1. Direct TC ID from result file:
  *      - TRX (MSTest):   [TestProperty("tc","12345")] → TestDefinitions/UnitTest/Properties/Property
  *      - NUnit XML:      [Property("tc","12345")]     → test-case/properties/property[@name="tc"]
+ *      - JUnit XML:      <property name="tc" value="12345"/> inside <testcase><properties>
+ *                        (pytest: add record_property hook in conftest.py; jest: custom reporter)
  *      - Cucumber JSON:  @tc:12345 tag on scenario
  *
  *   2. AutomatedTestName matching (fallback):
@@ -222,17 +224,35 @@ function parseNUnitXml(content: string, tagPrefix: string, treatInconclusiveAs?:
 }
 
 // ─── JUnit parser ─────────────────────────────────────────────────────────────
+//
+// Supports JUnit XML from:
+//   - Maven Surefire / Failsafe (Java JUnit 4/5, TestNG)
+//   - pytest --junitxml  (Python)
+//   - jest-junit         (Jest / Jasmine / WebdriverIO)
+//
+// TC ID extraction:
+//   - From <testcase><properties><property name="tc" value="N"/></properties></testcase>
+//     (pytest: add record_property in conftest.py; jest: custom reporter)
+//
+// AutomatedTestName mapping:
+//   - Uses testcase[@classname].testcase[@name] when classname is present.
+//     This matches the automatedTestName format used by the Java and Python parsers
+//     (e.g. "com.example.MyClass.myMethod" or "tests.module.TestClass.test_foo").
+//   - Falls back to suite[@name].testcase[@name] when classname is absent.
 
-function parseJUnit(content: string, treatInconclusiveAs?: string): ParsedResult[] {
-  const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
+function parseJUnit(content: string, tagPrefix: string, treatInconclusiveAs?: string): ParsedResult[] {
+  const parser = new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: '@_',
+    isArray: (name) => ['testsuite', 'testcase', 'property'].includes(name),
+  });
   const doc = parser.parse(content);
 
   const results: ParsedResult[] = [];
-  const suites = doc.testsuites?.testsuite ?? doc.testsuite ?? [];
-  const suiteList = Array.isArray(suites) ? suites : [suites];
+  const suites: any[] = doc.testsuites?.testsuite ?? (doc.testsuite ? [doc.testsuite] : []);
 
-  for (const suite of suiteList) {
-    let cases = suite.testcase ?? [];
+  for (const suite of suites) {
+    let cases: any[] = suite.testcase ?? [];
     if (!Array.isArray(cases)) cases = [cases];
 
     for (const tc of cases) {
@@ -242,23 +262,44 @@ function parseJUnit(content: string, treatInconclusiveAs?: string): ParsedResult
 
       if (tc.failure) {
         outcome = 'Failed';
-        const fail = typeof tc.failure === 'string' ? tc.failure : tc.failure['#text'] ?? '';
+        const fail = typeof tc.failure === 'string' ? tc.failure : (tc.failure['#text'] ?? '');
         errorMessage = tc.failure['@_message'] ?? fail;
-        stackTrace = typeof tc.failure === 'string' ? tc.failure : tc.failure['#text'];
+        stackTrace   = typeof tc.failure === 'string' ? tc.failure : tc.failure['#text'];
       } else if (tc.error) {
         outcome = 'Failed';
         errorMessage = tc.error['@_message'] ?? '';
-        stackTrace = typeof tc.error === 'string' ? tc.error : tc.error['#text'];
+        stackTrace   = typeof tc.error === 'string' ? tc.error : tc.error['#text'];
       } else if (tc.skipped !== undefined) {
         outcome = 'NotExecuted';
       }
 
+      // Build automatedTestName: prefer classname.name (matches Java/Python parsers),
+      // fall back to suiteName.name.
+      const className  = tc['@_classname'] ?? '';
+      const testCase   = tc['@_name'] ?? '';
+      const suiteName  = suite['@_name'] ?? '';
+      const testName   = className
+        ? `${className}.${testCase}`
+        : `${suiteName}.${testCase}`.replace(/^\./, '');
+
+      // Extract TC ID from <properties><property name="tc" value="N"/></properties>
+      // (e.g. added by a pytest conftest.py record_property hook or jest custom reporter)
+      let testCaseId: number | undefined;
+      const props: any[] = tc.properties?.property ?? [];
+      for (const prop of props) {
+        if (String(prop['@_name'] ?? '') === tagPrefix) {
+          const id = parseInt(String(prop['@_value'] ?? ''), 10);
+          if (!isNaN(id)) { testCaseId = id; break; }
+        }
+      }
+
       results.push({
-        testName: `${suite['@_name'] ?? ''}.${tc['@_name'] ?? ''}`.replace(/^\./, ''),
+        testName,
         outcome: normaliseOutcome(outcome, treatInconclusiveAs),
         durationMs: Math.round(parseFloat(tc['@_time'] ?? '0') * 1000),
         errorMessage,
         stackTrace,
+        testCaseId,
       });
     }
   }
@@ -390,7 +431,7 @@ export async function publishTestResults(
         allResults.push(...parseNUnitXml(content, tagPrefix, treatInconclusiveAs));
         break;
       case 'junit':
-        allResults.push(...parseJUnit(content, treatInconclusiveAs));
+        allResults.push(...parseJUnit(content, tagPrefix, treatInconclusiveAs));
         break;
       case 'cucumberJson':
         allResults.push(...parseCucumberJson(content, tagPrefix, treatInconclusiveAs));
