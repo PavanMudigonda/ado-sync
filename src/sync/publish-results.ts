@@ -32,7 +32,12 @@ import { SyncConfig } from '../types';
 
 // ─── Result file parsing ──────────────────────────────────────────────────────
 
-export type AttachmentType = 'GeneralAttachment' | 'ConsoleLog' | 'Log' | 'Screenshot' | 'VideoLog';
+/**
+ * Azure DevOps AttachmentType enum values (from TestInterfaces.AttachmentType).
+ * Only GeneralAttachment and ConsoleLog are universally supported for test result
+ * attachments. We use these two: screenshots/videos → GeneralAttachment, logs → ConsoleLog.
+ */
+export type AttachmentType = 'GeneralAttachment' | 'ConsoleLog';
 
 export interface TestAttachment {
   fileName: string;
@@ -58,17 +63,14 @@ export interface ParsedResult {
 /** Map a file extension to the Azure DevOps attachment type. */
 function extToAttachmentType(ext: string): AttachmentType {
   const e = ext.toLowerCase();
-  if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'].includes(e)) return 'Screenshot';
-  if (['.mp4', '.webm', '.avi', '.mov'].includes(e)) return 'VideoLog';
-  if (['.log', '.txt'].includes(e)) return 'Log';
+  // Log/text files → ConsoleLog; everything else (images, video, zip…) → GeneralAttachment
+  if (['.log', '.txt'].includes(e)) return 'ConsoleLog';
   return 'GeneralAttachment';
 }
 
 /** Mime type → attachment type for Cucumber JSON embeddings. */
 function mimeToAttachmentType(mime: string): AttachmentType {
-  if (mime.startsWith('image/')) return 'Screenshot';
-  if (mime.startsWith('video/')) return 'VideoLog';
-  if (mime.startsWith('text/')) return 'Log';
+  if (mime.startsWith('text/')) return 'ConsoleLog';
   return 'GeneralAttachment';
 }
 
@@ -124,7 +126,7 @@ function normaliseOutcome(raw: string, treatInconclusiveAs?: string): string {
 //
 // UnitTestResult.testId → UnitTest.id → Properties → tc value
 
-function parseTrx(content: string, tagPrefix: string, treatInconclusiveAs?: string): ParsedResult[] {
+function parseTrx(content: string, tagPrefix: string, treatInconclusiveAs?: string, resultFileDir = ''): ParsedResult[] {
   const parser = new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: '@_',
@@ -192,12 +194,14 @@ function parseTrx(content: string, tagPrefix: string, treatInconclusiveAs?: stri
       attachments.push({ fileName: 'stdout.log', data: Buffer.from(stdOut, 'utf8'), attachmentType: 'ConsoleLog' });
     }
     // Extract <ResultFiles> — files produced by the test (e.g. screenshots via TestContext.AddResultFile)
-    const resultFilesNode = r.ResultFiles ?? r.resultFiles;
+    // In TRX, ResultFiles is a child of Output, not a direct child of UnitTestResult.
+    const resultFilesNode = output?.ResultFiles ?? output?.resultFiles ?? r.ResultFiles ?? r.resultFiles;
     const resultFiles: any[] = resultFilesNode?.ResultFile ?? resultFilesNode?.resultFile ?? [];
     for (const rf of (Array.isArray(resultFiles) ? resultFiles : [resultFiles])) {
       const filePath = rf['@_path'] ?? '';
       if (!filePath) continue;
-      const data = safeReadFile(filePath);
+      const absPath = resultFileDir ? path.resolve(resultFileDir, filePath) : filePath;
+      const data = safeReadFile(absPath);
       if (data) attachments.push({ fileName: path.basename(filePath), data, attachmentType: extToAttachmentType(path.extname(filePath)) });
     }
 
@@ -234,7 +238,7 @@ function parseTrx(content: string, tagPrefix: string, treatInconclusiveAs?: stri
 //     </test-suite>
 //   </test-run>
 
-function parseNUnitXml(content: string, tagPrefix: string, treatInconclusiveAs?: string): ParsedResult[] {
+function parseNUnitXml(content: string, tagPrefix: string, treatInconclusiveAs?: string, resultFileDir = ''): ParsedResult[] {
   const parser = new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: '@_',
@@ -282,7 +286,8 @@ function parseNUnitXml(content: string, tagPrefix: string, treatInconclusiveAs?:
       for (const att of fileAtts) {
         const filePath = String(att.filePath ?? att['filePath'] ?? '').trim();
         if (!filePath) continue;
-        const data = safeReadFile(filePath);
+        const absPath = resultFileDir ? path.resolve(resultFileDir, filePath) : filePath;
+        const data = safeReadFile(absPath);
         if (data) nunitAttachments.push({ fileName: path.basename(filePath), data, attachmentType: extToAttachmentType(path.extname(filePath)) });
       }
 
@@ -325,7 +330,7 @@ function parseNUnitXml(content: string, tagPrefix: string, treatInconclusiveAs?:
 //     (e.g. "com.example.MyClass.myMethod" or "tests.module.TestClass.test_foo").
 //   - Falls back to suite[@name].testcase[@name] when classname is absent.
 
-function parseJUnit(content: string, tagPrefix: string, treatInconclusiveAs?: string): ParsedResult[] {
+function parseJUnit(content: string, tagPrefix: string, treatInconclusiveAs?: string, resultFileDir = ''): ParsedResult[] {
   const parser = new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: '@_',
@@ -390,14 +395,15 @@ function parseJUnit(content: string, tagPrefix: string, treatInconclusiveAs?: st
         let logText = sysOut;
         while ((m = playwrightRe.exec(sysOut)) !== null) {
           const filePath = m[1].trim();
-          const data = safeReadFile(filePath);
+          const absPath = resultFileDir ? path.resolve(resultFileDir, filePath) : filePath;
+          const data = safeReadFile(absPath);
           if (data) junitAttachments.push({ fileName: path.basename(filePath), data, attachmentType: extToAttachmentType(path.extname(filePath)) });
           logText = logText.replace(m[0], '').trim();
         }
-        if (logText) junitAttachments.push({ fileName: 'system-out.log', data: Buffer.from(logText, 'utf8'), attachmentType: 'Log' });
+        if (logText) junitAttachments.push({ fileName: 'system-out.log', data: Buffer.from(logText, 'utf8'), attachmentType: 'ConsoleLog' });
       }
       const sysErr = String(tc['system-err'] ?? '').trim();
-      if (sysErr) junitAttachments.push({ fileName: 'system-err.log', data: Buffer.from(sysErr, 'utf8'), attachmentType: 'Log' });
+      if (sysErr) junitAttachments.push({ fileName: 'system-err.log', data: Buffer.from(sysErr, 'utf8'), attachmentType: 'ConsoleLog' });
 
       results.push({
         testName,
@@ -502,7 +508,7 @@ function parseCucumberJson(content: string, tagPrefix: string, treatInconclusive
 //     }]
 //   }
 
-function parsePlaywrightJson(content: string, tagPrefix: string, treatInconclusiveAs?: string): ParsedResult[] {
+function parsePlaywrightJson(content: string, tagPrefix: string, treatInconclusiveAs?: string, resultFileDir = ''): ParsedResult[] {
   const report = JSON.parse(content);
   const results: ParsedResult[] = [];
 
@@ -542,7 +548,10 @@ function parsePlaywrightJson(content: string, tagPrefix: string, treatInconclusi
               const contentType: string = att.contentType ?? '';
               const attName: string = att.name ?? `attachment_${++attIdx}`;
               const ext = filePath ? path.extname(filePath) : mimeToExt(contentType);
-              const data = filePath ? safeReadFile(filePath) : (att.body ? Buffer.from(att.body, 'base64') : undefined);
+              const absPath = filePath
+                ? (resultFileDir ? path.resolve(resultFileDir, filePath) : filePath)
+                : undefined;
+              const data = absPath ? safeReadFile(absPath) : (att.body ? Buffer.from(att.body, 'base64') : undefined);
               if (data) {
                 pwAttachments.push({ fileName: `${attName}${ext || ''}`, data, attachmentType: mimeToAttachmentType(contentType) || extToAttachmentType(ext) });
               }
@@ -698,22 +707,23 @@ export async function publishTestResults(
     }
     const content = fs.readFileSync(src.filePath, 'utf8');
     const format = src.format ?? detectFormat(src.filePath, content);
+    const fileDir = path.dirname(src.filePath);
 
     switch (format) {
       case 'trx':
-        allResults.push(...parseTrx(content, tagPrefix, treatInconclusiveAs));
+        allResults.push(...parseTrx(content, tagPrefix, treatInconclusiveAs, fileDir));
         break;
       case 'nunitXml':
-        allResults.push(...parseNUnitXml(content, tagPrefix, treatInconclusiveAs));
+        allResults.push(...parseNUnitXml(content, tagPrefix, treatInconclusiveAs, fileDir));
         break;
       case 'junit':
-        allResults.push(...parseJUnit(content, tagPrefix, treatInconclusiveAs));
+        allResults.push(...parseJUnit(content, tagPrefix, treatInconclusiveAs, fileDir));
         break;
       case 'cucumberJson':
         allResults.push(...parseCucumberJson(content, tagPrefix, treatInconclusiveAs));
         break;
       case 'playwrightJson':
-        allResults.push(...parsePlaywrightJson(content, tagPrefix, treatInconclusiveAs));
+        allResults.push(...parsePlaywrightJson(content, tagPrefix, treatInconclusiveAs, fileDir));
         break;
       default:
         throw new Error(`Unsupported test result format: ${format}`);
@@ -738,9 +748,11 @@ export async function publishTestResults(
   const runSettings = pubConfig?.testRunSettings;
   const runName = opts.runName ?? runSettings?.name ?? `ado-sync ${new Date().toISOString()}`;
 
+  // Do NOT pass `plan` here — attaching to a test plan makes ADO treat the run
+  // as "planned", which requires testPointId + testCaseRevision on every result.
+  // Automated CI runs post results independently; test cases are linked by id alone.
   const runModel: any = {
     name: runName,
-    plan: { id: String(config.testPlan.id) },
     automated: runSettings?.runType === 'Manual' ? false : true,
     configurationIds: pubConfig?.testConfiguration?.id ? [pubConfig.testConfiguration.id] : [],
   };
@@ -804,7 +816,7 @@ export async function publishTestResults(
     const toUpload: TestAttachment[] = [];
     for (const att of resultEntry.attachments ?? []) {
       // 'files' mode: skip pure log attachments for passing tests
-      if (filesOnly && (att.attachmentType === 'ConsoleLog' || att.attachmentType === 'Log')) continue;
+      if (filesOnly && att.attachmentType === 'ConsoleLog') continue;
       if (includeForResult) toUpload.push(att);
     }
     toUpload.push(...(folderResultAtts.get(i) ?? []));
