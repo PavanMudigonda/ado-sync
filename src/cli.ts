@@ -166,7 +166,8 @@ program
   .command('publish-test-results')
   .description('Publish test results from result files (TRX, JUnit, Cucumber JSON) to Azure DevOps')
   .option('--testResult <path>', 'Path to a test result file (repeatable)', collect, [])
-  .option('--testResultFormat <format>', 'Result file format: trx, junit, cucumberJson')
+  .option('--testResultFormat <format>', 'Result file format: trx, nunitXml, junit, cucumberJson, playwrightJson')
+  .option('--attachmentsFolder <path>', 'Folder with screenshots/videos/logs to attach to test results')
   .option('--runName <name>', 'Name for the test run in Azure DevOps')
   .option('--buildId <id>', 'Build ID to associate with the test run')
   .option('--dry-run', 'Parse results and show summary without publishing')
@@ -188,6 +189,7 @@ program
         dryRun: opts.dryRun,
         resultFiles: opts.testResult?.length ? opts.testResult : undefined,
         resultFormat: opts.testResultFormat,
+        attachmentsFolder: opts.attachmentsFolder,
         runName: opts.runName,
         buildId: opts.buildId ? parseInt(opts.buildId) : undefined,
       });

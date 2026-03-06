@@ -31,7 +31,8 @@ ado-sync publish-test-results \
 | Option | Description |
 |--------|-------------|
 | `--testResult <path>` | Path to a result file. Repeatable. |
-| `--testResultFormat <format>` | `trx` · `nunitXml` · `junit` · `cucumberJson`. Auto-detected from file extension/content when omitted. |
+| `--testResultFormat <format>` | `trx` · `nunitXml` · `junit` · `cucumberJson` · `playwrightJson`. Auto-detected when omitted. |
+| `--attachmentsFolder <path>` | Folder to scan for screenshots/videos/logs to attach to test results. |
 | `--runName <name>` | Name for the Test Run in Azure DevOps. Defaults to `ado-sync <ISO timestamp>`. |
 | `--buildId <id>` | Build ID to associate with the Test Run. |
 | `--dry-run` | Parse results and print summary without creating a run in Azure. |
@@ -41,12 +42,13 @@ ado-sync publish-test-results \
 
 ## Supported formats
 
-| Format | Extension | Auto-detected | TC ID in file? |
-|--------|-----------|---------------|----------------|
-| TRX (MSTest / VSTest) | `.trx` | Yes (`<TestRun>` root) | Yes — via `[TestProperty("tc","ID")]` in `TestDefinitions` |
-| NUnit XML (native) | `.xml` | Yes (`<test-run>` root) | Yes — via `[Property("tc","ID")]` on each `test-case` |
-| JUnit XML | `.xml` | Yes (`<testsuites>` / `<testsuite>` root) | Optional — via `<property name="tc" value="ID"/>` (see below) |
-| Cucumber JSON | `.json` | Yes (JSON array) | Yes — via `@tc:ID` tag on scenario |
+| Format | Extension | Auto-detected | TC ID in file? | Attachments extracted |
+|--------|-----------|---------------|----------------|----------------------|
+| TRX (MSTest / VSTest) | `.trx` | Yes (`<TestRun>` root) | Yes — via `[TestProperty("tc","ID")]` | `<Output><StdOut>` + `<ResultFiles>` |
+| NUnit XML (native) | `.xml` | Yes (`<test-run>` root) | Yes — via `[Property("tc","ID")]` | `<output>` + `<attachments>` |
+| JUnit XML | `.xml` | Yes (`<testsuites>` / `<testsuite>` root) | Optional — via `<property name="tc" value="ID"/>` | `<system-out>`, `<system-err>`, `[[ATTACHMENT\|path]]` (Playwright) |
+| Cucumber JSON | `.json` | Yes (JSON array, Cucumber format) | Yes — via `@tc:ID` tag on scenario | `step.embeddings[]` (base64 screenshots/video) |
+| Playwright JSON | `.json` | Yes (JSON object with `suites` key) | Via `@tc:ID` in test title | `test.results[].attachments[]` (screenshots, videos, traces) |
 
 > **NUnit via TRX**: when NUnit tests are run through the VSTest adapter (`--logger trx`), `[Property]` values are **not** included in the TRX output. Use `--logger "nunit3;LogFileName=results.xml"` to get the native NUnit XML format, which does include property values.
 
@@ -222,28 +224,193 @@ ado-sync publish-test-results --testResult results/junit.xml --testResultFormat 
 
 ### Gherkin / Cucumber (JS)
 
+Cucumber JS with Selenium captures screenshots/videos as base64 `embeddings` inside each step. These are extracted automatically and attached to the test result in Azure DevOps.
+
 ```bash
-# Run with Cucumber JSON reporter
+# Run with Cucumber JSON reporter (includes step embeddings)
 npx cucumber-js --format json:results/cucumber.json
 
-# Publish — TC IDs are read from @tc:ID tags on each scenario
+# Publish — TC IDs from @tc:ID tags, screenshots from embeddings
 ado-sync publish-test-results --testResult results/cucumber.json
 ```
 
-TC IDs from `@tc:12345` tags on scenarios are extracted directly from the JSON — no AutomatedTestName matching needed.
+TC IDs from `@tc:12345` tags are extracted directly. Screenshots embedded by Selenium/WebDriver hooks are uploaded automatically.
 
 ---
 
-| Framework | Result format | TC ID in file | Fallback |
-|-----------|---------------|---------------|---------|
-| C# MSTest | TRX | ✅ `[TestProperty("tc","ID")]` | — |
-| C# NUnit | NUnit XML | ✅ `[Property("tc","ID")]` | — |
-| Java JUnit 4/5 | JUnit XML | ⚠️ optional (see above) | AutomatedTestName |
-| Java TestNG | JUnit XML | ⚠️ optional (see above) | AutomatedTestName |
-| Python pytest | JUnit XML | ⚠️ optional (conftest.py) | AutomatedTestName |
-| Jest | JUnit XML | ❌ | AutomatedTestName |
-| WebdriverIO | JUnit XML | ❌ | AutomatedTestName |
-| Cucumber JS | Cucumber JSON | ✅ `@tc:ID` tag | — |
+### Playwright
+
+Playwright supports two result formats — both extract attachments (screenshots, videos, traces):
+
+**Option A — Playwright JSON reporter** (recommended, includes all attachments):
+
+```bash
+# playwright.config.ts
+# reporter: [['json', { outputFile: 'results/playwright.json' }]]
+
+npx playwright test
+ado-sync publish-test-results --testResult results/playwright.json
+```
+
+Screenshots on failure, videos, and trace files are uploaded automatically from the `test-results/` folder referenced in the JSON.
+
+**Option B — JUnit XML reporter** (for CI systems that need JUnit format):
+
+```bash
+# playwright.config.ts
+# reporter: [['junit', { outputFile: 'results/junit.xml' }]]
+
+npx playwright test
+ado-sync publish-test-results --testResult results/junit.xml --testResultFormat junit
+```
+
+Playwright embeds `[[ATTACHMENT|path]]` markers in `<system-out>` — ado-sync reads these and uploads the referenced files (screenshots, videos).
+
+**Using `--attachmentsFolder` for extra files:**
+
+```bash
+ado-sync publish-test-results \
+  --testResult results/junit.xml \
+  --attachmentsFolder test-results
+```
+
+---
+
+| Framework | Result format | TC ID in file | Attachments uploaded |
+|-----------|---------------|---------------|----------------------|
+| C# MSTest | TRX | ✅ `[TestProperty("tc","ID")]` | `<Output><StdOut>` + `TestContext.AddResultFile()` files |
+| C# NUnit | NUnit XML | ✅ `[Property("tc","ID")]` | `<output>` text + `TestContext.AddAttachment()` files |
+| Java JUnit 4/5 | JUnit XML | ⚠️ optional | `<system-out>`, `<system-err>` |
+| Java TestNG | JUnit XML | ⚠️ optional | `<system-out>`, `<system-err>` |
+| Python pytest | JUnit XML | ⚠️ optional (conftest.py) | `<system-out>`, `<system-err>` |
+| Jest | JUnit XML | ❌ | `<system-out>`, `<system-err>` |
+| WebdriverIO | JUnit XML | ❌ | `<system-out>`, `<system-err>` |
+| Cucumber JS | Cucumber JSON | ✅ `@tc:ID` tag | `step.embeddings[]` (Selenium screenshots/video) |
+| Playwright | Playwright JSON | Via `@tc:ID` in title | Screenshots, videos, traces from `attachments[]` |
+| Playwright | JUnit XML | Via `@tc:ID` in title | `[[ATTACHMENT\|path]]` referenced files |
+
+---
+
+## Attachments
+
+ado-sync uploads screenshots, videos, and logs from test results to the corresponding Azure DevOps test result entry. Attachments appear in the Azure Test Plans UI under each result.
+
+### What is extracted automatically per format
+
+| Format | Extracted automatically |
+|--------|------------------------|
+| TRX | `<Output><StdOut>` → console log; `<ResultFiles><ResultFile>` → files on disk |
+| NUnit XML | `<output>` → console log; `<attachments><attachment><filePath>` → files on disk |
+| JUnit XML | `<system-out>` → log; `<system-err>` → log; `[[ATTACHMENT\|path]]` → Playwright files |
+| Cucumber JSON | `step.embeddings[]` → base64-encoded screenshots/video |
+| Playwright JSON | `results[].attachments[]` → files on disk (screenshots, videos, traces) |
+
+### `--attachmentsFolder` — folder-based attachment upload
+
+For any framework, point ado-sync at a folder containing screenshots and videos:
+
+```bash
+ado-sync publish-test-results \
+  --testResult results/junit.xml \
+  --attachmentsFolder test-results/screenshots
+```
+
+Files are matched to individual test results by looking for the test method name in the filename (case-insensitive). For example, `addItemAndCheckout_failed.png` → matched to `com.example.CheckoutTests.addItemAndCheckout`.
+
+Unmatched files are attached at the test run level.
+
+### Config-based attachment folder
+
+```json
+{
+  "publishTestResults": {
+    "attachments": {
+      "folder": "test-results/screenshots",
+      "include": ["**/*.png", "**/*.mp4"],
+      "matchByTestName": true
+    },
+    "publishAttachmentsForPassingTests": "files"
+  }
+}
+```
+
+### `publishAttachmentsForPassingTests`
+
+Controls how attachments are handled for **passing** tests (failing tests always get all attachments):
+
+| Value | Behaviour |
+|-------|-----------|
+| `"none"` *(default)* | No attachments uploaded for passing tests |
+| `"files"` | Screenshots and videos uploaded; console logs skipped |
+| `"all"` | All attachments including logs uploaded for passing tests |
+
+### Framework-specific setup
+
+**C# MSTest — attach files from test code:**
+
+```csharp
+TestContext.AddResultFile("screenshots/mytest.png");
+```
+
+**C# NUnit — attach files:**
+
+```csharp
+TestContext.AddAttachment("screenshots/mytest.png");
+```
+
+**Java (JUnit/TestNG) — capture Selenium screenshot and write to system-out:**
+
+```java
+// In an @AfterMethod / @After hook:
+File screenshot = ((TakesScreenshot) driver).getScreenshotAs(OutputType.FILE);
+// Surefire writes <system-out> to JUnit XML — log the path:
+System.out.println("Screenshot: " + screenshot.getAbsolutePath());
+// Or use --attachmentsFolder to pick up the file directly
+```
+
+**Python pytest — capture screenshot via conftest.py:**
+
+```python
+# conftest.py
+@pytest.fixture(autouse=True)
+def screenshot_on_failure(request, driver):
+    yield
+    if request.node.rep_call.failed:
+        driver.save_screenshot(f"screenshots/{request.node.name}.png")
+```
+
+Then publish with:
+```bash
+ado-sync publish-test-results \
+  --testResult results/junit.xml \
+  --attachmentsFolder screenshots
+```
+
+**Cucumber JS — embed screenshot in step hook:**
+
+```javascript
+// hooks.js
+After(async function({ pickle, result }) {
+  if (result.status === Status.FAILED) {
+    const screenshot = await driver.takeScreenshot();
+    this.attach(Buffer.from(screenshot, 'base64'), 'image/png');
+  }
+});
+```
+
+Screenshots are embedded as base64 in the Cucumber JSON and uploaded automatically.
+
+**Playwright — screenshots and videos are automatic** when configured in `playwright.config.ts`:
+
+```typescript
+use: {
+  screenshot: 'only-on-failure',
+  video: 'retain-on-failure',
+  trace: 'on-first-retry',
+}
+```
+
+Use the Playwright JSON reporter — attachments are uploaded automatically.
 
 ---
 
