@@ -2,7 +2,19 @@
 
 Bidirectional sync between local test specs and Azure DevOps Test Cases.
 
-Supports **Cucumber / Gherkin** `.feature` files, **prose Markdown** `.md` spec files (including Playwright test-plan markdown), **C# MSTest** `.cs` test files, and **Azure DevOps tabular exports** in **CSV** and **Excel** (`.xlsx`) format.
+Supports a wide range of test file formats and frameworks:
+
+| `local.type` | Framework / Format | Files |
+|---|---|---|
+| `gherkin` | Cucumber / Gherkin | `.feature` |
+| `markdown` | Prose specs, Playwright test plans | `.md` |
+| `csharp` | MSTest, NUnit | `.cs` |
+| `java` | JUnit 4, JUnit 5, TestNG + Selenium | `.java` |
+| `python` | pytest + Selenium | `.py` |
+| `javascript` | Jest, Jasmine, WebdriverIO | `.js` / `.ts` |
+| `csv` | Azure DevOps tabular export | `.csv` |
+| `excel` | Azure DevOps tabular export | `.xlsx` |
+
 Inspired by [SpecSync](https://docs.specsolutions.eu/specsync/).
 
 ---
@@ -10,20 +22,37 @@ Inspired by [SpecSync](https://docs.specsolutions.eu/specsync/).
 ## How it works
 
 ```
-Local files                   ado-sync              Azure DevOps
-──────────────                ─────────────────     ────────────────
-.feature files  ── push ──►  create / update  ──►  Test Cases
-.md spec files  ◄── pull ──  apply changes    ◄──  (Work Items)
-.cs files       ── push ──►  (push-only)      ──►  + Associated Automation
-.csv files      ── push ──►  (push-only)
-.xlsx files     ── push ──►  (push-only)
-                              write ID back
-                              @tc:12345 / [TestProperty("tc","…")] / col A
-TRX / JUnit /   ── publish-test-results ──►   Test Run results (linked to TCs)
+Local files                    ado-sync              Azure DevOps
+──────────────                 ─────────────────     ────────────────
+.feature files   ── push ──►  create / update  ──►  Test Cases
+.md spec files   ◄── pull ──  apply changes    ◄──  (Work Items)
+.cs files        ── push ──►  (push-only)      ──►  + Associated Automation
+.java files      ── push ──►  (push-only)      ──►  + Associated Automation
+.py files        ── push ──►  (push-only)      ──►  + Associated Automation
+.js / .ts files  ── push ──►  (push-only)      ──►  + Associated Automation
+.csv files       ── push ──►  (push-only)
+.xlsx files      ── push ──►  (push-only)
+                               write ID back
+                               @tc:12345 / [TestProperty] / @Tag / @pytest.mark / // @tc:
+TRX / JUnit /    ── publish-test-results ──►   Test Run results (linked to TCs)
 Cucumber JSON
 ```
 
-On the **first push**, a new Test Case is created in Azure DevOps and its ID is written back into the local file. Every subsequent push uses that ID to update the existing Test Case. For C# MSTest tests, the ID is written as `[TestProperty("tc", "12345")]` so TRX results published via `publish-test-results` can be linked back to the right Test Cases.
+On the **first push**, a new Test Case is created in Azure DevOps and its ID is written back into the local file. Every subsequent push uses that ID to update the existing Test Case.
+
+**ID writeback format per framework:**
+
+| Framework | ID written as |
+|---|---|
+| Gherkin / Markdown | `@tc:12345` tag / comment |
+| C# MSTest | `[TestProperty("tc", "12345")]` |
+| C# NUnit | `[Property("tc", "12345")]` |
+| Java JUnit 4 / TestNG | `// @tc:12345` comment above `@Test` |
+| Java JUnit 5 | `@Tag("tc:12345")` above `@Test` |
+| Python pytest | `@pytest.mark.tc(12345)` above `def test_*` |
+| JavaScript/TS (Jest/Jasmine/WebdriverIO) | `// @tc:12345` comment above `it()`/`test()` |
+| CSV | Numeric ID in column A |
+| Excel | Numeric ID in cell A |
 
 ---
 
@@ -224,6 +253,108 @@ Recommended `ado-sync.json` for C# MSTest:
 }
 ```
 
+### Java JUnit / TestNG: create TCs and publish results
+
+```bash
+# 1. Create TCs and write IDs back into .java files
+ado-sync push --dry-run   # preview
+ado-sync push             # writes // @tc:ID (JUnit 4/TestNG) or @Tag("tc:ID") (JUnit 5)
+
+# 2. Run tests and generate JUnit XML
+mvn test                  # Surefire writes target/surefire-reports/*.xml by default
+# or with Gradle:
+./gradlew test            # writes build/test-results/test/*.xml
+
+# 3. Publish results
+ado-sync publish-test-results --testResult target/surefire-reports/TEST-*.xml --testResultFormat junit
+```
+
+Recommended `ado-sync.json` for Java:
+
+```json
+{
+  "orgUrl": "https://dev.azure.com/my-org",
+  "project": "MyProject",
+  "auth": { "type": "pat", "token": "$AZURE_DEVOPS_TOKEN" },
+  "testPlan": { "id": 1234 },
+  "local": {
+    "type": "java",
+    "include": ["**/src/test/**/*.java"],
+    "exclude": ["**/*BaseTest.java", "**/*Helper.java"]
+  },
+  "sync": {
+    "markAutomated": true
+  }
+}
+```
+
+### Python pytest: create TCs and publish results
+
+```bash
+# 1. Create TCs and write IDs back into .py files
+ado-sync push --dry-run   # preview
+ado-sync push             # writes @pytest.mark.tc(ID) above each test function
+
+# 2. Run tests and generate JUnit XML
+pytest --junitxml=results/junit.xml
+
+# 3. Publish results
+ado-sync publish-test-results --testResult results/junit.xml --testResultFormat junit
+```
+
+Recommended `ado-sync.json` for Python:
+
+```json
+{
+  "orgUrl": "https://dev.azure.com/my-org",
+  "project": "MyProject",
+  "auth": { "type": "pat", "token": "$AZURE_DEVOPS_TOKEN" },
+  "testPlan": { "id": 1234 },
+  "local": {
+    "type": "python",
+    "include": ["tests/**/*.py"],
+    "exclude": ["tests/conftest.py", "tests/**/helpers.py"]
+  },
+  "sync": {
+    "markAutomated": true
+  }
+}
+```
+
+### JavaScript / TypeScript (Jest, Jasmine, WebdriverIO): create TCs
+
+```bash
+# 1. Create TCs and write IDs back into .js / .ts files
+ado-sync push --dry-run   # preview
+ado-sync push             # writes // @tc:ID above each it() / test()
+
+# 2. Run tests and generate JUnit XML (Jest example)
+npx jest --reporters=default --reporters=jest-junit
+# JEST_JUNIT_OUTPUT_DIR=results JEST_JUNIT_OUTPUT_NAME=junit.xml
+
+# 3. Publish results
+ado-sync publish-test-results --testResult results/junit.xml --testResultFormat junit
+```
+
+Recommended `ado-sync.json` for Jest/Jasmine/WebdriverIO:
+
+```json
+{
+  "orgUrl": "https://dev.azure.com/my-org",
+  "project": "MyProject",
+  "auth": { "type": "pat", "token": "$AZURE_DEVOPS_TOKEN" },
+  "testPlan": { "id": 1234 },
+  "local": {
+    "type": "javascript",
+    "include": ["src/**/*.spec.ts", "tests/**/*.test.js"],
+    "exclude": ["**/*.helper.ts"]
+  },
+  "sync": {
+    "markAutomated": true
+  }
+}
+```
+
 ### CI pipeline
 
 ```yaml
@@ -298,3 +429,21 @@ Ensure the method has `[TestMethod]` on its own line. Nested classes or abstract
 
 **TRX results not linked to Test Cases**
 For MSTest, TC IDs are read directly from `[TestProperty("tc","ID")]` embedded in the TRX — no further config needed. For NUnit, use `--logger "nunit3;LogFileName=results.xml"` (native XML format) instead of TRX so `[Property("tc","ID")]` values are included. If neither is available, set `sync.markAutomated: true` and rely on `AutomatedTestName` FQMN matching.
+
+**Java test methods not detected**
+Ensure each test method has a `@Test` annotation. Abstract base methods and methods with only `@Before`/`@After` are not parsed. Add base class files to `local.exclude`.
+
+**Java ID not written back (JUnit 5)**
+ado-sync writes `@Tag("tc:ID")` above the `@Test` annotation. Ensure the file is writable. The `@Tag` import (`org.junit.jupiter.api.Tag`) must already be present or will be added automatically.
+
+**Python test functions not detected**
+ado-sync detects functions starting with `test_` at module level and inside classes. Ensure functions follow the `def test_*()` convention. Abstract base test methods should be excluded from `local.include`.
+
+**Python ID not written back**
+ado-sync writes `@pytest.mark.tc(ID)` directly above the `def test_*` line. Ensure `pytest` is in your test environment. The `pytest` import is not required in the file itself — the mark is a decorator, not a function call.
+
+**JavaScript/TypeScript tests not detected**
+ado-sync detects `it()`, `test()`, `xit()`, `xtest()`, and `.only`/`.skip`/`.concurrent` variants. Tests with dynamic titles (template literals or computed values) are skipped — use string literals for the test title.
+
+**JavaScript ID not written back**
+ado-sync inserts `// @tc:ID` immediately above the `it()`/`test()` line. There must be no blank line between the comment and the test function call.

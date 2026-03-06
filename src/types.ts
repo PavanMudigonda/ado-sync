@@ -208,8 +208,8 @@ export interface SyncConfig {
   testPlans?: TestPlanEntry[];
   /** Local spec sources */
   local: {
-    /** 'gherkin' for .feature files, 'markdown' for .md spec files, 'csharp' for MSTest .cs files */
-    type: 'gherkin' | 'markdown' | 'csv' | 'excel' | 'csharp';
+    /** 'gherkin' for .feature files, 'markdown' for .md, 'csharp' for MSTest/NUnit .cs, 'java' for JUnit/TestNG .java, 'python' for pytest .py, 'javascript' for Jest/Jasmine/WebdriverIO .js/.ts */
+    type: 'gherkin' | 'markdown' | 'csv' | 'excel' | 'csharp' | 'java' | 'python' | 'javascript';
     /** Glob pattern(s) relative to config file location */
     include: string | string[];
     /** Glob pattern(s) to exclude */
