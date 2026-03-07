@@ -233,8 +233,8 @@ export interface SyncConfig {
   testPlans?: TestPlanEntry[];
   /** Local spec sources */
   local: {
-    /** 'gherkin' for .feature files, 'markdown' for .md, 'csharp' for MSTest/NUnit .cs, 'java' for JUnit/TestNG .java, 'python' for pytest .py, 'javascript' for Jest/Jasmine/WebdriverIO .js/.ts */
-    type: 'gherkin' | 'markdown' | 'csv' | 'excel' | 'csharp' | 'java' | 'python' | 'javascript';
+    /** 'gherkin' for .feature files, 'markdown' for .md, 'csharp' for MSTest/NUnit .cs, 'java' for JUnit/TestNG .java, 'python' for pytest .py, 'javascript' for Jest/Jasmine/WebdriverIO .js/.ts, 'playwright' for Playwright Test .spec.ts/.spec.js, 'puppeteer' for Puppeteer + Jest/Mocha .js/.ts, 'cypress' for Cypress .cy.js/.cy.ts, 'testcafe' for TestCafe .js/.ts, 'detox' for Detox (React Native) .js/.ts, 'espresso' for Android Espresso .java/.kt, 'xcuitest' for iOS XCUITest .swift, 'flutter' for Flutter/Dart _test.dart */
+    type: 'gherkin' | 'markdown' | 'csv' | 'excel' | 'csharp' | 'java' | 'python' | 'javascript' | 'playwright' | 'puppeteer' | 'cypress' | 'testcafe' | 'detox' | 'espresso' | 'xcuitest' | 'flutter';
     /** Glob pattern(s) relative to config file location */
     include: string | string[];
     /** Glob pattern(s) to exclude */

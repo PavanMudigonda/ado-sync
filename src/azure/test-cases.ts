@@ -1087,12 +1087,18 @@ export async function addTestCaseToSuite(
   suiteId: number
 ): Promise<void> {
   const api = await client.getTestPlanApi();
-  await api.addTestCasesToSuite(
-    [{ workItem: { id: testCaseId } } as any],
-    config.project,
-    config.testPlan.id,
-    suiteId
-  );
+  try {
+    await api.addTestCasesToSuite(
+      [{ workItem: { id: testCaseId } } as any],
+      config.project,
+      config.testPlan.id,
+      suiteId
+    );
+  } catch (err: any) {
+    // Azure returns an error when the TC is already in the suite — safe to ignore.
+    if (/duplicate/i.test(err?.message ?? '')) return;
+    throw err;
+  }
 }
 
 export async function addTestCaseToRootSuite(
@@ -1105,12 +1111,17 @@ export async function addTestCaseToRootSuite(
   const rootSuiteId = plan?.rootSuite?.id;
   if (!rootSuiteId) return;
 
-  await api.addTestCasesToSuite(
-    [{ workItem: { id: testCaseId } } as any],
-    config.project,
-    config.testPlan.id,
-    rootSuiteId
-  );
+  try {
+    await api.addTestCasesToSuite(
+      [{ workItem: { id: testCaseId } } as any],
+      config.project,
+      config.testPlan.id,
+      rootSuiteId
+    );
+  } catch (err: any) {
+    if (/duplicate/i.test(err?.message ?? '')) return;
+    throw err;
+  }
 }
 
 /**
