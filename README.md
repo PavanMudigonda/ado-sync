@@ -12,6 +12,15 @@ Supports a wide range of test file formats and frameworks:
 | `java` | JUnit 4, JUnit 5, TestNG + Selenium | `.java` |
 | `python` | pytest + Selenium | `.py` |
 | `javascript` | Jest, Jasmine, WebdriverIO | `.js` / `.ts` |
+| `playwright` | Playwright Test | `.js` / `.ts` |
+| `puppeteer` | Puppeteer + Jest or Mocha | `.js` / `.ts` |
+| `cypress` | Cypress | `.cy.js` / `.cy.ts` |
+| `testcafe` | TestCafe | `.js` / `.ts` |
+| `detox` | Detox (React Native E2E) | `.js` / `.ts` |
+| `espresso` | Android Espresso (JUnit 4 / Kotlin) | `.java` / `.kt` |
+| `xcuitest` | iOS / macOS XCUITest | `.swift` |
+| `flutter` | Flutter widget & integration tests | `_test.dart` |
+| Appium | Use `javascript` / `java` / `python` / `csharp` | depends on language binding |
 | `csv` | Azure DevOps tabular export | `.csv` |
 | `excel` | Azure DevOps tabular export | `.xlsx` |
 
@@ -51,49 +60,72 @@ On the **first push**, a new Test Case is created in Azure DevOps and its ID is 
 | Java JUnit 5 | `@Tag("tc:12345")` above `@Test` |
 | Python pytest | `@pytest.mark.tc(12345)` above `def test_*` |
 | JavaScript/TS (Jest/Jasmine/WebdriverIO) | `// @tc:12345` comment above `it()`/`test()` |
+| Playwright | `// @tc:12345` comment above `test()` |
+| Puppeteer | `// @tc:12345` comment above `it()`/`test()` |
+| Cypress | `// @tc:12345` comment above `it()`/`specify()` |
+| TestCafe | `// @tc:12345` comment above `test()` |
+| Detox | `// @tc:12345` comment above `it()`/`test()` |
+| Espresso (Java/Kotlin) | `// @tc:12345` comment above `@Test` |
+| XCUITest (Swift) | `// @tc:12345` comment above `func test*()` |
+| Flutter (Dart) | `// @tc:12345` comment above `testWidgets()`/`test()` |
 | CSV | Numeric ID in column A |
 | Excel | Numeric ID in cell A |
 
 ---
 
-## Installation
+## Quick start
+
+**Step 1 — Install**
 
 ```bash
 npm install -g ado-sync
-# or run without installing
+# or run once without installing
 npx ado-sync --help
 ```
 
----
-
-## Quick start
+**Step 2 — Generate a config file**
 
 ```bash
-# 1. Generate a config file
 ado-sync init              # creates ado-sync.json
-ado-sync init ado-sync.yml # YAML format
-
-# 2. Edit the config with your org, project, plan ID, and token
-export AZURE_DEVOPS_TOKEN=your_personal_access_token
-
-# 3. Preview what will be created
-ado-sync push --dry-run
-
-# 4. Push to Azure DevOps
-ado-sync push
+ado-sync init ado-sync.yml # YAML format if you prefer
 ```
 
-Minimal config:
+**Step 3 — Fill in your details**
+
+Open `ado-sync.json` and replace the placeholders:
 
 ```json
 {
-  "orgUrl": "https://dev.azure.com/my-org",
-  "project": "MyProject",
+  "orgUrl": "https://dev.azure.com/YOUR-ORG",
+  "project": "YOUR-PROJECT-NAME",
   "auth": { "type": "pat", "token": "$AZURE_DEVOPS_TOKEN" },
-  "testPlan": { "id": 1234 },
+  "testPlan": { "id": 12345 },
   "local": { "type": "gherkin", "include": "specs/**/*.feature" }
 }
 ```
+
+| Field | Where to find it |
+|-------|-----------------|
+| `orgUrl` | Azure DevOps → top-left org name → `https://dev.azure.com/<org>` |
+| `project` | Azure DevOps → your project name (shown in the breadcrumb) |
+| `testPlan.id` | Test Plans → click your plan → the number in the URL |
+| `AZURE_DEVOPS_TOKEN` | Azure DevOps → User Settings → Personal Access Tokens → New Token (scope: Test Management read/write) |
+
+**Step 4 — Set your token**
+
+```bash
+export AZURE_DEVOPS_TOKEN=your_personal_access_token
+# or add it to a .env file in this directory
+```
+
+**Step 5 — Preview then push**
+
+```bash
+ado-sync push --dry-run   # preview — no changes made
+ado-sync push             # create / update Test Cases in Azure DevOps
+```
+
+On the first push, new Test Cases are created and their IDs are written back into your local files (`@tc:12345`). Every subsequent push updates them.
 
 ---
 
@@ -130,6 +162,13 @@ ado-sync push
 ado-sync push --dry-run
 ado-sync push --tags "@smoke and not @wip"
 ado-sync push --config-override testPlan.id=9999
+
+# AI-generated test steps for code files (Java, C#, Python, JS/TS, Playwright)
+ado-sync push --ai-provider heuristic           # fast regex-based (no model needed)
+ado-sync push --ai-provider local --ai-model ~/.cache/models/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf
+ado-sync push --ai-provider ollama --ai-model qwen2.5-coder:7b
+ado-sync push --ai-provider openai  --ai-key $OPENAI_API_KEY
+ado-sync push --ai-provider none                # disable AI summary entirely
 ```
 
 | Scenario state | Action |
@@ -152,9 +191,98 @@ ado-sync pull --tags "@smoke"
 ```bash
 ado-sync status
 ado-sync status --tags "@smoke"
+ado-sync status --ai-provider heuristic
 ```
 
 Compares local specs against Azure DevOps and prints a diff — no changes made.
+
+### AI auto-summary
+
+For code-based test types (`java`, `csharp`, `python`, `javascript`, `playwright`, `cypress`, `testcafe`, `detox`, `espresso`, `xcuitest`, `flutter`), ado-sync reads your test function bodies and automatically generates a TC **title**, **description**, and **steps** — so you don't need doc comments on every test.
+
+> **No setup required to try it.** `ado-sync push` always works, even without a model — it falls back to fast regex-based analysis automatically.
+
+#### Choose a provider
+
+| Provider | Quality | Setup |
+|---|---|---|
+| `local` *(default)* | Good–Excellent | Download a GGUF model file (see below) |
+| `heuristic` | Basic | None — works offline, zero dependencies |
+| `ollama` | Good–Excellent | Install [Ollama](https://ollama.com) + `ollama pull qwen2.5-coder:7b` |
+| `openai` | Excellent | `--ai-key $OPENAI_API_KEY` |
+| `anthropic` | Excellent | `--ai-key $ANTHROPIC_API_KEY` |
+
+#### Option A — No setup (heuristic, instant)
+
+```bash
+ado-sync push --ai-provider heuristic
+```
+
+Uses regex pattern matching. No model download, no internet required. Good for CI pipelines.
+
+#### Option B — Local LLM (best privacy, no API cost)
+
+`node-llama-cpp` is bundled — **no extra install needed**. You only need to download a model file once.
+
+**1. Pick a model size**
+
+| Model | RAM needed | Quality |
+|-------|-----------|---------|
+| 1.5B Q4_K_M *(start here)* | ~1.1 GB | Good |
+| 7B Q4_K_M | ~4.5 GB | Better |
+| 14B Q4_K_M | ~8.5 GB | Excellent |
+
+**2. Download the model**
+
+macOS / Linux:
+```bash
+mkdir -p ~/.cache/ado-sync/models
+curl -L -o ~/.cache/ado-sync/models/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf \
+  "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
+```
+
+Windows (PowerShell):
+```powershell
+New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\ado-sync\models"
+Invoke-WebRequest `
+  -Uri "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf" `
+  -OutFile "$env:LOCALAPPDATA\ado-sync\models\qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
+```
+
+**3. Run push with the model**
+
+```bash
+# macOS / Linux
+ado-sync push --ai-model ~/.cache/ado-sync/models/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf
+
+# Windows
+ado-sync push --ai-model "$env:LOCALAPPDATA\ado-sync\models\qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
+```
+
+#### Option C — Ollama (model management UI, easy upgrades)
+
+```bash
+# 1. Install Ollama from https://ollama.com, then:
+ollama pull qwen2.5-coder:7b
+
+# 2. Push using Ollama
+ado-sync push --ai-provider ollama --ai-model qwen2.5-coder:7b
+```
+
+#### Option D — Cloud AI (OpenAI / Anthropic)
+
+```bash
+ado-sync push --ai-provider openai   --ai-key $OPENAI_API_KEY
+ado-sync push --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
+```
+
+#### Disable AI entirely
+
+```bash
+ado-sync push --ai-provider none
+```
+
+> Tests with existing doc comments (JSDoc / Javadoc / C# XML doc / Python docstring) that already have both steps and a description are **never overwritten**. Local source files are **never modified** by AI summary.
 
 ### `publish-test-results`
 
@@ -195,7 +323,8 @@ ado-sync push --config-override sync.disableLocalChanges=true
 | Topic | Link |
 |-------|------|
 | Full configuration reference | [docs/configuration.md](docs/configuration.md) |
-| Spec file formats (Gherkin, Markdown, C# MSTest, CSV, Excel) | [docs/spec-formats.md](docs/spec-formats.md) |
+| Spec file formats (Gherkin, Markdown, C# MSTest, CSV, Excel, JS/TS) | [docs/spec-formats.md](docs/spec-formats.md) |
+| Work Item Links (User Story, Bug, etc.) | [docs/spec-formats.md#work-item-links](docs/spec-formats.md#work-item-links) |
 | Advanced features (format, state, fieldUpdates, customizations, attachments, CI mode) | [docs/advanced.md](docs/advanced.md) |
 | Publishing test results | [docs/publish-test-results.md](docs/publish-test-results.md) |
 
@@ -383,7 +512,7 @@ Recommended `ado-sync.json` for Playwright:
   "auth": { "type": "pat", "token": "$AZURE_DEVOPS_TOKEN" },
   "testPlan": { "id": 1234 },
   "local": {
-    "type": "javascript",
+    "type": "playwright",
     "include": ["tests/**/*.spec.ts"],
     "exclude": ["**/*.helper.ts"]
   },
@@ -412,12 +541,149 @@ Recommended `ado-sync.json` for Jest/Jasmine/WebdriverIO:
 }
 ```
 
+### Detox (React Native): create TCs and push
+
+```bash
+# 1. Create TCs and write IDs back into .ts files
+ado-sync push --dry-run   # preview
+ado-sync push             # writes // @tc:ID above each it() / test()
+
+# 2. Run Detox tests (Jest runner)
+npx detox test --configuration ios.sim.release
+
+# 3. Publish results (Jest JUnit reporter)
+ado-sync publish-test-results --testResult results/junit.xml --testResultFormat junit
+```
+
+Recommended `ado-sync.json` for Detox:
+
+```json
+{
+  "orgUrl": "https://dev.azure.com/my-org",
+  "project": "MyProject",
+  "auth": { "type": "pat", "token": "$AZURE_DEVOPS_TOKEN" },
+  "testPlan": { "id": 1234 },
+  "local": {
+    "type": "detox",
+    "include": ["e2e/**/*.test.ts"]
+  },
+  "sync": { "markAutomated": true }
+}
+```
+
+### Espresso (Android): create TCs and push
+
+```bash
+# 1. Create TCs and write IDs back into .java / .kt files
+ado-sync push --dry-run   # preview
+ado-sync push             # writes // @tc:ID above @Test
+
+# 2. Run instrumented tests and generate JUnit XML
+./gradlew connectedAndroidTest
+# XML output: app/build/outputs/androidTest-results/connected/TEST-*.xml
+
+# 3. Publish results
+ado-sync publish-test-results \
+  --testResult "app/build/outputs/androidTest-results/connected/TEST-*.xml" \
+  --testResultFormat junit
+```
+
+Recommended `ado-sync.json` for Espresso:
+
+```json
+{
+  "orgUrl": "https://dev.azure.com/my-org",
+  "project": "MyProject",
+  "auth": { "type": "pat", "token": "$AZURE_DEVOPS_TOKEN" },
+  "testPlan": { "id": 1234 },
+  "local": {
+    "type": "espresso",
+    "include": ["app/src/androidTest/**/*.java", "app/src/androidTest/**/*.kt"],
+    "exclude": ["**/*BaseTest.java"]
+  },
+  "sync": { "markAutomated": true }
+}
+```
+
+### XCUITest (iOS): create TCs and push
+
+```bash
+# 1. Create TCs and write IDs back into .swift files
+ado-sync push --dry-run   # preview
+ado-sync push             # writes // @tc:ID above func test*()
+
+# 2. Run XCUITest and export JUnit XML
+xcodebuild test \
+  -project MyApp.xcodeproj \
+  -scheme MyApp \
+  -destination 'platform=iOS Simulator,name=iPhone 15' \
+  -resultBundlePath TestResults.xcresult
+xcrun xcresulttool get --path TestResults.xcresult --format junit > results/junit.xml
+
+# 3. Publish results
+ado-sync publish-test-results --testResult results/junit.xml --testResultFormat junit
+```
+
+Recommended `ado-sync.json` for XCUITest:
+
+```json
+{
+  "orgUrl": "https://dev.azure.com/my-org",
+  "project": "MyProject",
+  "auth": { "type": "pat", "token": "$AZURE_DEVOPS_TOKEN" },
+  "testPlan": { "id": 1234 },
+  "local": {
+    "type": "xcuitest",
+    "include": ["UITests/**/*.swift"],
+    "exclude": ["UITests/**/*Helper.swift", "UITests/**/*Base.swift"]
+  },
+  "sync": { "markAutomated": true }
+}
+```
+
+### Flutter: create TCs and push
+
+```bash
+# 1. Create TCs and write IDs back into _test.dart files
+ado-sync push --dry-run   # preview
+ado-sync push             # writes // @tc:ID above testWidgets() / test()
+
+# 2. Run Flutter tests with machine-readable output
+flutter test --machine > results/flutter_test.jsonl
+# Or generate JUnit XML with the flutter_test_junit package:
+flutter test --reporter junit > results/junit.xml
+
+# 3. Publish results
+ado-sync publish-test-results --testResult results/junit.xml --testResultFormat junit
+```
+
+Recommended `ado-sync.json` for Flutter:
+
+```json
+{
+  "orgUrl": "https://dev.azure.com/my-org",
+  "project": "MyProject",
+  "auth": { "type": "pat", "token": "$AZURE_DEVOPS_TOKEN" },
+  "testPlan": { "id": 1234 },
+  "local": {
+    "type": "flutter",
+    "include": ["test/**/*_test.dart", "integration_test/**/*_test.dart"]
+  },
+  "sync": { "markAutomated": true }
+}
+```
+
 ### CI pipeline
 
 ```yaml
 # GitHub Actions
 - name: Sync test cases to Azure DevOps
   run: ado-sync push --config-override sync.disableLocalChanges=true
+  env:
+    AZURE_DEVOPS_TOKEN: ${{ secrets.AZURE_DEVOPS_TOKEN }}
+
+- name: Sync test cases to Azure DevOps (with AI summary)
+  run: ado-sync push --ai-provider heuristic --config-override sync.disableLocalChanges=true
   env:
     AZURE_DEVOPS_TOKEN: ${{ secrets.AZURE_DEVOPS_TOKEN }}
 
@@ -432,6 +698,109 @@ Recommended `ado-sync.json` for Jest/Jasmine/WebdriverIO:
 ```bash
 ado-sync status
 ```
+
+---
+
+## Work Item Links
+
+Link each Test Case to related Azure DevOps work items (User Stories, Bugs, etc.) automatically on every push.
+
+### Configure `sync.links`
+
+```json
+{
+  "sync": {
+    "links": [
+      {
+        "prefix": "story",
+        "relationship": "Microsoft.VSTS.Common.TestedBy-Reverse",
+        "workItemType": "User Story"
+      },
+      {
+        "prefix": "bug",
+        "relationship": "System.LinkTypes.Related",
+        "workItemType": "Bug"
+      }
+    ]
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `prefix` | The tag prefix used in your spec files (e.g. `story` → `@story:555`) |
+| `relationship` | ADO relation type (see common values below) |
+| `workItemType` | Optional — used in log output only |
+
+**Common relationship values:**
+
+| Relationship | Meaning |
+|---|---|
+| `Microsoft.VSTS.Common.TestedBy-Reverse` | Test Case "Tested By" ↔ User Story |
+| `System.LinkTypes.Related` | Simple "Related" link |
+| `System.LinkTypes.Dependency-Forward` | "Successor" (this item depends on) |
+| `System.LinkTypes.Hierarchy-Reverse` | "Parent" link |
+
+### Tag your tests
+
+**Gherkin (`.feature`):**
+```gherkin
+# @story:555 @bug:789
+Scenario: User can log in
+  Given I am on the login page
+```
+
+**JavaScript / TypeScript (Jest, Playwright, Cypress, TestCafe, Puppeteer):**
+```typescript
+// @story:555
+// @bug:789
+test('user can log in', async ({ page }) => { ... });
+```
+
+**Markdown (`.md`):**
+```markdown
+### User can log in @story:555 @bug:789
+
+1. Navigate to the login page
+2. Check: Login form is visible
+```
+
+**Python (pytest):**
+```python
+# @story:555 @bug:789
+def test_user_can_log_in():
+    ...
+```
+
+**C# / Java / Espresso:** Add `// @story:555` in the comment block immediately above the `[TestMethod]` / `@Test` line.
+
+**Swift (XCUITest):**
+```swift
+// @story:555
+// @bug:789
+func testUserCanLogin() { ... }
+```
+
+**Dart (Flutter):**
+```dart
+// @story:555
+// @bug:789
+testWidgets('user can log in', (WidgetTester tester) async { ... });
+```
+
+**Detox / React Native:**
+```typescript
+// @story:555
+// @bug:789
+it('user can log in', async () => { ... });
+```
+
+### How it works
+
+- On each `push`, ado-sync reads the `@story:N` / `@bug:N` tags from the spec file.
+- **New links** found in the file are added to the Test Case in Azure DevOps.
+- **Stale links** (present in Azure but no longer tagged locally) are removed automatically.
+- The sync is non-destructive for links not covered by a configured prefix — only the prefixes listed in `sync.links` are managed.
 
 ---
 

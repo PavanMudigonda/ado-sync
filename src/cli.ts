@@ -18,6 +18,7 @@ import * as path from 'path';
 
 import pkg from '../package.json';
 import { applyOverrides, CONFIG_TEMPLATE_JSON, CONFIG_TEMPLATE_YAML, loadConfig, resolveConfigPath } from './config';
+import { AiSummaryOpts } from './ai/summarizer';
 import { pull, push, status } from './sync/engine';
 import { publishTestResults } from './sync/publish-results';
 import { SyncResult } from './types';
@@ -37,6 +38,29 @@ program.option('-c, --config <path>', 'Path to config file (default: ado-sync.js
 /** Collect repeatable option values into an array. */
 function collect(value: string, previous: string[]): string[] {
   return [...previous, value];
+}
+
+// ─── AI summary helper ────────────────────────────────────────────────────────
+
+/**
+ * Build AiSummaryOpts from parsed CLI opts.
+ * Returns undefined only when --ai-provider none is passed explicitly.
+ */
+function buildAiOpts(opts: {
+  aiProvider?: string;
+  aiModel?: string;
+  aiUrl?: string;
+  aiKey?: string;
+}): AiSummaryOpts | undefined {
+  if (opts.aiProvider === 'none') return undefined;
+  const provider = (opts.aiProvider ?? 'local') as AiSummaryOpts['provider'];
+  return {
+    provider,
+    ...(opts.aiModel && { model: opts.aiModel }),
+    ...(opts.aiUrl   && { baseUrl: opts.aiUrl }),
+    ...(opts.aiKey   && { apiKey: opts.aiKey }),
+    heuristicFallback: true,
+  };
 }
 
 // ─── init ─────────────────────────────────────────────────────────────────────
@@ -68,6 +92,10 @@ program
   .option('--dry-run', 'Show what would change without making any modifications')
   .option('--tags <expression>', 'Only sync scenarios matching this tag expression (e.g. "@smoke and not @wip")')
   .option('--config-override <path=value>', 'Override a config value (repeatable, e.g. --config-override sync.tagPrefix=mytag)', collect, [])
+  .option('--ai-provider <provider>', 'AI provider for test step generation: local (default, node-llama-cpp), heuristic, ollama, openai, anthropic, none (disable)')
+  .option('--ai-model <model>', 'local: path to GGUF file; ollama: model tag; openai/anthropic: model name')
+  .option('--ai-url <url>', 'Base URL for ollama or OpenAI-compatible endpoint')
+  .option('--ai-key <key>', 'API key for openai or anthropic')
   .action(async (opts) => {
     const globalOpts = program.opts();
     try {
@@ -85,9 +113,10 @@ program
       if (opts.configOverride?.length) console.log(chalk.dim(`Overrides: ${opts.configOverride.join(', ')}`));
       console.log('');
 
+      const aiSummary = buildAiOpts(opts);
       const isTTY = process.stdout.isTTY ?? false;
       const onProgress = createProgressCallback(isTTY);
-      const results = await push(config, configDir, { dryRun: opts.dryRun, tags: opts.tags, onProgress });
+      const results = await push(config, configDir, { dryRun: opts.dryRun, tags: opts.tags, onProgress, aiSummary });
       if (isTTY) clearProgressLine();
       printResults(results, config.toolSettings?.outputLevel);
     } catch (err: any) {
@@ -136,6 +165,10 @@ program
   .description('Show diff between local specs and Azure DevOps without making changes')
   .option('--tags <expression>', 'Only check scenarios matching this tag expression')
   .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
+  .option('--ai-provider <provider>', 'AI provider for test step generation: local (default, node-llama-cpp), heuristic, ollama, openai, anthropic, none (disable)')
+  .option('--ai-model <model>', 'local: path to GGUF file; ollama: model tag; openai/anthropic: model name')
+  .option('--ai-url <url>', 'Base URL for ollama or OpenAI-compatible endpoint')
+  .option('--ai-key <key>', 'API key for openai or anthropic')
   .action(async (opts) => {
     const globalOpts = program.opts();
     try {
@@ -149,9 +182,10 @@ program
       if (opts.tags) console.log(chalk.dim(`Tags:   ${opts.tags}`));
       console.log('');
 
+      const aiSummary = buildAiOpts(opts);
       const isTTY = process.stdout.isTTY ?? false;
       const onProgress = createProgressCallback(isTTY);
-      const results = await status(config, configDir, { tags: opts.tags, onProgress });
+      const results = await status(config, configDir, { tags: opts.tags, onProgress, aiSummary });
       if (isTTY) clearProgressLine();
       printResults(results, config.toolSettings?.outputLevel);
     } catch (err: any) {

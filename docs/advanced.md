@@ -348,3 +348,143 @@ ado-sync push --config-override sync.disableLocalChanges=true
 When a scenario is deleted from a local file but its Test Case still exists in the Azure suite, ado-sync detects this on the next `push` and appends the tag `ado-sync:removed` to the Azure Test Case (without deleting it). A `−` removed line is printed in the output.
 
 To completely remove the Test Case from Azure, delete it manually in Test Plans after reviewing.
+
+---
+
+## AI auto-summary for code tests
+
+When pushing code-based test types (`java`, `csharp`, `python`, `javascript`, `playwright`), ado-sync reads each test function body and automatically generates a TC **title**, **description**, and numbered **steps**.
+
+**What gets generated and when:**
+
+| Test state | What AI generates |
+|------------|------------------|
+| No doc comment at all | Title + description + all steps |
+| Has doc comment steps but no description | Description only (existing steps kept) |
+| Has both steps and a description | Nothing — left unchanged |
+
+Local source files are **never modified** by the AI summary feature.
+
+---
+
+### Providers
+
+| Provider | Quality | Requires |
+|----------|---------|---------|
+| `local` *(default)* | Good–Excellent | A GGUF model file (see setup below) |
+| `heuristic` | Basic | Nothing — zero dependencies, works offline |
+| `ollama` | Good–Excellent | [Ollama](https://ollama.com) server running locally |
+| `openai` | Excellent | OpenAI API key |
+| `anthropic` | Excellent | Anthropic API key |
+
+> **No setup required to try it.** If no `--ai-model` is passed for `local`, it falls back to `heuristic` silently — so `ado-sync push` always works.
+
+### CLI flags
+
+| Flag | Description |
+|------|-------------|
+| `--ai-provider <p>` | Provider to use. Default: `local`. Pass `none` to disable entirely. |
+| `--ai-model <m>` | For `local`: path to `.gguf` file. For `ollama`/`openai`/`anthropic`: model name/tag. |
+| `--ai-url <url>` | Base URL for `ollama` or an OpenAI-compatible endpoint. |
+| `--ai-key <key>` | API key for `openai` or `anthropic`. Supports `$ENV_VAR` references. |
+
+---
+
+### Setting up the local provider (step by step)
+
+`node-llama-cpp` is bundled with ado-sync — **no separate install needed**. You only need to download a model file once.
+
+#### Step 1 — Choose a model size
+
+All models use the `Q4_K_M` quantization (best balance of size and quality).
+
+| Model | RAM needed | Quality | HF repo |
+|-------|-----------|---------|---------|
+| 0.5B | ~400 MB | Minimal | `Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF` |
+| **1.5B** *(start here)* | ~1.1 GB | Good | `Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF` |
+| 3B | ~2 GB | Better | `Qwen/Qwen2.5-Coder-3B-Instruct-GGUF` |
+| 7B | ~4.5 GB | Best local | `Qwen/Qwen2.5-Coder-7B-Instruct-GGUF` |
+| 14B | ~8.5 GB | Excellent | `Qwen/Qwen2.5-Coder-14B-Instruct-GGUF` |
+
+#### Step 2 — Download the model
+
+**macOS / Linux:**
+```bash
+mkdir -p ~/.cache/ado-sync/models
+
+# curl (no extra tools needed)
+curl -L -o ~/.cache/ado-sync/models/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf \
+  "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
+
+# or huggingface-cli (shows a progress bar — useful for larger models)
+pip install -U huggingface_hub
+huggingface-cli download Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF \
+  qwen2.5-coder-1.5b-instruct-q4_k_m.gguf \
+  --local-dir ~/.cache/ado-sync/models
+```
+
+**Windows (PowerShell):**
+```powershell
+New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\ado-sync\models"
+
+# Invoke-WebRequest
+Invoke-WebRequest `
+  -Uri "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf" `
+  -OutFile "$env:LOCALAPPDATA\ado-sync\models\qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
+
+# or huggingface-cli (shows a progress bar)
+pip install -U huggingface_hub
+huggingface-cli download Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF `
+  qwen2.5-coder-1.5b-instruct-q4_k_m.gguf `
+  --local-dir "$env:LOCALAPPDATA\ado-sync\models"
+```
+
+#### Step 3 — Push with the model
+
+```bash
+# macOS / Linux
+ado-sync push --ai-model ~/.cache/ado-sync/models/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf
+
+# Windows
+ado-sync push --ai-model "$env:LOCALAPPDATA\ado-sync\models\qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
+```
+
+The model is loaded once and reused for all tests in the run — no repeated loading overhead.
+
+---
+
+### Setting up Ollama
+
+```bash
+# 1. Install Ollama from https://ollama.com
+
+# 2. Pull a model
+ollama pull qwen2.5-coder:7b
+
+# 3. Push (Ollama server must be running)
+ado-sync push --ai-provider ollama --ai-model qwen2.5-coder:7b
+```
+
+### Setting up OpenAI / Anthropic
+
+```bash
+ado-sync push --ai-provider openai    --ai-key $OPENAI_API_KEY
+ado-sync push --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
+```
+
+### Disabling AI summary
+
+```bash
+ado-sync push --ai-provider none
+```
+
+---
+
+### How it works internally
+
+1. After parsing local files, ado-sync checks each test for a missing description or missing steps.
+2. For each test that needs either, ado-sync extracts the raw function body from the source file.
+3. The body is sent to the configured provider with a prompt requesting `Title:`, `Description:`, and `N. Step` / `N. Check:` lines.
+4. Title and steps are applied only when the test had no existing steps. Description is applied only when the test had no existing description.
+5. If the LLM call fails (network error, model not found, etc.), it automatically falls back to `heuristic`.
+6. The `local` provider caches the GGUF model in memory for the entire push run — a 50-test suite loads it only once.
