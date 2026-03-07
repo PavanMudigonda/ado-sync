@@ -25,8 +25,12 @@ import { parseExcelFile } from '../parsers/excel';
 import { parseGherkinFile } from '../parsers/gherkin';
 import { parseJavaFile } from '../parsers/java';
 import { parseJavaScriptFile } from '../parsers/javascript';
+import { parseTestCafeFile } from '../parsers/testcafe';
+import { parseSwiftFile } from '../parsers/swift';
+import { parseDartFile } from '../parsers/dart';
 import { parseMarkdownFile } from '../parsers/markdown';
 import { parsePythonFile } from '../parsers/python';
+import { AiSummaryOpts, summarizeTest } from '../ai/summarizer';
 import { AzureTestCase, ParsedStep, ParsedTest, SyncConfig, SyncResult, TestPlanEntry } from '../types';
 import { CacheEntry, hashSteps, hashString, loadCache, saveCache,SyncCache } from './cache';
 import { writebackId } from './writeback';
@@ -107,7 +111,23 @@ async function parseLocalFiles(
           tests = parsePythonFile(fp, tagPrefix, linkConfigs);
           break;
         case 'javascript':
+        case 'playwright':
+        case 'puppeteer':
+        case 'cypress':
+        case 'detox':
           tests = parseJavaScriptFile(fp, tagPrefix, linkConfigs);
+          break;
+        case 'testcafe':
+          tests = parseTestCafeFile(fp, tagPrefix, linkConfigs);
+          break;
+        case 'espresso':
+          tests = parseJavaFile(fp, tagPrefix, linkConfigs);
+          break;
+        case 'xcuitest':
+          tests = parseSwiftFile(fp, tagPrefix, linkConfigs);
+          break;
+        case 'flutter':
+          tests = parseDartFile(fp, tagPrefix, linkConfigs);
           break;
         default:
           tests = parseMarkdownFile(fp, tagPrefix, linkConfigs, attachmentsConfig);
@@ -133,6 +153,8 @@ export interface SyncOpts {
   tags?: string;
   /** Called after each test case is processed. Useful for rendering a live progress bar. */
   onProgress?: (done: number, total: number, result: SyncResult) => void;
+  /** AI auto-summary options: generate title/steps for tests that have none. */
+  aiSummary?: AiSummaryOpts;
 }
 
 // ─── Multi-plan helpers ───────────────────────────────────────────────────────
@@ -183,6 +205,32 @@ async function pushSingle(
 ): Promise<SyncResult[]> {
   const files = await discoverFiles(config.local.include, config.local.exclude, configDir);
   const tests = await parseLocalFiles(files, config, opts.tags);
+
+  // AI auto-summary: for code-based local types, default to the local node-llama-cpp
+  // provider (with heuristic fallback) when no explicit aiSummary opts are provided.
+  // If no GGUF model path is set, the local provider transparently falls back to
+  // heuristic mode so the push always succeeds even without a model installed.
+  const CODE_TYPES = new Set(['javascript', 'playwright', 'puppeteer', 'cypress', 'testcafe', 'detox', 'espresso', 'xcuitest', 'flutter', 'java', 'csharp', 'python']);
+  const effectiveAiOpts: AiSummaryOpts | undefined =
+    opts.aiSummary ?? (CODE_TYPES.has(config.local.type) ? { provider: 'local', heuristicFallback: true } : undefined);
+
+  if (effectiveAiOpts) {
+    for (const test of tests) {
+      const needsSteps = test.steps.length === 0;
+      const needsDescription = !test.description;
+      if (needsSteps || needsDescription) {
+        const result = await summarizeTest(test, config.local.type, effectiveAiOpts);
+        if (needsSteps) {
+          test.title = result.title;
+          test.steps = result.steps;
+        }
+        if (needsDescription && result.description) {
+          test.description = result.description;
+        }
+      }
+    }
+  }
+
   const client = await AzureClient.create(config);
   const tagPrefix = config.sync?.tagPrefix ?? 'tc';
   const titleField = config.sync?.titleField ?? 'System.Title';
@@ -515,9 +563,9 @@ async function pullSingle(
 export async function status(
   config: SyncConfig,
   configDir: string,
-  opts: Pick<SyncOpts, 'tags' | 'onProgress'> = {}
+  opts: Pick<SyncOpts, 'tags' | 'onProgress' | 'aiSummary'> = {}
 ): Promise<SyncResult[]> {
-  return push(config, configDir, { dryRun: true, tags: opts.tags, onProgress: opts.onProgress });
+  return push(config, configDir, { dryRun: true, tags: opts.tags, onProgress: opts.onProgress, aiSummary: opts.aiSummary });
 }
 
 // ─── Cache helpers ────────────────────────────────────────────────────────────
@@ -542,7 +590,7 @@ function applyRemoteToLocal(
   newTitle: string,
   newSteps: ParsedStep[],
   newDescription: string | undefined,
-  localType: 'gherkin' | 'markdown' | 'csv' | 'excel' | 'csharp' | 'java' | 'python' | 'javascript',
+  localType: 'gherkin' | 'markdown' | 'csv' | 'excel' | 'csharp' | 'java' | 'python' | 'javascript' | 'playwright' | 'puppeteer' | 'cypress' | 'testcafe' | 'detox' | 'espresso' | 'xcuitest' | 'flutter',
   tagPrefix: string
 ): void {
   if (localType === 'gherkin') {

@@ -1,18 +1,28 @@
 /**
  * JavaScript / TypeScript test parser for azure-test-sync.
  *
- * Supports Jest, Jasmine, and WebdriverIO (which uses Jest or Jasmine as its
- * underlying test runner).  All three frameworks share the same
- * describe() / it() / test() API for test organisation, so a single parser
- * handles all of them.
+ * Supports Jest, Jasmine, WebdriverIO, Playwright Test, Puppeteer (Mocha/Jest),
+ * and Cypress. All frameworks share the same describe() / it() / test() API for
+ * test organisation, so a single parser handles all of them.
  *
  * Cucumber (.feature files) is already handled by the existing 'gherkin' type.
+ * TestCafe uses a fixture/test API and is handled by the separate 'testcafe' type.
  *
  * Detected test functions:
- *   it(title, fn)          test(title, fn)
- *   it.only / test.only    it.skip / test.skip
- *   xit / xtest            (Jasmine skip — still synced to Azure)
+ *   it(title, fn)                    test(title, fn)
+ *   it.only / test.only              it.skip / test.skip
+ *   xit / xtest                      (Jasmine skip — still synced to Azure)
  *   it.concurrent / test.concurrent
+ *   test.fixme(title, fn)            (Playwright — annotates test as fixme)
+ *   test.fail(title, fn)             (Playwright — marks test as expected to fail)
+ *   specify(title, fn)               specify.only / specify.skip  (Cypress alias for it)
+ *
+ * Detected describe functions (for nesting):
+ *   describe()  describe.only()  describe.skip()  describe.concurrent()
+ *   test.describe()              (Playwright)
+ *   test.describe.only()         test.describe.skip()
+ *   test.describe.parallel()     test.describe.serial()
+ *   context()  context.only()  context.skip()  (Cypress alias for describe)
  *
  * Source mapping:
  *   JSDoc /** ... * / first non-numbered line    → TC Title
@@ -39,14 +49,15 @@ import { extractLinkRefs, extractPathTags } from './shared';
 // ─── Test function detection ──────────────────────────────────────────────────
 
 const TEST_FN_PREFIX =
-  '(?:it|test|xit|xtest|it\\.only|test\\.only|it\\.skip|test\\.skip|it\\.concurrent|test\\.concurrent)';
+  '(?:it|test|xit|xtest|specify|it\\.only|test\\.only|specify\\.only|it\\.skip|test\\.skip|specify\\.skip|it\\.concurrent|test\\.concurrent|test\\.fixme|test\\.fail)';
 
 const TEST_CALL_RE      = new RegExp(`^${TEST_FN_PREFIX}\\s*\\(`);
 const TEST_TITLE_RE     = new RegExp(
   `^${TEST_FN_PREFIX}\\s*\\(\\s*(['"\`])((?:\\\\.|[^\\\\])*?)\\1`
 );
+// context() and context.only/skip are Cypress aliases for describe()
 const DESCRIBE_TITLE_RE =
-  /^describe(?:\.(?:only|skip|concurrent))?\s*\(\s*(['"`])((?:\\.|[^\\])*?)\1/;
+  /^(?:describe(?:\.(?:only|skip|concurrent))?|context(?:\.(?:only|skip))?|test\.describe(?:\.(?:only|skip|parallel|serial|configure))?)\s*\(\s*(['"`])((?:\\.|[^\\])*?)\1/;
 
 function isTestLine(trimmedLine: string): boolean {
   return TEST_CALL_RE.test(trimmedLine);
