@@ -48,7 +48,7 @@ ado-sync publish-test-results \
 | NUnit XML (native) | `.xml` | Yes (`<test-run>` root) | Yes — via `[Property("tc","ID")]` | `<output>` + `<attachments>` |
 | JUnit XML | `.xml` | Yes (`<testsuites>` / `<testsuite>` root) | Optional — via `<property name="tc" value="ID"/>` | `<system-out>`, `<system-err>`, `[[ATTACHMENT\|path]]` (Playwright) |
 | Cucumber JSON | `.json` | Yes (JSON array, Cucumber format) | Yes — via `@tc:ID` tag on scenario | `step.embeddings[]` (base64 screenshots/video) |
-| Playwright JSON | `.json` | Yes (JSON object with `suites` key) | Via `@tc:ID` in test title | `test.results[].attachments[]` (screenshots, videos, traces) |
+| Playwright JSON | `.json` | Yes (JSON object with `suites` key) | Yes — via `test.annotations[{ type: 'tc', description: 'ID' }]` (preferred) or `@tc:ID` in test title | `test.results[].attachments[]` (screenshots, videos, traces) |
 
 > **NUnit via TRX**: when NUnit tests are run through the VSTest adapter (`--logger trx`), `[Property]` values are **not** included in the TRX output. Use `--logger "nunit3;LogFileName=results.xml"` to get the native NUnit XML format, which does include property values.
 
@@ -64,7 +64,7 @@ ado-sync publish-test-results \
 
 Results are linked to Azure Test Cases in priority order:
 
-1. **TC ID from file** (preferred) — when the result file contains a TC ID (`[TestProperty]`, `[Property]`, `<property name="tc">`, or `@tc:` tag), the result is posted with `testCase.id` set directly. This is robust to class/method renames.
+1. **TC ID from file** (preferred) — when the result file contains a TC ID (`[TestProperty]`, `[Property]`, `<property name="tc">`, `@tc:` tag, or Playwright `test.annotations[{ type: 'tc' }]`), the result is posted with `testCase.id` set directly. This is robust to class/method renames.
 2. **AutomatedTestName matching** (fallback) — when no TC ID is found, the result is posted with `automatedTestName` = the fully-qualified method name. Azure DevOps links it to a TC whose `AutomatedTestName` field matches. Requires `sync.markAutomated: true` on push.
 
 ---
@@ -314,8 +314,8 @@ ado-sync publish-test-results \
 | Jest | JUnit XML | ⚠️ optional `<property name="tc">` | `<system-out>`, `<system-err>` | ✅ |
 | WebdriverIO / Jasmine | JUnit XML | ⚠️ optional `<property name="tc">` | `<system-out>`, `<system-err>` | ✅ |
 | Cucumber JS | Cucumber JSON | ✅ `@tc:ID` tag | `step.embeddings[]` (base64 screenshots/video) | ✅ |
-| Playwright | Playwright JSON | Via `@tc:ID` in test title | Files from `attachments[].path` (screenshots, videos, traces) | ✅ |
-| Playwright | JUnit XML | Via `@tc:ID` in test title | `[[ATTACHMENT\|path]]` referenced files | ✅ |
+| Playwright | Playwright JSON | ✅ native `annotation: { type: 'tc', description: 'ID' }`; or `@tc:ID` in test title | Files from `attachments[].path` (screenshots, videos, traces) | ✅ |
+| Playwright | JUnit XML | ⚠️ `@tc:ID` in test title only (no annotation in JUnit format) | `[[ATTACHMENT\|path]]` referenced files | ✅ |
 
 ---
 

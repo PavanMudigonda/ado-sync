@@ -216,6 +216,210 @@ export function writebackJavaScript(test: ParsedTest, id: number, tagPrefix: str
   fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
 }
 
+// ─── Playwright writeback ─────────────────────────────────────────────────────
+
+/**
+ * Write (or update) the TC ID in a Playwright test file using the native
+ * annotation API rather than a comment.
+ *
+ * Target format: annotation: { type: 'tc', description: '12345' }
+ * inserted/updated in the test call's options object.
+ *
+ * Three-phase strategy:
+ *  1. Update existing annotation — find  type: '<tagPrefix>'  within 25 lines,
+ *     then replace the adjacent  description  value in-place.  Handles both
+ *     inline  { type: 'tc', description: 'OLD' }  and multi-line forms.
+ *  2. Inject into existing options — when the test call already has an options
+ *     object on the same line, add  annotation: { … }  before the closing '}'.
+ *  3. Create options — when the test call has no options object and  async
+ *     appears on the same line, insert  { annotation: { … } },  before  async.
+ *  4. Comment fallback — if none of the above match, fall back to the
+ *     comment-style  // @tc:12345  (handles unusual multi-line patterns).
+ */
+export function writebackPlaywright(test: ParsedTest, id: number, tagPrefix: string): void {
+  const raw = fs.readFileSync(test.filePath, 'utf8');
+  const lines = raw.split('\n');
+  const itLineIdx = test.line - 1;
+  const newAnnotation = `{ type: '${tagPrefix}', description: '${id}' }`;
+  const scanEnd = Math.min(itLineIdx + 25, lines.length);
+
+  // ── Phase 1: update an existing tc annotation ─────────────────────────────
+
+  // 1A — inline, type before description:
+  //   annotation: { type: 'tc', description: 'OLD' }
+  const inlineRe = new RegExp(
+    `(annotation\\s*:\\s*\\{[^{}]*type\\s*:\\s*['"]${tagPrefix}['"][^{}]*description\\s*:\\s*['"'])` +
+    `\\d+(['"][^{}]*\\})`
+  );
+  // 1B — inline, description before type:
+  //   annotation: { description: 'OLD', type: 'tc' }
+  const inlineRevRe = new RegExp(
+    `(annotation\\s*:\\s*\\{[^{}]*description\\s*:\\s*['"'])\\d+(['"][^{}]*type\\s*:\\s*['"]${tagPrefix}['"][^{}]*\\})`
+  );
+
+  for (let i = itLineIdx; i < scanEnd; i++) {
+    if (inlineRe.test(lines[i])) {
+      lines[i] = lines[i].replace(inlineRe, `$1${id}$2`);
+      fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+      return;
+    }
+    if (inlineRevRe.test(lines[i])) {
+      lines[i] = lines[i].replace(inlineRevRe, `$1${id}$2`);
+      fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+      return;
+    }
+    if (i > itLineIdx && /^\s*async[\s(]/.test(lines[i])) break;
+  }
+
+  // 1C — multi-line: type: 'tc' on its own line, description on an adjacent line
+  const typeLineRe = new RegExp(`^\\s*type\\s*:\\s*['"]${tagPrefix}['"]`);
+  const descLineRe = /^(\s*description\s*:\s*['"])\d+(['"]\s*,?\s*)$/;
+
+  for (let i = itLineIdx; i < scanEnd; i++) {
+    if (typeLineRe.test(lines[i])) {
+      for (const j of [i - 1, i + 1, i + 2]) {
+        if (j >= 0 && j < lines.length && descLineRe.test(lines[j])) {
+          lines[j] = lines[j].replace(descLineRe, `$1${id}$2`);
+          fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+          return;
+        }
+      }
+    }
+    if (i > itLineIdx && /^\s*async[\s(]/.test(lines[i])) break;
+  }
+
+  // ── Phase 2 & 3: inject annotation into the test call ─────────────────────
+  //
+  // Only handles single-line test calls (most common Playwright style).
+  // Multi-line calls fall through to the comment fallback.
+
+  const itLine = lines[itLineIdx];
+
+  // Quoted-title pattern — handles 'title', "title", `title`
+  const titlePat = `(?:'[^']*'|"[^"]*"|\`[^\`]*\`)`;
+  const fnPat    = `(?:it|test|xit|xtest|specify)(?:\\.(?:only|skip|concurrent|fixme|fail))?`;
+
+  // Phase 3 — no options object, async on the same line:
+  //   test('title', async ({ page }) => {
+  //   → test('title', { annotation: { … } }, async ({ page }) => {
+  const noOptsRe = new RegExp(
+    `^(\\s*${fnPat}\\s*\\(\\s*${titlePat}\\s*,\\s*)(async[\\s(])`
+  );
+  const noOptsMatch = itLine.match(noOptsRe);
+  if (noOptsMatch) {
+    lines[itLineIdx] =
+      noOptsMatch[1] +
+      `{ annotation: ${newAnnotation} }, ` +
+      noOptsMatch[2] +
+      itLine.slice(noOptsMatch[0].length);
+    fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+    return;
+  }
+
+  // Phase 2 — options object already present on the same line:
+  //   test('title', { tag: '@smoke' }, async ...
+  //   → test('title', { tag: '@smoke', annotation: { … } }, async ...
+  const withOptsRe = new RegExp(
+    `^(\\s*${fnPat}\\s*\\(\\s*${titlePat}\\s*,\\s*)(\\{)`
+  );
+  const withOptsMatch = itLine.match(withOptsRe);
+  if (withOptsMatch) {
+    const braceStart = withOptsMatch[0].length - 1; // position of opening '{'
+    let depth = 0;
+    let braceEnd = -1;
+    for (let k = braceStart; k < itLine.length; k++) {
+      if (itLine[k] === '{') depth++;
+      else if (itLine[k] === '}') {
+        depth--;
+        if (depth === 0) { braceEnd = k; break; }
+      }
+    }
+    if (braceEnd >= 0) {
+      const before = itLine.slice(0, braceEnd);
+      const after  = itLine.slice(braceEnd);
+      const sep    = before.trimEnd().endsWith(',') ? ' ' : ', ';
+      lines[itLineIdx] = `${before}${sep}annotation: ${newAnnotation}${after}`;
+      fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+      return;
+    }
+  }
+
+  // ── Phase 4: comment fallback ──────────────────────────────────────────────
+  writebackJavaScript(test, id, tagPrefix);
+}
+
+// ─── TestCafe writeback ───────────────────────────────────────────────────────
+
+/**
+ * Write (or update) the TC ID in a TestCafe test file using the native
+ * test.meta() API.
+ *
+ * Target format:
+ *   test.meta('<tagPrefix>', 'N')('title', async t => { ... })
+ *
+ * Three-phase strategy:
+ *  1. Update existing .meta('<tagPrefix>', 'OLD') — key-value form.
+ *  2. Update existing .meta({ <tagPrefix>: 'OLD' }) — object form.
+ *  3. Inject .meta('<tagPrefix>', 'N') — when no meta exists, transform
+ *       test('title', fn)       →  test.meta('tc','N')('title', fn)
+ *       test.skip('title', fn)  →  test.skip.meta('tc','N')('title', fn)
+ *  4. Comment fallback — // @tc:N if none of the above apply.
+ */
+export function writebackTestCafe(test: ParsedTest, id: number, tagPrefix: string): void {
+  const raw = fs.readFileSync(test.filePath, 'utf8');
+  const lines = raw.split('\n');
+  const testLineIdx = test.line - 1;
+  const scanEnd = Math.min(testLineIdx + 8, lines.length);
+
+  // ── Phase 1: update existing key-value meta: .meta('tc', 'OLD') ──────────
+  const kvRe = new RegExp(
+    `(\\.meta\\s*\\(\\s*['"]${tagPrefix}['"]\\s*,\\s*['"])\\d+(['"])`
+  );
+  for (let i = testLineIdx; i < scanEnd; i++) {
+    if (kvRe.test(lines[i])) {
+      lines[i] = lines[i].replace(kvRe, `$1${id}$2`);
+      fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+      return;
+    }
+    if (i > testLineIdx && /^\s*async[\s(]/.test(lines[i])) break;
+  }
+
+  // ── Phase 2: update existing object meta: .meta({ tc: 'OLD', ... }) ──────
+  const objRe = new RegExp(
+    `(\\.meta\\s*\\(\\s*\\{[^}]*['"]?${tagPrefix}['"]?\\s*:\\s*['"])\\d+(['"][^}]*\\})`
+  );
+  for (let i = testLineIdx; i < scanEnd; i++) {
+    if (objRe.test(lines[i])) {
+      lines[i] = lines[i].replace(objRe, `$1${id}$2`);
+      fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+      return;
+    }
+    if (i > testLineIdx && /^\s*async[\s(]/.test(lines[i])) break;
+  }
+
+  // ── Phase 3: inject .meta('tc', N) when no meta exists ───────────────────
+  // Only inject when the test line has NO .meta( already (avoid double-meta).
+  const testLine = lines[testLineIdx];
+  const alreadyHasMeta = /\.meta\s*\(/.test(testLine);
+
+  if (!alreadyHasMeta) {
+    // Transform: test('title', ...)       → test.meta('tc','N')('title', ...)
+    //            test.skip('title', ...)  → test.skip.meta('tc','N')('title', ...)
+    const injected = testLine.replace(
+      /^(\s*)(test(?:\.(?:skip|only))?)\s*\(/,
+      `$1$2.meta('${tagPrefix}', '${id}')(`
+    );
+    if (injected !== testLine) {
+      lines[testLineIdx] = injected;
+      fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+      return;
+    }
+  }
+
+  // ── Phase 4: comment fallback ──────────────────────────────────────────────
+  writebackJavaScript(test, id, tagPrefix);
+}
+
 // ─── Python writeback ─────────────────────────────────────────────────────────
 
 /**
@@ -405,11 +609,15 @@ export async function writebackId(
     case 'python':
       writebackPython(test, id, tagPrefix);
       break;
-    case 'javascript':
     case 'playwright':
+      writebackPlaywright(test, id, tagPrefix);
+      break;
+    case 'testcafe':
+      writebackTestCafe(test, id, tagPrefix);
+      break;
+    case 'javascript':
     case 'puppeteer':
     case 'cypress':
-    case 'testcafe':
     case 'detox':
     case 'xcuitest':
     case 'flutter':
