@@ -375,6 +375,7 @@ class TestCheckout:
 
 Set `local.type: "javascript"`. Supports **Jest**, **Jasmine**, and **WebdriverIO** (which uses Jest or Jasmine as its runner). All three share the same `describe()`/`it()`/`test()` API, so a single parser handles all of them.
 
+> **Playwright Test** (`@playwright/test`) has its own type: use `local.type: "playwright"` instead — see below.
 > **Cucumber `.feature` files** are handled by `local.type: "gherkin"` — not this type.
 
 ### Detected test functions
@@ -451,6 +452,553 @@ describe('Checkout', () => {
 
 ---
 
+## Playwright Test `.js` / `.ts`
+
+Set `local.type: "playwright"`. Supports **Playwright Test** (`@playwright/test`) for both JavaScript and TypeScript. Each `test()` call becomes one Test Case.
+
+> **Jest/Jasmine/WebdriverIO** tests use `local.type: "javascript"` — not this type.
+
+### Detected test functions
+
+| Function | Description |
+|----------|-------------|
+| `test(title, fn)` | Standard test |
+| `test.only` | Focused test |
+| `test.skip` | Skipped test (still synced) |
+| `test.fixme` | Test marked as broken (still synced, tagged `wip`) |
+| `test.fail` | Test expected to fail (still synced) |
+| `test.describe` | Nested describe block |
+| `test.describe.parallel` | Parallel describe block |
+| `test.describe.serial` | Serial describe block |
+
+### Source mapping
+
+| Playwright source | Azure TC field |
+|-------------------|---------------|
+| JSDoc `/** ... */` first non-numbered line | TC **Title** |
+| Numbered lines `N. text` in JSDoc | TC **Steps** (action) |
+| Numbered lines `N. Check: text` in JSDoc | TC **Steps** (expected result, when `useExpectedResult: true`) |
+| `// @tags: smoke, regression` above `test()` | TC **Tags** |
+| `// @tc:ID` above `test()` | TC ID (written back after first push) |
+| `{basename} > {describe} > {test title}` | `AutomatedTestName` |
+
+### TypeScript example
+
+```typescript
+import { test, expect } from '@playwright/test';
+
+test.describe('SauceDemo Checkout', () => {
+
+  /**
+   * Complete checkout with valid details
+   * 1. Log in as standard_user
+   * 2. Add Sauce Labs Backpack to cart
+   * 3. Proceed through checkout and enter name and zip
+   * 4. Check: Order confirmation page is displayed
+   */
+  // @tc:1041               // written back by ado-sync after first push
+  // @tags: smoke, checkout
+  test('completes checkout with valid details', async ({ page }) => {
+    // ...
+  });
+
+  // @tc:1042
+  test.fixme('promo code applies discount', async ({ page }) => {
+    // known issue — still synced to Azure, tagged wip
+  });
+});
+
+test.describe.parallel('Cart assertions', () => {
+
+  // @tc:1043
+  test('cart badge shows correct count', async ({ page }) => {
+    // ...
+  });
+});
+```
+
+### JavaScript example (CommonJS)
+
+```javascript
+const { test, expect } = require('@playwright/test');
+
+test.describe('SauceDemo Login', () => {
+
+  /**
+   * Valid credentials redirect to inventory page
+   * 1. Navigate to https://www.saucedemo.com
+   * 2. Enter username "standard_user" and password "secret_sauce"
+   * 3. Click the login button
+   * 4. Check: URL contains "inventory.html"
+   */
+  // @tc:1044
+  test('valid credentials redirect to inventory', async ({ page }) => {
+    // ...
+  });
+});
+```
+
+### Recommended config
+
+```json
+{
+  "local": {
+    "type": "playwright",
+    "include": ["tests/**/*.spec.ts", "tests/**/*.spec.js"],
+    "exclude": ["**/*.helper.ts", "**/*.fixture.ts"]
+  },
+  "sync": {
+    "markAutomated": true
+  }
+}
+```
+
+### Notes
+
+- **`pull` is not supported** for Playwright files. Only `push` applies.
+- **`test.describe` nesting** — arbitrarily deep nesting is supported. All enclosing describe titles are included in the `automatedTestName`.
+- **`test.fixme` / `test.fail`** — both are parsed and synced as normal test cases. Add `// @tags: wip` above `test.fixme` to mark them in Azure.
+- **Publishing results** — set `testResultFormat: playwrightJson` when using `publish-test-results`.
+
+---
+
+## Puppeteer `.js` / `.ts`
+
+Set `local.type: "puppeteer"`. Supports **Puppeteer** tests written with Jest or Mocha as the test runner. Puppeteer tests use the same `describe()` / `it()` / `test()` API as Jest, so this type is an alias for `javascript` — choose it for clarity when your project uses Puppeteer.
+
+```typescript
+import puppeteer from 'puppeteer';
+
+describe('SauceDemo Login', () => {
+
+  /**
+   * Valid credentials redirect to inventory page
+   * 1. Navigate to https://www.saucedemo.com
+   * 2. Enter "standard_user" into the username field
+   * 3. Enter "secret_sauce" into the password field
+   * 4. Click the login button
+   * 5. Check: URL contains "inventory"
+   */
+  // @tc:1060
+  it('redirects to inventory on valid login', async () => {
+    // ...
+  });
+});
+```
+
+### Recommended config
+
+```json
+{
+  "local": {
+    "type": "puppeteer",
+    "include": ["tests/**/*.test.ts"],
+    "exclude": ["**/*.helper.ts"]
+  },
+  "sync": { "markAutomated": true }
+}
+```
+
+### Notes
+
+- ID writeback format: `// @tc:12345` immediately above the `it()`/`test()` line.
+- `pull` is not supported for Puppeteer files — only `push` applies.
+- `describe()` nesting is fully supported.
+
+---
+
+## Cypress `.cy.js` / `.cy.ts`
+
+Set `local.type: "cypress"`. Supports **Cypress** tests. Cypress uses `describe()` / `context()` / `it()` / `specify()` — all four are detected.
+
+```typescript
+describe('SauceDemo Login', () => {
+
+  context('valid credentials', () => {
+
+    /**
+     * Successful login redirects to inventory page
+     * 1. Visit https://www.saucedemo.com
+     * 2. Enter "standard_user" into the username field
+     * 3. Enter "secret_sauce" into the password field
+     * 4. Click the login button
+     * 5. Check: URL contains "inventory"
+     */
+    // @tc:1070
+    // @tags: smoke
+    it('redirects to inventory', () => {
+      // ...
+    });
+
+    // @tc:1071
+    specify('locked out user sees error', () => {
+      // ...
+    });
+  });
+});
+```
+
+### Recommended config
+
+```json
+{
+  "local": {
+    "type": "cypress",
+    "include": ["cypress/e2e/**/*.cy.ts", "cypress/e2e/**/*.cy.js"],
+    "exclude": ["cypress/support/**"]
+  },
+  "sync": { "markAutomated": true }
+}
+```
+
+### Notes
+
+- `context()` is treated as a `describe()` alias (Cypress convention).
+- `specify()` is treated as an `it()` alias (Cypress convention).
+- ID writeback format: `// @tc:12345` immediately above the `it()`/`specify()` line.
+- `pull` is not supported for Cypress files — only `push` applies.
+
+---
+
+## TestCafe `.js` / `.ts`
+
+Set `local.type: "testcafe"`. Supports **TestCafe** tests using the `fixture` / `test` API.
+
+```typescript
+fixture('SauceDemo Login')
+  .page('https://www.saucedemo.com');
+
+/**
+ * Valid credentials redirect to inventory page
+ * 1. Type "standard_user" into the username field
+ * 2. Type "secret_sauce" into the password field
+ * 3. Click the login button
+ * 4. Check: URL contains "inventory"
+ */
+// @tc:1080
+// @tags: smoke
+test('redirects to inventory on valid login', async t => {
+  // ...
+});
+
+// @tc:1081
+test.skip('locked out user sees error', async t => {
+  // skipped — still synced to Azure
+});
+```
+
+### Recommended config
+
+```json
+{
+  "local": {
+    "type": "testcafe",
+    "include": ["tests/**/*.ts"],
+    "exclude": ["tests/helpers/**"]
+  },
+  "sync": { "markAutomated": true }
+}
+```
+
+### Notes
+
+- The `fixture()` title is used as the group / suite name and included in `automatedTestName`.
+- `test.skip()` and `test.only()` are both parsed and synced.
+- ID writeback format: `// @tc:12345` immediately above the `test()` line.
+- `pull` is not supported for TestCafe files — only `push` applies.
+- JSDoc `/** ... */` above a `test()` call is parsed for TC title and numbered steps, same as Playwright and Jest.
+
+---
+
+## Appium
+
+Appium tests are written in your language of choice. Use the `local.type` that matches the language:
+
+| Appium language binding | Use `local.type` | Notes |
+|-------------------------|-----------------|-------|
+| JavaScript / TypeScript (WebdriverIO, Mocha, Jest) | `javascript` | Detects `describe()`/`it()`/`test()` |
+| Java (JUnit 4, JUnit 5, TestNG) | `java` | Detects `@Test` annotations |
+| Python (pytest) | `python` | Detects `def test_*()` functions |
+| C# (NUnit, MSTest) | `csharp` | Detects `[TestMethod]`/`[Test]` attributes |
+
+**JavaScript/TypeScript Appium example:**
+
+```typescript
+// @tc:12345
+// @smoke
+describe('Login', () => {
+  /**
+   * User can log in with valid credentials
+   *
+   * 1. Navigate to the login screen
+   * 2. Enter email into the email field
+   * 3. Enter password into the password field
+   * 4. Tap the login button
+   * 5. Check: Home screen is displayed
+   */
+  it('can log in with valid credentials', async () => {
+    await driver.execute('mobile: launchApp', { bundleId: 'com.example.app' });
+    await $('~emailField').setValue('user@example.com');
+    await $('~passwordField').setValue('secret');
+    await $('~loginButton').click();
+    await expect($('~homeScreen')).toBeDisplayed();
+  });
+});
+```
+
+Recommended `ado-sync.json`:
+
+```json
+{
+  "local": {
+    "type": "javascript",
+    "include": ["test/**/*.spec.ts"]
+  },
+  "sync": { "markAutomated": true }
+}
+```
+
+---
+
+## Detox `.js` / `.ts`
+
+Set `local.type: "detox"` for React Native end-to-end tests using [Detox](https://wix.github.io/Detox/).
+
+Detox uses the same Jest `describe()`/`it()` API as Jest — the existing JavaScript parser handles it.
+
+```typescript
+// @tc:12345
+// @smoke
+describe('Login flow', () => {
+  /**
+   * User can log in with valid credentials
+   *
+   * 1. Launch the app
+   * 2. Type email into the email field
+   * 3. Tap the login button
+   * 4. Check: Welcome screen is visible
+   */
+  it('logs in with valid credentials', async () => {
+    await device.launchApp();
+    await element(by.id('email')).typeText('user@example.com');
+    await element(by.id('password')).typeText('secret');
+    await element(by.id('login-btn')).tap();
+    await expect(element(by.id('welcome-screen'))).toBeVisible();
+  });
+});
+```
+
+Recommended `ado-sync.json`:
+
+```json
+{
+  "local": {
+    "type": "detox",
+    "include": ["e2e/**/*.test.ts"],
+    "exclude": ["e2e/setup/**"]
+  },
+  "sync": { "markAutomated": true }
+}
+```
+
+**Notes:**
+- `describe()` blocks define the test group (same as Jest).
+- `// @tc:12345` is inserted immediately above the `it()`/`test()` line on writeback.
+- `pull` is not supported for Detox files — only `push`.
+
+---
+
+## Espresso `.java` / `.kt`
+
+Set `local.type: "espresso"` for Android UI tests using [Espresso](https://developer.android.com/training/testing/espresso).
+
+Espresso tests use JUnit 4 `@Test` annotations — the same parser as `java` handles them.
+
+```java
+@RunWith(AndroidJUnit4.class)
+public class LoginInstrumentedTest {
+
+    // @tc:12345
+    // @smoke
+    /**
+     * User can log in with valid credentials
+     *
+     * 1. Type email into the email field
+     * 2. Type password into the password field
+     * 3. Click the login button
+     * 4. Check: Welcome screen is displayed
+     */
+    @Test
+    public void userCanLoginWithValidCredentials() {
+        onView(withId(R.id.email)).perform(typeText("user@example.com"), closeSoftKeyboard());
+        onView(withId(R.id.password)).perform(typeText("secret"), closeSoftKeyboard());
+        onView(withId(R.id.login_button)).perform(click());
+        onView(withId(R.id.welcome_screen)).check(matches(isDisplayed()));
+    }
+}
+```
+
+**Kotlin** (same `@Test` detection):
+
+```kotlin
+@RunWith(AndroidJUnit4::class)
+class LoginInstrumentedTest {
+
+    // @tc:12345
+    @Test
+    fun `user can login with valid credentials`() {
+        onView(withId(R.id.email)).perform(typeText("user@example.com"), closeSoftKeyboard())
+        onView(withId(R.id.login_button)).perform(click())
+        onView(withId(R.id.welcome_screen)).check(matches(isDisplayed()))
+    }
+}
+```
+
+Recommended `ado-sync.json`:
+
+```json
+{
+  "local": {
+    "type": "espresso",
+    "include": ["app/src/androidTest/**/*.java", "app/src/androidTest/**/*.kt"],
+    "exclude": ["**/*BaseTest.java", "**/*Helper.java"]
+  },
+  "sync": { "markAutomated": true }
+}
+```
+
+**Notes:**
+- ID writeback format: `// @tc:12345` immediately above the `@Test` annotation line.
+- Kotlin backtick method names (`` fun `my test name`() ``) are supported — the method name is used as the fallback title.
+- `pull` is not supported — only `push`.
+
+---
+
+## XCUITest `.swift`
+
+Set `local.type: "xcuitest"` for iOS and macOS UI automation tests using Apple's [XCTest](https://developer.apple.com/documentation/xctest) framework.
+
+Tests are `func test*()` methods inside classes that extend `XCTestCase`.
+
+```swift
+import XCTest
+
+class LoginTests: XCTestCase {
+
+    // @tc:12345
+    // @smoke
+    /// User can log in with valid credentials
+    ///
+    /// 1. Launch the app
+    /// 2. Enter email into the email field
+    /// 3. Enter password into the password field
+    /// 4. Tap the login button
+    /// 5. Check: Welcome screen is visible
+    func testUserCanLoginWithValidCredentials() {
+        let app = XCUIApplication()
+        app.launch()
+        app.textFields["Email"].typeText("user@example.com")
+        app.secureTextFields["Password"].typeText("secret")
+        app.buttons["Log In"].tap()
+        XCTAssertTrue(app.staticTexts["Welcome"].exists)
+    }
+
+    func testLoginFailsWithInvalidPassword() {
+        let app = XCUIApplication()
+        app.launch()
+        app.textFields["Email"].typeText("user@example.com")
+        app.secureTextFields["Password"].typeText("wrong")
+        app.buttons["Log In"].tap()
+        XCTAssertTrue(app.staticTexts["Invalid credentials"].exists)
+    }
+}
+```
+
+Recommended `ado-sync.json`:
+
+```json
+{
+  "local": {
+    "type": "xcuitest",
+    "include": ["UITests/**/*.swift"],
+    "exclude": ["UITests/**/*Helper.swift", "UITests/**/*Base.swift"]
+  },
+  "sync": { "markAutomated": true }
+}
+```
+
+**Notes:**
+- The enclosing class name is used as the test group (`automatedTestName = FileName > ClassName > methodName`).
+- Both `///` triple-slash (Swift idiomatic) and `/** ... */` block doc comments are parsed for TC title and numbered steps.
+- Method name → title fallback: `testUserCanLogin` → "User can login", `test_submit_form` → "Submit form".
+- ID writeback format: `// @tc:12345` immediately above the `func test*()` line.
+- `pull` is not supported — only `push`.
+
+---
+
+## Flutter `_test.dart`
+
+Set `local.type: "flutter"` for Flutter widget tests and integration tests using the [`flutter_test`](https://api.flutter.dev/flutter/flutter_test/flutter_test-library.html) package.
+
+```dart
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  group('Login', () {
+    // @tc:12345
+    // @smoke
+    /// User can log in with valid credentials
+    ///
+    /// 1. Tap the email field
+    /// 2. Enter the email address
+    /// 3. Tap the password field
+    /// 4. Enter the password
+    /// 5. Tap the Login button
+    /// 6. Check: Welcome screen is visible
+    testWidgets('can log in with valid credentials', (WidgetTester tester) async {
+      await tester.pumpWidget(MyApp());
+      await tester.enterText(find.byKey(Key('email')), 'user@example.com');
+      await tester.enterText(find.byKey(Key('password')), 'secret');
+      await tester.tap(find.byKey(Key('login-btn')));
+      await tester.pumpAndSettle();
+      expect(find.text('Welcome'), findsOneWidget);
+    });
+
+    // @tc:12346
+    testWidgets('shows error for invalid credentials', (WidgetTester tester) async {
+      await tester.pumpWidget(MyApp());
+      await tester.enterText(find.byKey(Key('email')), 'bad@example.com');
+      await tester.enterText(find.byKey(Key('password')), 'wrong');
+      await tester.tap(find.byKey(Key('login-btn')));
+      await tester.pumpAndSettle();
+      expect(find.text('Invalid credentials'), findsOneWidget);
+    });
+  });
+}
+```
+
+Recommended `ado-sync.json`:
+
+```json
+{
+  "local": {
+    "type": "flutter",
+    "include": ["test/**/*_test.dart", "integration_test/**/*_test.dart"]
+  },
+  "sync": { "markAutomated": true }
+}
+```
+
+**Notes:**
+- `group('title', () { ... })` is the describe equivalent. Nested groups are supported.
+- `testWidgets()`, `test()`, and `testUI()` (integration_test alias) are all detected.
+- The file base name is stripped of `_test.dart` / `.dart` suffixes for `automatedTestName`.
+- Both `///` triple-slash and `/** ... */` block doc comments are parsed.
+- ID writeback format: `// @tc:12345` immediately above the `testWidgets()`/`test()` line.
+- `pull` is not supported — only `push`.
+
+---
+
 ## CSV `.csv`
 
 Set `local.type: "csv"` to parse Azure DevOps / SpecSync tabular CSV exports.
@@ -495,6 +1043,7 @@ After a first push, ado-sync writes the Azure TC ID back into the local file.
 | Java JUnit 4 / TestNG | `// @tc:12345` comment on the line above `@Test` |
 | Python pytest | `@pytest.mark.tc(12345)` decorator above `def test_*` |
 | JavaScript/TS | `// @tc:12345` comment on the line above `it()`/`test()` |
+| Playwright | `// @tc:12345` comment on the line above `test()` |
 | CSV | Numeric ID in column A of the matching title row |
 | Excel | Numeric ID in cell A of the matching title row |
 
