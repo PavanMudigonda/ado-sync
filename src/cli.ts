@@ -17,8 +17,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import pkg from '../package.json';
-import { applyOverrides, CONFIG_TEMPLATE_JSON, CONFIG_TEMPLATE_YAML, loadConfig, resolveConfigPath } from './config';
 import { AiSummaryOpts } from './ai/summarizer';
+import { applyOverrides, CONFIG_TEMPLATE_JSON, CONFIG_TEMPLATE_YAML, loadConfig, resolveConfigPath } from './config';
 import { pull, push, status } from './sync/engine';
 import { publishTestResults } from './sync/publish-results';
 import { SyncResult } from './types';

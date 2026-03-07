@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import { glob } from 'glob';
 import * as path from 'path';
 
+import { AiSummaryOpts, summarizeTest } from '../ai/summarizer';
 import { AzureClient } from '../azure/client';
 import {
   addTestCaseToConditionSuites,
@@ -21,18 +22,17 @@ import {
 } from '../azure/test-cases';
 import { parseCsharpFile } from '../parsers/csharp';
 import { applyRemoteToCsv, parseCsvFile } from '../parsers/csv';
+import { parseDartFile } from '../parsers/dart';
 import { parseExcelFile } from '../parsers/excel';
 import { parseGherkinFile } from '../parsers/gherkin';
 import { parseJavaFile } from '../parsers/java';
 import { parseJavaScriptFile } from '../parsers/javascript';
-import { parseTestCafeFile } from '../parsers/testcafe';
-import { parseSwiftFile } from '../parsers/swift';
-import { parseDartFile } from '../parsers/dart';
 import { parseMarkdownFile } from '../parsers/markdown';
 import { parsePythonFile } from '../parsers/python';
-import { AiSummaryOpts, summarizeTest } from '../ai/summarizer';
+import { parseSwiftFile } from '../parsers/swift';
+import { parseTestCafeFile } from '../parsers/testcafe';
 import { AzureTestCase, ParsedStep, ParsedTest, SyncConfig, SyncResult, TestPlanEntry } from '../types';
-import { CacheEntry, hashSteps, hashString, loadCache, saveCache,SyncCache } from './cache';
+import { CacheEntry, hashSteps, hashString, loadCache, saveCache, SyncCache } from './cache';
 import { writebackId } from './writeback';
 
 // ─── Tag filtering ────────────────────────────────────────────────────────────
