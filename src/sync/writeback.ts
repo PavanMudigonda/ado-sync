@@ -161,20 +161,27 @@ export function writebackCsharp(test: ParsedTest, id: number, tagPrefix: string)
   fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
 }
 
-// ─── JavaScript writeback ─────────────────────────────────────────────────────
+// ─── Comment-style writeback (JavaScript, TypeScript, Swift, Dart) ───────────
+//
+// Used by all frameworks that store the TC ID as a single-line  // @tc:12345
+// comment immediately above the test function call / definition:
+//   • JavaScript / TypeScript  (Jest, Playwright, Cypress, TestCafe, Detox, Puppeteer, WebdriverIO)
+//   • Swift  (XCUITest — same  // comment syntax)
+//   • Dart   (Flutter   — same  // comment syntax)
+//
+// Re-exported as writebackJavaScript to avoid a breaking rename.
 
 /**
- * Write (or update) the TC ID comment in a .js / .ts file for a given
- * it() / test() call (Jest, Jasmine, WebdriverIO).
+ * Write (or update) the TC ID comment in a source file for a given test function.
  *
- * Format:  // @tc:12345  inserted immediately above the it() / test() line.
- * No extra dependency required.
+ * Format:  // @tc:12345  inserted immediately above the test call / method line.
+ * Applies to: JS/TS (all frameworks), Swift (XCUITest), Dart (Flutter).
  *
  * Strategy:
- *  1. Locate the it()/test() line at test.line (1-based).
+ *  1. Locate the test line at test.line (1-based).
  *  2. Scan backward (up to 25 lines) for an existing // @{tagPrefix}:N comment.
  *  3. If found, replace in place.
- *  4. If not found, insert immediately above the it()/test() line.
+ *  4. If not found, insert immediately above the test line.
  */
 export function writebackJavaScript(test: ParsedTest, id: number, tagPrefix: string): void {
   const raw = fs.readFileSync(test.filePath, 'utf8');
@@ -372,7 +379,7 @@ export function writebackJava(test: ParsedTest, id: number, tagPrefix: string): 
 export async function writebackId(
   test: ParsedTest,
   id: number,
-  localType: 'gherkin' | 'markdown' | 'csv' | 'excel' | 'csharp' | 'java' | 'python' | 'javascript',
+  localType: 'gherkin' | 'markdown' | 'csv' | 'excel' | 'csharp' | 'java' | 'python' | 'javascript' | 'playwright' | 'puppeteer' | 'cypress' | 'testcafe' | 'detox' | 'espresso' | 'xcuitest' | 'flutter',
   tagPrefix: string
 ): Promise<void> {
   switch (localType) {
@@ -392,12 +399,20 @@ export async function writebackId(
       writebackCsharp(test, id, tagPrefix);
       break;
     case 'java':
+    case 'espresso':
       writebackJava(test, id, tagPrefix);
       break;
     case 'python':
       writebackPython(test, id, tagPrefix);
       break;
     case 'javascript':
+    case 'playwright':
+    case 'puppeteer':
+    case 'cypress':
+    case 'testcafe':
+    case 'detox':
+    case 'xcuitest':
+    case 'flutter':
       writebackJavaScript(test, id, tagPrefix);
       break;
   }
