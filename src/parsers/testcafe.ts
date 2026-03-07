@@ -8,6 +8,9 @@
  *   test('title', async t => { ... })
  *   test.skip('title', async t => { ... })
  *   test.only('title', async t => { ... })
+ *   test.meta('tc', '12345')('title', async t => { ... })     ← native meta, key-value
+ *   test.meta({ tc: '12345' })('title', async t => { ... })   ← native meta, object form
+ *   test.skip.meta(...)('title', ...)   /   test.meta(...).skip('title', ...)
  *
  * Detected fixture blocks (used as the test group / describe equivalent):
  *   fixture('Fixture title')
@@ -18,13 +21,16 @@
  *   JSDoc /** ... * / first non-numbered line    → TC Title
  *   Numbered lines "N. text"                     → TC Steps (action)
  *   "N. Check: text"                             → TC Steps (expected result column)
+ *   test.meta('<tagPrefix>', 'N')                → Azure TC ID (preferred)
+ *   test.meta({ <tagPrefix>: 'N' })              → Azure TC ID (object form)
  *   // @tags: smoke, regression                  → TC Tags (comma-separated list)
  *   // @smoke                                    → TC Tag (single-word shorthand)
- *   // @{tagPrefix}:N  comment above test()      → Azure TC ID (written back after push)
+ *   // @{tagPrefix}:N  comment above test()      → Azure TC ID (comment fallback)
  *   {fileBasename} > {fixture} > {test title}    → automatedTestName
  *
  * ID writeback:
- *   Inserts / updates  // @tc:12345  immediately above the test() line.
+ *   Inserts / updates  test.meta('<tagPrefix>', 'N')  chained to the test call.
+ *   Falls back to  // @tc:12345  comment if the test call cannot be parsed.
  *
  * Path-based auto-tagging: directory segments starting with '@' become tags.
  */
@@ -37,6 +43,7 @@ import { extractLinkRefs, extractPathTags } from './shared';
 
 // ─── Test / fixture detection ─────────────────────────────────────────────────
 
+/** Matches a regular test call (no .meta chaining). */
 const TEST_CALL_RE =
   /^(?:test|test\.skip|test\.only)\s*\(/;
 
@@ -45,6 +52,14 @@ const TEST_TITLE_RE =
 
 const FIXTURE_TITLE_RE =
   /^(?:fixture|fixture\.skip|fixture\.only)\s*\(\s*(['"`])((?:\\.|[^\\])*?)\1/;
+
+/**
+ * Matches a meta-chained test call:
+ *   test.meta(...)('title', fn)
+ *   test.skip.meta(...)('title', fn)
+ *   test.only.meta(...)('title', fn)
+ */
+const META_CHAIN_RE = /^test(?:\.(?:skip|only))?\.meta\s*\(/;
 
 // ─── Indentation helpers ──────────────────────────────────────────────────────
 
@@ -157,6 +172,91 @@ function extractCommentMetadataAbove(
   return { azureId, tags };
 }
 
+// ─── TestCafe native .meta() extraction ───────────────────────────────────────
+
+interface MetaChainResult {
+  callTitle: string;
+  azureId?: number;
+  tags: string[];
+  /** Line index of the title call — used to advance the outer loop. */
+  titleLineIdx: number;
+}
+
+/**
+ * Parse a meta-chained TestCafe test call:
+ *   test.meta('tc', '12345')('title', async t => { ... })
+ *   test.meta({ tc: '12345', priority: 'high' })('title', async t => { ... })
+ *
+ * Collects up to 8 lines starting at startLineIdx to handle multi-line meta
+ * calls. The titleLineIdx in the result indicates where the title was found
+ * (used to advance the outer parsing loop past this test).
+ *
+ * Returns null if the pattern cannot be parsed.
+ */
+function extractMetaChainResult(
+  lines: string[],
+  startLineIdx: number,
+  tagPrefix: string
+): MetaChainResult | null {
+  let azureId: number | undefined;
+  const tags: string[] = [];
+
+  const scanEnd = Math.min(startLineIdx + 8, lines.length);
+
+  // Accumulate trimmed source lines until we can see the )(title pattern
+  let collected = '';
+  for (let i = startLineIdx; i < scanEnd; i++) {
+    collected += (i > startLineIdx ? ' ' : '') + lines[i].trim();
+
+    // Have we closed the .meta(...) call and opened the title call?
+    // Pattern: ) followed by ( with a quoted string
+    const titleMatch = collected.match(/\)\s*\(\s*(['"`])((?:\\.|[^\\])*?)\1/);
+    if (!titleMatch) continue;
+
+    const callTitle = titleMatch[2]
+      .replace(/\\'/g, "'")
+      .replace(/\\"/g, '"')
+      .replace(/\\`/g, '`')
+      .replace(/\\\\/g, '\\');
+
+    if (!callTitle) return null;
+
+    // Extract TC ID — key-value form: .meta('tc', '12345')
+    const kvRe = new RegExp(
+      `\\.meta\\s*\\(\\s*['"]${tagPrefix}['"]\\s*,\\s*['"]([\\d]+)['"]`
+    );
+    const kvMatch = collected.match(kvRe);
+    if (kvMatch) {
+      azureId = parseInt(kvMatch[1], 10);
+    }
+
+    // Extract TC ID — object form: .meta({ tc: '12345', ... }) or .meta({ "tc": '12345' })
+    if (azureId === undefined) {
+      const objRe = new RegExp(
+        `\\.meta\\s*\\(\\s*\\{[^}]*['"]?${tagPrefix}['"]?\\s*:\\s*['"]([\\d]+)['"]`
+      );
+      const objMatch = collected.match(objRe);
+      if (objMatch) {
+        azureId = parseInt(objMatch[1], 10);
+      }
+    }
+
+    // Extract extra tags from object form (non-tc string values)
+    const metaObjMatch = collected.match(/\.meta\s*\(\s*\{([^}]*)\}/);
+    if (metaObjMatch) {
+      const pairRe = /['"]?([\w]+)['"]?\s*:\s*['"]([^'"]+)['"]/g;
+      let pm: RegExpExecArray | null;
+      while ((pm = pairRe.exec(metaObjMatch[1])) !== null) {
+        if (pm[1] !== tagPrefix) tags.push(pm[2]);
+      }
+    }
+
+    return { callTitle, azureId, tags, titleLineIdx: i };
+  }
+
+  return null;
+}
+
 // ─── JSDoc → title + steps ────────────────────────────────────────────────────
 
 const NUMBERED_STEP_RE = /^\d+\.\s+(.+)$/;
@@ -210,25 +310,47 @@ export function parseTestCafeFile(
 
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trim();
-    if (!TEST_CALL_RE.test(trimmed)) continue;
 
-    const testLineIdx = i;
-    const m = trimmed.match(TEST_TITLE_RE);
-    if (!m) continue;
+    let testLineIdx = i;    // line used for JSDoc / comment extraction (start of test expression)
+    let callTitle   = '';
+    let metaAzureId: number | undefined;
+    let metaTags: string[] = [];
 
-    const callTitle = m[2]
-      .replace(/\\'/g, "'")
-      .replace(/\\"/g, '"')
-      .replace(/\\`/g, '`')
-      .replace(/\\\\/g, '\\');
+    if (META_CHAIN_RE.test(trimmed)) {
+      // ── meta-chained test: test.meta(...)('title', fn) ──────────────────────
+      const extracted = extractMetaChainResult(lines, i, tagPrefix);
+      if (!extracted) continue;
+
+      callTitle   = extracted.callTitle;
+      metaAzureId = extracted.azureId;
+      metaTags    = extracted.tags;
+      // testLineIdx stays at i (start of meta chain, used for JSDoc/comment/writeback)
+      i = extracted.titleLineIdx; // advance past multi-line meta to avoid re-parsing
+
+    } else if (TEST_CALL_RE.test(trimmed)) {
+      // ── regular test: test('title', fn) ─────────────────────────────────────
+      const m = trimmed.match(TEST_TITLE_RE);
+      if (!m) continue;
+
+      callTitle = m[2]
+        .replace(/\\'/g, "'")
+        .replace(/\\"/g, '"')
+        .replace(/\\`/g, '`')
+        .replace(/\\\\/g, '\\');
+
+    } else {
+      continue;
+    }
 
     if (!callTitle) continue;
 
     const jsdocLines              = extractJsdocBefore(lines, testLineIdx);
-    const { azureId, tags: cTags } = extractCommentMetadataAbove(lines, testLineIdx, tagPrefix);
+    const { azureId: cId, tags: cTags } = extractCommentMetadataAbove(lines, testLineIdx, tagPrefix);
     const fixture                 = findEnclosingFixture(lines, testLineIdx);
 
-    const allTags = [...new Set([...pathTags, ...cTags])];
+    // Native .meta() ID takes priority over comment-style ID
+    const azureId = metaAzureId ?? cId;
+    const allTags = [...new Set([...pathTags, ...cTags, ...metaTags])];
     const { title, steps } = parseSummary(jsdocLines, callTitle);
 
     const automatedTestName = fixture
@@ -241,7 +363,7 @@ export function parseTestCafeFile(
       steps,
       tags: allTags,
       azureId: azureId !== undefined && !isNaN(azureId) ? azureId : undefined,
-      line: testLineIdx + 1,
+      line: testLineIdx + 1, // 1-based; writeback starts from here
       linkRefs: extractLinkRefs(allTags, linkConfigs),
       automatedTestName,
     });
