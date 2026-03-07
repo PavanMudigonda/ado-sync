@@ -533,11 +533,35 @@ function parsePlaywrightJson(content: string, tagPrefix: string, treatInconclusi
           // Build test name from suite title path + spec title
           const testName = [...currentPath, spec.title].join(' > ');
 
-          // Extract TC id from @tc:NNN in the spec title or tags
+          // Extract TC id — check native annotations first, then @tc:NNN in spec title
           let testCaseId: number | undefined;
-          const tcRe = new RegExp(`@${tagPrefix}:(\\d+)`);
-          const titleMatch = spec.title?.match(tcRe);
-          if (titleMatch) testCaseId = parseInt(titleMatch[1], 10);
+
+          // 1. Native annotation: { type: 'tc', description: '12345' } on any test attempt
+          for (const res of resultEntries) {
+            for (const ann of res.annotations ?? test.annotations ?? []) {
+              if (String(ann.type) === tagPrefix) {
+                const id = parseInt(String(ann.description ?? ''), 10);
+                if (!isNaN(id)) { testCaseId = id; break; }
+              }
+            }
+            if (testCaseId !== undefined) break;
+          }
+          // Also check top-level test.annotations (Playwright ≥ 1.42 hoists them here)
+          if (testCaseId === undefined) {
+            for (const ann of test.annotations ?? []) {
+              if (String(ann.type) === tagPrefix) {
+                const id = parseInt(String(ann.description ?? ''), 10);
+                if (!isNaN(id)) { testCaseId = id; break; }
+              }
+            }
+          }
+
+          // 2. Fallback: @tc:NNN in spec title
+          if (testCaseId === undefined) {
+            const tcRe = new RegExp(`@${tagPrefix}:(\\d+)`);
+            const titleMatch = spec.title?.match(tcRe);
+            if (titleMatch) testCaseId = parseInt(titleMatch[1], 10);
+          }
 
           // Extract attachments (screenshots, videos, traces) from all retried results
           const pwAttachments: TestAttachment[] = [];

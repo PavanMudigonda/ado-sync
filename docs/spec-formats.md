@@ -471,6 +471,36 @@ Set `local.type: "playwright"`. Supports **Playwright Test** (`@playwright/test`
 | `test.describe.parallel` | Parallel describe block |
 | `test.describe.serial` | Serial describe block |
 
+### ID tagging — native annotation (recommended)
+
+Playwright Test has a built-in annotation API. Use it to attach the TC ID directly in the test definition — no comments needed:
+
+```typescript
+// Single annotation (most common)
+test('completes checkout', {
+  annotation: { type: 'tc', description: '1041' },
+  tag: '@smoke',
+}, async ({ page }) => { ... });
+
+// Tag-style ID (alternative)
+test('cart badge shows count', {
+  tag: ['@tc:1043', '@smoke'],
+}, async ({ page }) => { ... });
+
+// Array form — combine TC ID with other annotations
+test.fixme('promo code applies discount', {
+  annotation: [
+    { type: 'tc', description: '1042' },
+    { type: 'issue', description: 'promo-code not yet implemented' },
+  ],
+  tag: '@wip',
+}, async ({ page }) => { ... });
+```
+
+**Writeback** — on the first `push`, ado-sync injects `{ annotation: { type: 'tc', description: 'N' } }` into the test options object. Subsequent pushes update the description in place.
+
+**Comment fallback** — `// @tc:ID` above `test()` is still recognised and written for edge cases where the options object cannot be parsed (e.g., multi-line title spanning several lines).
+
 ### Source mapping
 
 | Playwright source | Azure TC field |
@@ -478,9 +508,15 @@ Set `local.type: "playwright"`. Supports **Playwright Test** (`@playwright/test`
 | JSDoc `/** ... */` first non-numbered line | TC **Title** |
 | Numbered lines `N. text` in JSDoc | TC **Steps** (action) |
 | Numbered lines `N. Check: text` in JSDoc | TC **Steps** (expected result, when `useExpectedResult: true`) |
-| `// @tags: smoke, regression` above `test()` | TC **Tags** |
-| `// @tc:ID` above `test()` | TC ID (written back after first push) |
+| `annotation: { type: 'tc', description: 'N' }` | TC ID (**preferred**) |
+| `annotation: [{ type: 'tc', description: 'N' }, ...]` | TC ID (array form) |
+| `tag: '@tc:N'` or `tag: ['@tc:N', ...]` | TC ID (tag form) |
+| `tag: '@smoke'` etc. | TC **Tags** |
+| `// @tags: smoke, regression` above `test()` | TC **Tags** (comment form) |
+| `// @tc:ID` above `test()` | TC ID (comment fallback) |
 | `{basename} > {describe} > {test title}` | `AutomatedTestName` |
+
+**Priority**: native `annotation` > native `tag` > `// @tc:N` comment.
 
 ### TypeScript example
 
@@ -496,28 +532,35 @@ test.describe('SauceDemo Checkout', () => {
    * 3. Proceed through checkout and enter name and zip
    * 4. Check: Order confirmation page is displayed
    */
-  // @tc:1041               // written back by ado-sync after first push
-  // @tags: smoke, checkout
-  test('completes checkout with valid details', async ({ page }) => {
+  test('completes checkout with valid details', {
+    annotation: { type: 'tc', description: '1041' },
+    tag: '@smoke',
+  }, async ({ page }) => {
     // ...
   });
 
-  // @tc:1042
-  test.fixme('promo code applies discount', async ({ page }) => {
-    // known issue — still synced to Azure, tagged wip
+  test.fixme('promo code applies discount', {
+    annotation: [
+      { type: 'tc', description: '1042' },
+      { type: 'issue', description: 'promo-code not yet implemented' },
+    ],
+    tag: '@wip',
+  }, async ({ page }) => {
+    // known issue — still synced to Azure
   });
 });
 
 test.describe.parallel('Cart assertions', () => {
 
-  // @tc:1043
-  test('cart badge shows correct count', async ({ page }) => {
+  test('cart badge shows correct count', {
+    annotation: { type: 'tc', description: '1043' },
+  }, async ({ page }) => {
     // ...
   });
 });
 ```
 
-### JavaScript example (CommonJS)
+### JavaScript example (comment fallback style)
 
 ```javascript
 const { test, expect } = require('@playwright/test');
@@ -531,7 +574,7 @@ test.describe('SauceDemo Login', () => {
    * 3. Click the login button
    * 4. Check: URL contains "inventory.html"
    */
-  // @tc:1044
+  // @tc:1044   ← comment style also works; ado-sync upgrades to annotation on next push
   test('valid credentials redirect to inventory', async ({ page }) => {
     // ...
   });
@@ -557,8 +600,9 @@ test.describe('SauceDemo Login', () => {
 
 - **`pull` is not supported** for Playwright files. Only `push` applies.
 - **`test.describe` nesting** — arbitrarily deep nesting is supported. All enclosing describe titles are included in the `automatedTestName`.
-- **`test.fixme` / `test.fail`** — both are parsed and synced as normal test cases. Add `// @tags: wip` above `test.fixme` to mark them in Azure.
+- **`test.fixme` / `test.fail`** — both are parsed and synced as normal test cases. Use `tag: '@wip'` on `test.fixme` to mark them in Azure.
 - **Publishing results** — set `testResultFormat: playwrightJson` when using `publish-test-results`.
+- **Native annotation priority** — `annotation: { type: 'tc', … }` is read before `tag:` which is read before `// @tc:N` comments. The tool writes back using native annotation on every sync.
 
 ---
 
@@ -664,7 +708,45 @@ describe('SauceDemo Login', () => {
 
 Set `local.type: "testcafe"`. Supports **TestCafe** tests using the `fixture` / `test` API.
 
-```typescript
+### ID tagging — native `test.meta()` (recommended)
+
+TestCafe has a built-in `.meta()` method that attaches key-value metadata to a test. Use it to store the TC ID natively — no comments needed:
+
+```javascript
+// Key-value form (recommended — clean and simple)
+test.meta('tc', '1080')('redirects to inventory on valid login', async t => { ... });
+
+// Object form (use when adding multiple metadata fields)
+test.meta({ tc: '1081', priority: 'high' })('locked out user sees error', async t => { ... });
+
+// Combined with test.skip
+test.skip.meta('tc', '1082')('skipped test', async t => { ... });
+```
+
+**Writeback** — on the first `push`, ado-sync injects `.meta('tc', 'N')` between the test function and its title call. For example:
+```
+test('title', fn)  →  test.meta('tc', '12345')('title', fn)
+```
+Subsequent pushes update the existing `.meta()` value in place.
+
+**Comment fallback** — `// @tc:N` above `test()` is still recognised.
+
+### Source mapping
+
+| TestCafe source | Azure TC field |
+|-----------------|---------------|
+| JSDoc `/** ... */` first non-numbered line | TC **Title** |
+| Numbered lines `N. text` in JSDoc | TC **Steps** (action) |
+| Numbered lines `N. Check: text` in JSDoc | TC **Steps** (expected result) |
+| `test.meta('tc', 'N')` | TC ID (**preferred**) |
+| `test.meta({ tc: 'N' })` | TC ID (object form) |
+| `// @tags: smoke, regression` above `test()` | TC **Tags** |
+| `// @tc:N` above `test()` | TC ID (comment fallback) |
+| `{basename} > {fixture} > {test title}` | `AutomatedTestName` |
+
+### Example
+
+```javascript
 fixture('SauceDemo Login')
   .page('https://www.saucedemo.com');
 
@@ -675,16 +757,18 @@ fixture('SauceDemo Login')
  * 3. Click the login button
  * 4. Check: URL contains "inventory"
  */
-// @tc:1080
-// @tags: smoke
-test('redirects to inventory on valid login', async t => {
+// @smoke
+test.meta('tc', '1080')('redirects to inventory on valid login', async t => {
   // ...
 });
 
-// @tc:1081
-test.skip('locked out user sees error', async t => {
-  // skipped — still synced to Azure
+test.meta({ tc: '1081', priority: 'high' })('locked out user sees error', async t => {
+  // ...
 });
+
+// Comment style still works (written by ado-sync before meta support was added)
+// @tc:1082
+test.skip('skipped test — still synced', async t => { ... });
 ```
 
 ### Recommended config
@@ -693,7 +777,7 @@ test.skip('locked out user sees error', async t => {
 {
   "local": {
     "type": "testcafe",
-    "include": ["tests/**/*.ts"],
+    "include": ["tests/**/*.js", "tests/**/*.ts"],
     "exclude": ["tests/helpers/**"]
   },
   "sync": { "markAutomated": true }
@@ -704,9 +788,8 @@ test.skip('locked out user sees error', async t => {
 
 - The `fixture()` title is used as the group / suite name and included in `automatedTestName`.
 - `test.skip()` and `test.only()` are both parsed and synced.
-- ID writeback format: `// @tc:12345` immediately above the `test()` line.
 - `pull` is not supported for TestCafe files — only `push` applies.
-- JSDoc `/** ... */` above a `test()` call is parsed for TC title and numbered steps, same as Playwright and Jest.
+- JSDoc `/** ... */` above a `test.meta(...)` call is parsed for TC title and numbered steps.
 
 ---
 
