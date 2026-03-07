@@ -60,10 +60,10 @@ On the **first push**, a new Test Case is created in Azure DevOps and its ID is 
 | Java JUnit 5 | `@Tag("tc:12345")` above `@Test` |
 | Python pytest | `@pytest.mark.tc(12345)` above `def test_*` |
 | JavaScript/TS (Jest/Jasmine/WebdriverIO) | `// @tc:12345` comment above `it()`/`test()` |
-| Playwright | `// @tc:12345` comment above `test()` |
+| Playwright | `annotation: { type: 'tc', description: '12345' }` in test options *(preferred)*; or `// @tc:12345` comment fallback |
 | Puppeteer | `// @tc:12345` comment above `it()`/`test()` |
 | Cypress | `// @tc:12345` comment above `it()`/`specify()` |
-| TestCafe | `// @tc:12345` comment above `test()` |
+| TestCafe | `test.meta('tc', '12345')('title', fn)` *(preferred)*; or `// @tc:12345` comment fallback |
 | Detox | `// @tc:12345` comment above `it()`/`test()` |
 | Espresso (Java/Kotlin) | `// @tc:12345` comment above `@Test` |
 | XCUITest (Swift) | `// @tc:12345` comment above `func test*()` |
@@ -453,6 +453,23 @@ pytest --junitxml=results/junit.xml
 # 3. Publish results
 ado-sync publish-test-results --testResult results/junit.xml --testResultFormat junit
 ```
+
+By default, TC linking uses `AutomatedTestName` matching (requires `sync.markAutomated: true`).
+
+**Optional — embed TC IDs into JUnit XML** for direct linking (more reliable, works even if the class/method is renamed):
+
+Add this to `conftest.py`:
+
+```python
+# conftest.py
+def pytest_runtest_makereport(item, call):
+    """Write @pytest.mark.tc(N) as a JUnit XML property for ado-sync to pick up."""
+    for marker in item.iter_markers("tc"):
+        if marker.args:
+            item.user_properties.append(("tc", str(marker.args[0])))
+```
+
+pytest will then write each TC ID into the JUnit XML as `<property name="tc" value="N"/>`, and ado-sync will link the result directly to that Test Case — no AutomatedTestName matching needed.
 
 Recommended `ado-sync.json` for Python:
 
