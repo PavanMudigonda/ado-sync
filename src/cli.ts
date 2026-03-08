@@ -116,7 +116,8 @@ program
       const aiSummary = buildAiOpts(opts, config);
       const isTTY = process.stdout.isTTY ?? false;
       const onProgress = createProgressCallback(isTTY);
-      const results = await push(config, configDir, { dryRun: opts.dryRun, tags: opts.tags, onProgress, aiSummary });
+      const onAiProgress = createAiProgressCallback(isTTY);
+      const results = await push(config, configDir, { dryRun: opts.dryRun, tags: opts.tags, onProgress, onAiProgress, aiSummary });
       if (isTTY) clearProgressLine();
       printResults(results, config.toolSettings?.outputLevel);
     } catch (err: any) {
@@ -185,7 +186,8 @@ program
       const aiSummary = buildAiOpts(opts, config);
       const isTTY = process.stdout.isTTY ?? false;
       const onProgress = createProgressCallback(isTTY);
-      const results = await status(config, configDir, { tags: opts.tags, onProgress, aiSummary });
+      const onAiProgress = createAiProgressCallback(isTTY);
+      const results = await status(config, configDir, { tags: opts.tags, onProgress, onAiProgress, aiSummary });
       if (isTTY) clearProgressLine();
       printResults(results, config.toolSettings?.outputLevel);
     } catch (err: any) {
@@ -282,6 +284,29 @@ function createProgressCallback(
 /** Erase the progress bar line (call once before printing results). */
 function clearProgressLine(): void {
   process.stdout.write(`\r${' '.repeat(process.stdout.columns ?? 80)}\r`);
+}
+
+/**
+ * Returns an onAiProgress callback if stdout is a TTY.
+ * Shows a spinner-style line during the AI summarisation phase.
+ */
+function createAiProgressCallback(
+  isTTY: boolean
+): ((done: number, total: number, title: string) => void) | undefined {
+  if (!isTTY) return undefined;
+
+  return (done: number, total: number, title: string) => {
+    if (total === 0 || (done === total && title === '')) {
+      process.stdout.write(`\r${' '.repeat(process.stdout.columns ?? 80)}\r`);
+      return;
+    }
+    const filled = total > 0 ? Math.round((done / total) * PROGRESS_WIDTH) : 0;
+    const bar = '█'.repeat(filled) + '░'.repeat(PROGRESS_WIDTH - filled);
+    const maxTitle = 38;
+    const t = title.length > maxTitle ? title.slice(0, maxTitle - 1) + '…' : title;
+    const line = `  [${bar}] ${done}/${total}  ${chalk.dim('✦')} ${chalk.dim('ai')} ${t}`;
+    process.stdout.write(`\r${line.padEnd(process.stdout.columns ?? 80)}`);
+  };
 }
 
 // ─── Output helpers ───────────────────────────────────────────────────────────
