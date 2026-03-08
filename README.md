@@ -18,8 +18,8 @@ Supports a wide range of test file formats and frameworks:
 | `javascript` | Jasmine / WebdriverIO | `.js` / `.ts` | [js-jasmine-wdio.yaml](docs/examples/js-jasmine-wdio.yaml) |
 | `playwright` | Playwright Test (TypeScript) | `.spec.ts` | [playwright-ts.yaml](docs/examples/playwright-ts.yaml) |
 | `playwright` | Playwright Test (JavaScript) | `.spec.js` | [playwright-js.yaml](docs/examples/playwright-js.yaml) |
-| `puppeteer` | Puppeteer + Jest or Mocha | `.js` / `.ts` | |
-| `cypress` | Cypress | `.cy.js` / `.cy.ts` | |
+| `puppeteer` | Puppeteer + Jest or Mocha | `.js` / `.ts` | [puppeteer.yaml](docs/examples/puppeteer.yaml) |
+| `cypress` | Cypress | `.cy.js` / `.cy.ts` | [cypress.yaml](docs/examples/cypress.yaml) |
 | `testcafe` | TestCafe | `.js` / `.ts` | [testcafe.yaml](docs/examples/testcafe.yaml) |
 | `detox` | Detox (React Native E2E) | `.js` / `.ts` | [detox-react-native.yaml](docs/examples/detox-react-native.yaml) |
 | `espresso` | Android Espresso (JUnit 4 / Kotlin) | `.java` / `.kt` | [espresso-android.yaml](docs/examples/espresso-android.yaml) |

@@ -757,6 +757,40 @@ async function ollamaSummary(
   return parseAiResponse(data.response ?? '', fallbackTitle);
 }
 
+/**
+ * Fetch with automatic retry for transient errors:
+ *   503 — model container cold-starting (Hugging Face serverless inference)
+ *   429 — rate limit exceeded
+ * Retries up to `maxRetries` times with exponential backoff starting at `baseDelayMs`.
+ */
+async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  provider: string,
+  maxRetries = 3,
+  baseDelayMs = 5_000
+): Promise<Response> {
+  let attempt = 0;
+  while (true) {
+    const res = await fetch(url, init);
+    if (res.status === 503 || res.status === 429) {
+      if (attempt >= maxRetries) return res;
+      const retryAfter = res.headers.get('retry-after');
+      const delayMs = retryAfter
+        ? parseInt(retryAfter, 10) * 1_000
+        : baseDelayMs * Math.pow(2, attempt);
+      const reason = res.status === 503 ? 'model loading' : 'rate limited';
+      process.stderr.write(
+        `  [ai-summary] ${provider} ${reason} — retrying in ${Math.round(delayMs / 1000)}s (${attempt + 1}/${maxRetries})\n`
+      );
+      await new Promise(r => setTimeout(r, delayMs));
+      attempt++;
+      continue;
+    }
+    return res;
+  }
+}
+
 async function openaiSummary(
   code: string,
   fallbackTitle: string,
@@ -764,17 +798,21 @@ async function openaiSummary(
   apiKey: string,
   baseUrl: string
 ): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
-  const res = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: 'user', content: buildPrompt(code) }],
-      temperature: 0,
-    }),
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!res.ok) throw new Error(`OpenAI ${res.status}: ${await res.text()}`);
+  const res = await fetchWithRetry(
+    `${baseUrl}/chat/completions`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: buildPrompt(code) }],
+        temperature: 0,
+      }),
+      signal: AbortSignal.timeout(60_000),
+    },
+    'openai'
+  );
+  if (!res.ok) throw new Error(`openai ${res.status}: ${await res.text()}`);
   const data = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
   return parseAiResponse(data.choices?.[0]?.message?.content ?? '', fallbackTitle);
 }
@@ -787,21 +825,25 @@ async function anthropicSummary(
   baseUrl: string
 ): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
   const url = `${baseUrl.replace(/\/$/, '')}/messages`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
+  const res = await fetchWithRetry(
+    url,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 512,
+        messages: [{ role: 'user', content: buildPrompt(code) }],
+      }),
+      signal: AbortSignal.timeout(60_000),
     },
-    body: JSON.stringify({
-      model,
-      max_tokens: 512,
-      messages: [{ role: 'user', content: buildPrompt(code) }],
-    }),
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!res.ok) throw new Error(`Anthropic ${res.status}: ${await res.text()}`);
+    'anthropic'
+  );
+  if (!res.ok) throw new Error(`anthropic ${res.status}: ${await res.text()}`);
   const data = await res.json() as { content?: Array<{ text?: string }> };
   return parseAiResponse(data.content?.[0]?.text ?? '', fallbackTitle);
 }
