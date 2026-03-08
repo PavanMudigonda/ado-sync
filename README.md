@@ -525,13 +525,13 @@ ado-sync publish-test-results --testResult results/junit.xml --testResultFormat 
 ```bash
 # 1. Create TCs and write IDs back into .ts spec files
 ado-sync push --dry-run   # preview
-ado-sync push             # writes // @tc:ID above each test()
+ado-sync push             # writes annotation: { type: 'tc', description: 'ID' } into test options
 
-# 2. Add @tc:ID tag to test title and run Playwright with JSON reporter
+# 2. Run Playwright with JSON reporter
 #    playwright.config.ts: reporter: [['json', { outputFile: 'results/playwright.json' }]]
 npx playwright test
 
-# 3. Publish — TC IDs from @tc:ID in test title; screenshots/videos from attachments[]
+# 3. Publish — TC IDs from native test.annotations; screenshots/videos from attachments[]
 ado-sync publish-test-results --testResult results/playwright.json
 ```
 

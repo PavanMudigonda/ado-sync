@@ -498,7 +498,7 @@ The same `--ai-url` override works for any other OpenAI-compatible server:
 | LocalAI | `http://localhost:8080/v1` |
 | LM Studio | `http://localhost:1234/v1` |
 
-Config file equivalent:
+Config file equivalent — set any `--ai-*` flag in `sync.ai` to avoid repeating it on every push. CLI flags always take precedence over config values:
 
 ```json
 {
@@ -511,6 +511,20 @@ Config file equivalent:
     }
   }
 }
+```
+
+The `sync.ai` block works for any provider:
+
+```json
+{ "sync": { "ai": { "provider": "ollama", "model": "qwen2.5-coder:7b" } } }
+```
+
+```json
+{ "sync": { "ai": { "provider": "anthropic", "apiKey": "$ANTHROPIC_API_KEY" } } }
+```
+
+```json
+{ "sync": { "ai": { "provider": "none" } } }
 ```
 
 ### Disabling AI summary
