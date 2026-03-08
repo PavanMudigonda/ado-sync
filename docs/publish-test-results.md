@@ -303,6 +303,136 @@ ado-sync publish-test-results \
 
 ---
 
+### TestCafe
+
+TestCafe requires the `testcafe-reporter-junit` package to produce JUnit XML:
+
+```bash
+npm install --save-dev testcafe-reporter-junit
+```
+
+```bash
+# Run tests with JUnit reporter
+npx testcafe chrome tests/ --reporter junit:results/junit.xml
+
+# Publish results
+ado-sync publish-test-results --testResult results/junit.xml --testResultFormat junit
+```
+
+TC linking uses `AutomatedTestName` matching — set `sync.markAutomated: true` on push. The `automatedTestName` format stored in the TC is `{fileBasename} > {fixture} > {testTitle}`, which matches the JUnit `suiteName.testName` format produced by `testcafe-reporter-junit`.
+
+> **TC IDs are not embedded in JUnit output**: TestCafe's `test.meta('tc', 'N')` metadata is not written into the JUnit XML. Linking relies on AutomatedTestName matching only.
+
+---
+
+### Cypress
+
+Cypress has a built-in JUnit reporter via Mocha:
+
+```bash
+# Run tests with JUnit reporter (outputs one file per spec by default)
+npx cypress run \
+  --reporter junit \
+  --reporter-options "mochaFile=results/junit-[hash].xml"
+
+# Publish all result files
+ado-sync publish-test-results \
+  --testResult "results/junit-*.xml" \
+  --testResultFormat junit
+```
+
+TC linking uses `AutomatedTestName` matching — set `sync.markAutomated: true` on push.
+
+> **JUnit classname format**: By default Cypress sets `classname` to the spec file path and `name` to the test title. Ensure your `automatedTestName` format matches by setting `reporterOptions: { suiteTitleSeparatedBy: ' > ' }` in `cypress.config.js`.
+
+---
+
+### Detox (React Native)
+
+Detox uses Jest as its runner — use `jest-junit` the same way as Jest:
+
+```bash
+npm install --save-dev jest-junit
+```
+
+```bash
+# Run Detox tests
+JEST_JUNIT_OUTPUT_DIR=results JEST_JUNIT_OUTPUT_NAME=junit.xml \
+  npx detox test --configuration ios.sim.release
+
+# Publish results
+ado-sync publish-test-results --testResult results/junit.xml --testResultFormat junit
+```
+
+TC linking uses `AutomatedTestName` matching — set `sync.markAutomated: true` on push.
+
+---
+
+### XCUITest (iOS / macOS)
+
+Export results from Xcode's `.xcresult` bundle to JUnit XML using `xcresulttool`:
+
+```bash
+# Run tests and save result bundle
+xcodebuild test \
+  -project MyApp.xcodeproj \
+  -scheme MyApp \
+  -destination 'platform=iOS Simulator,name=iPhone 15' \
+  -resultBundlePath TestResults.xcresult
+
+# Export JUnit XML
+xcrun xcresulttool get --path TestResults.xcresult --format junit > results/junit.xml
+
+# Publish results
+ado-sync publish-test-results --testResult results/junit.xml --testResultFormat junit
+```
+
+TC linking uses `AutomatedTestName` matching — set `sync.markAutomated: true` on push. The `automatedTestName` format is `{className}/{funcTestName}` (e.g. `LoginUITests/testValidCredentialsNavigateToInventory`).
+
+> **Attachments**: `xcresulttool` does not embed screenshots in the JUnit export. Use `--attachmentsFolder` to attach screenshot files produced by your test hooks separately.
+
+---
+
+### Espresso (Android)
+
+Gradle's `connectedAndroidTest` task writes JUnit XML to `app/build/outputs/androidTest-results/connected/`:
+
+```bash
+# Run instrumented tests
+./gradlew connectedAndroidTest
+
+# Publish results
+ado-sync publish-test-results \
+  --testResult "app/build/outputs/androidTest-results/connected/TEST-*.xml" \
+  --testResultFormat junit
+```
+
+TC linking uses `AutomatedTestName` matching — set `sync.markAutomated: true` on push. The `automatedTestName` format is `{packageName}.{ClassName}.{methodName}`.
+
+---
+
+### Flutter
+
+Flutter can produce JUnit XML via the `flutter_test_junit` package or by piping `--reporter junit`:
+
+```bash
+# Option A — built-in reporter (Flutter ≥ 3.7)
+flutter test --reporter junit > results/junit.xml
+
+# Option B — flutter_test_junit package
+flutter pub add --dev flutter_test_junit
+dart run flutter_test_junit:main > results/junit.xml
+```
+
+```bash
+# Publish results
+ado-sync publish-test-results --testResult results/junit.xml --testResultFormat junit
+```
+
+TC linking uses `AutomatedTestName` matching — set `sync.markAutomated: true` on push.
+
+---
+
 | Framework | Result format | TC ID in file | Attachments uploaded | Live-tested |
 |-----------|---------------|---------------|----------------------|-------------|
 | C# MSTest | TRX | ✅ `[TestProperty("tc","ID")]` | `<Output><StdOut>` + `<Output><ResultFiles>` files | ✅ |
@@ -316,6 +446,12 @@ ado-sync publish-test-results \
 | Cucumber JS | Cucumber JSON | ✅ `@tc:ID` tag | `step.embeddings[]` (base64 screenshots/video) | ✅ |
 | Playwright | Playwright JSON | ✅ native `annotation: { type: 'tc', description: 'ID' }`; or `@tc:ID` in test title | Files from `attachments[].path` (screenshots, videos, traces) | ✅ |
 | Playwright | JUnit XML | ⚠️ `@tc:ID` in test title only (no annotation in JUnit format) | `[[ATTACHMENT\|path]]` referenced files | ✅ |
+| TestCafe | JUnit XML | ❌ AutomatedTestName matching only | `<system-out>`, `<system-err>` | |
+| Cypress | JUnit XML | ❌ AutomatedTestName matching only | `<system-out>`, `<system-err>` | |
+| Detox | JUnit XML | ❌ AutomatedTestName matching only | `<system-out>`, `<system-err>` | |
+| XCUITest | JUnit XML | ❌ AutomatedTestName matching only | none (use `--attachmentsFolder`) | |
+| Espresso | JUnit XML | ❌ AutomatedTestName matching only | `<system-out>`, `<system-err>` | |
+| Flutter | JUnit XML | ❌ AutomatedTestName matching only | `<system-out>`, `<system-err>` | |
 
 ---
 
