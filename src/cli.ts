@@ -21,7 +21,7 @@ import { AiSummaryOpts } from './ai/summarizer';
 import { applyOverrides, CONFIG_TEMPLATE_JSON, CONFIG_TEMPLATE_YAML, loadConfig, resolveConfigPath } from './config';
 import { pull, push, status } from './sync/engine';
 import { publishTestResults } from './sync/publish-results';
-import { SyncResult } from './types';
+import { SyncConfig, SyncResult } from './types';
 
 // ─── CLI definition ───────────────────────────────────────────────────────────
 
@@ -43,22 +43,22 @@ function collect(value: string, previous: string[]): string[] {
 // ─── AI summary helper ────────────────────────────────────────────────────────
 
 /**
- * Build AiSummaryOpts from parsed CLI opts.
- * Returns undefined only when --ai-provider none is passed explicitly.
+ * Build AiSummaryOpts from parsed CLI opts, falling back to config file values.
+ * CLI flags always take precedence. Returns undefined when provider is 'none'.
  */
-function buildAiOpts(opts: {
-  aiProvider?: string;
-  aiModel?: string;
-  aiUrl?: string;
-  aiKey?: string;
-}): AiSummaryOpts | undefined {
-  if (opts.aiProvider === 'none') return undefined;
-  const provider = (opts.aiProvider ?? 'local') as AiSummaryOpts['provider'];
+function buildAiOpts(
+  opts: { aiProvider?: string; aiModel?: string; aiUrl?: string; aiKey?: string },
+  config?: SyncConfig
+): AiSummaryOpts | undefined {
+  const cfgAi = config?.sync?.ai;
+  // CLI --ai-provider none wins over config; config provider='none' also disables
+  const provider = opts.aiProvider ?? cfgAi?.provider ?? 'local';
+  if (provider === 'none') return undefined;
   return {
-    provider,
-    ...(opts.aiModel && { model: opts.aiModel }),
-    ...(opts.aiUrl   && { baseUrl: opts.aiUrl }),
-    ...(opts.aiKey   && { apiKey: opts.aiKey }),
+    provider: provider as AiSummaryOpts['provider'],
+    model:    opts.aiModel ?? cfgAi?.model,
+    baseUrl:  opts.aiUrl   ?? cfgAi?.baseUrl,
+    apiKey:   opts.aiKey   ?? cfgAi?.apiKey,
     heuristicFallback: true,
   };
 }
@@ -113,7 +113,7 @@ program
       if (opts.configOverride?.length) console.log(chalk.dim(`Overrides: ${opts.configOverride.join(', ')}`));
       console.log('');
 
-      const aiSummary = buildAiOpts(opts);
+      const aiSummary = buildAiOpts(opts, config);
       const isTTY = process.stdout.isTTY ?? false;
       const onProgress = createProgressCallback(isTTY);
       const results = await push(config, configDir, { dryRun: opts.dryRun, tags: opts.tags, onProgress, aiSummary });
@@ -182,7 +182,7 @@ program
       if (opts.tags) console.log(chalk.dim(`Tags:   ${opts.tags}`));
       console.log('');
 
-      const aiSummary = buildAiOpts(opts);
+      const aiSummary = buildAiOpts(opts, config);
       const isTTY = process.stdout.isTTY ?? false;
       const onProgress = createProgressCallback(isTTY);
       const results = await status(config, configDir, { tags: opts.tags, onProgress, aiSummary });
