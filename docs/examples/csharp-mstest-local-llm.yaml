@@ -1,0 +1,35 @@
+orgUrl: https://dev.azure.com/your-org
+project: YourProject
+auth:
+  type: pat
+  token: $AZURE_DEVOPS_TOKEN
+testPlan:
+  id: 12345            # replace with your test plan ID
+  suiteId: 12346       # replace with your root suite ID
+  suiteMapping: flat
+local:
+  type: csharp
+  include: Tests/**/*.cs
+sync:
+  tagPrefix: tc
+  titleField: System.Title
+  markAutomated: true
+  ai:
+    provider: local
+    # Download a GGUF model file once, then point to it here.
+    # macOS / Linux:
+    #   mkdir -p ~/.cache/ado-sync/models
+    #   curl -L -o ~/.cache/ado-sync/models/qwen2.5-coder-7b-instruct-q4_k_m.gguf \
+    #     "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf"
+    #
+    # Windows (PowerShell):
+    #   New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\ado-sync\models"
+    #   Invoke-WebRequest -Uri "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf" `
+    #     -OutFile "$env:LOCALAPPDATA\ado-sync\models\qwen2.5-coder-7b-instruct-q4_k_m.gguf"
+    #
+    # Model size options (Qwen2.5-Coder recommended):
+    #   1.5B Q4_K_M  ~1.1 GB RAM  Good
+    #   7B   Q4_K_M  ~4.5 GB RAM  Better
+    #   14B  Q4_K_M  ~8.5 GB RAM  Excellent
+    model: ~/.cache/ado-sync/models/qwen2.5-coder-7b-instruct-q4_k_m.gguf
+    # model: $env:LOCALAPPDATA\ado-sync\models\qwen2.5-coder-7b-instruct-q4_k_m.gguf  # Windows
