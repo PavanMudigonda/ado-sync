@@ -493,10 +493,53 @@ The same `--ai-url` override works for any other OpenAI-compatible server:
 | Service | `--ai-url` |
 |---------|-----------|
 | LiteLLM (local proxy) | `http://localhost:4000` |
+| LiteLLM (hosted) | `https://<your-litellm-host>/v1` |
+| Hugging Face Inference | `https://router.huggingface.co/v1` |
 | Azure OpenAI | `https://<resource>.openai.azure.com/openai/deployments/<deployment>` |
 | vLLM | `http://localhost:8000/v1` |
 | LocalAI | `http://localhost:8080/v1` |
 | LM Studio | `http://localhost:1234/v1` |
+
+> **Note:** `api-inference.huggingface.co` is deprecated — use `router.huggingface.co` instead.
+
+### Using Hugging Face Inference API
+
+[Hugging Face](https://huggingface.co) provides a free serverless inference API for open-source models. Use the `openai` provider since HF exposes an OpenAI-compatible endpoint:
+
+```bash
+ado-sync push \
+  --ai-provider openai \
+  --ai-url https://router.huggingface.co/v1 \
+  --ai-key $HF_TOKEN \
+  --ai-model Qwen/Qwen2.5-Coder-7B-Instruct
+```
+
+Get a token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) (requires the **Inference** permission).
+
+Recommended open-source models:
+
+| Model | Notes |
+|-------|-------|
+| `Qwen/Qwen2.5-Coder-7B-Instruct` | Best for code/test understanding |
+| `meta-llama/Llama-3.1-8B-Instruct` | Good general purpose |
+| `mistralai/Mistral-7B-Instruct-v0.3` | Lightweight and fast |
+
+Config file equivalent:
+
+```json
+{
+  "sync": {
+    "ai": {
+      "provider": "openai",
+      "baseUrl": "https://router.huggingface.co/v1",
+      "apiKey": "$HF_TOKEN",
+      "model": "Qwen/Qwen2.5-Coder-7B-Instruct"
+    }
+  }
+}
+```
+
+> **LiteLLM model names:** When using a hosted LiteLLM instance that proxies Anthropic models, prefix the model name with `anthropic/`, e.g. `anthropic/claude-opus-4-6`. Check your instance's `/v1/models` endpoint for registered model names.
 
 Config file equivalent — set any `--ai-*` flag in `sync.ai` to avoid repeating it on every push. CLI flags always take precedence over config values:
 
@@ -525,6 +568,41 @@ The `sync.ai` block works for any provider:
 
 ```json
 { "sync": { "ai": { "provider": "none" } } }
+```
+
+### Complete example — C# MSTest with Hugging Face
+
+A full `ado-sync.yaml` for a C# MSTest project using the Hugging Face Inference API for AI-generated test steps:
+
+```yaml
+orgUrl: https://dev.azure.com/your-org
+project: YourProject
+auth:
+  type: pat
+  token: $AZURE_DEVOPS_TOKEN
+testPlan:
+  id: 12345
+  suiteId: 12346
+  suiteMapping: flat
+local:
+  type: csharp
+  include: Tests/**/*.cs
+sync:
+  tagPrefix: tc
+  titleField: System.Title
+  markAutomated: true
+  ai:
+    provider: openai
+    baseUrl: https://router.huggingface.co/v1
+    apiKey: $HF_TOKEN
+    model: Qwen/Qwen2.5-Coder-7B-Instruct
+```
+
+Run:
+```bash
+export AZURE_DEVOPS_TOKEN=your-pat
+export HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxx
+ado-sync push --config ado-sync.yaml
 ```
 
 ### Disabling AI summary
