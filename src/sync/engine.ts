@@ -157,6 +157,8 @@ export interface SyncOpts {
   onAiProgress?: (done: number, total: number, title: string) => void;
   /** AI auto-summary options: generate title/steps for tests that have none. */
   aiSummary?: AiSummaryOpts;
+  /** Internal: pre-parsed tests injected by multi-plan push to skip re-parsing. */
+  _preloadedTests?: ParsedTest[];
 }
 
 // ─── Multi-plan helpers ───────────────────────────────────────────────────────
@@ -188,12 +190,44 @@ export async function push(
   configDir: string,
   opts: SyncOpts = {}
 ): Promise<SyncResult[]> {
-  // Multi-plan: delegate to each plan entry
+  // Multi-plan: run AI summarisation across all plans first so progress totals
+  // are correct, then delegate each plan's sync loop (with AI already applied).
   if (config.testPlans?.length) {
-    const all: SyncResult[] = [];
+    // Collect all tests across plans and run AI in one pass
+    const planTests: Array<{ entryConfig: SyncConfig; tests: ParsedTest[] }> = [];
     for (const entry of config.testPlans) {
       const entryConfig = configForPlanEntry(config, entry);
-      all.push(...await pushSingle(entryConfig, configDir, opts));
+      const files = await discoverFiles(entryConfig.local.include, entryConfig.local.exclude, configDir);
+      const tests = await parseLocalFiles(files, entryConfig, opts.tags);
+      planTests.push({ entryConfig, tests });
+    }
+    if (opts.aiSummary) {
+      const CODE_TYPES = new Set(['javascript', 'playwright', 'puppeteer', 'cypress', 'testcafe', 'detox', 'espresso', 'xcuitest', 'flutter', 'java', 'csharp', 'python']);
+      const allTargets = planTests.flatMap(({ entryConfig, tests }) =>
+        CODE_TYPES.has(entryConfig.local.type) ? tests.filter(t => t.steps.length === 0 || !t.description) : []
+      );
+      let aiDone = 0;
+      for (const { entryConfig, tests } of planTests) {
+        if (!CODE_TYPES.has(entryConfig.local.type)) continue;
+        for (const test of tests) {
+          const needsSteps = test.steps.length === 0;
+          const needsDescription = !test.description;
+          if (needsSteps || needsDescription) {
+            opts.onAiProgress?.(aiDone, allTargets.length, test.title);
+            const result = await summarizeTest(test, entryConfig.local.type, opts.aiSummary);
+            aiDone++;
+            opts.onAiProgress?.(aiDone, allTargets.length, test.title);
+            if (needsSteps) { test.title = result.title; test.steps = result.steps; }
+            if (needsDescription && result.description) test.description = result.description;
+          }
+        }
+      }
+      if (allTargets.length > 0) opts.onAiProgress?.(allTargets.length, allTargets.length, '');
+    }
+    // Run sync loop per plan (AI already applied, skip AI phase inside pushSingle)
+    const all: SyncResult[] = [];
+    for (const { entryConfig, tests } of planTests) {
+      all.push(...await pushSingle(entryConfig, configDir, { ...opts, aiSummary: undefined, onAiProgress: undefined, _preloadedTests: tests } as SyncOpts));
     }
     return all;
   }
@@ -205,8 +239,11 @@ async function pushSingle(
   configDir: string,
   opts: SyncOpts
 ): Promise<SyncResult[]> {
-  const files = await discoverFiles(config.local.include, config.local.exclude, configDir);
-  const tests = await parseLocalFiles(files, config, opts.tags);
+  const files = opts._preloadedTests
+    ? []
+    : await discoverFiles(config.local.include, config.local.exclude, configDir);
+  const tests = opts._preloadedTests
+    ?? await parseLocalFiles(files, config, opts.tags);
 
   // AI auto-summary: for code-based local types, default to the local node-llama-cpp
   // provider (with heuristic fallback) when no explicit aiSummary opts are provided.
@@ -214,7 +251,8 @@ async function pushSingle(
   // heuristic mode so the push always succeeds even without a model installed.
   const CODE_TYPES = new Set(['javascript', 'playwright', 'puppeteer', 'cypress', 'testcafe', 'detox', 'espresso', 'xcuitest', 'flutter', 'java', 'csharp', 'python']);
   const effectiveAiOpts: AiSummaryOpts | undefined =
-    opts.aiSummary ?? (CODE_TYPES.has(config.local.type) ? { provider: 'local', heuristicFallback: true } : undefined);
+    opts._preloadedTests ? undefined  // AI already applied in multi-plan pre-pass
+    : opts.aiSummary ?? (CODE_TYPES.has(config.local.type) ? { provider: 'local', heuristicFallback: true } : undefined);
 
   if (effectiveAiOpts) {
     const aiTargets = tests.filter(t => t.steps.length === 0 || !t.description);
