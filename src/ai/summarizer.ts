@@ -783,9 +783,11 @@ async function anthropicSummary(
   code: string,
   fallbackTitle: string,
   model: string,
-  apiKey: string
+  apiKey: string,
+  baseUrl: string
 ): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const url = `${baseUrl.replace(/\/$/, '')}/messages`;
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -865,7 +867,8 @@ export async function summarizeTest(
         return await anthropicSummary(
           body, fallbackTitle,
           opts.model ?? 'claude-haiku-4-5-20251001',
-          resolveEnvVar(opts.apiKey ?? '')
+          resolveEnvVar(opts.apiKey ?? ''),
+          opts.baseUrl ?? 'https://api.anthropic.com/v1'
         );
     }
   } catch (err: any) {
