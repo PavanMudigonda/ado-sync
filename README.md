@@ -8,7 +8,7 @@ Supports a wide range of test file formats and frameworks:
 |---|---|---|---|
 | `gherkin` | Cucumber / Gherkin | `.feature` | |
 | `markdown` | Prose specs, Playwright test plans | `.md` | |
-| `csharp` | MSTest | `.cs` | [csharp-mstest.yaml](docs/examples/csharp-mstest.yaml) |
+| `csharp` | MSTest | `.cs` | [csharp-mstest.yaml](docs/examples/csharp-mstest.yaml) · [local LLM](docs/examples/csharp-mstest-local-llm.yaml) |
 | `csharp` | NUnit | `.cs` | [csharp-nunit.yaml](docs/examples/csharp-nunit.yaml) |
 | `csharp` | SpecFlow (Gherkin) | `.feature` | [csharp-specflow.yaml](docs/examples/csharp-specflow.yaml) |
 | `java` | JUnit 4, JUnit 5 | `.java` | [java-junit.yaml](docs/examples/java-junit.yaml) |
