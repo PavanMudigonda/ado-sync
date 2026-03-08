@@ -153,6 +153,8 @@ export interface SyncOpts {
   tags?: string;
   /** Called after each test case is processed. Useful for rendering a live progress bar. */
   onProgress?: (done: number, total: number, result: SyncResult) => void;
+  /** Called during AI summarisation phase (before sync loop). done=0 signals start of a test. */
+  onAiProgress?: (done: number, total: number, title: string) => void;
   /** AI auto-summary options: generate title/steps for tests that have none. */
   aiSummary?: AiSummaryOpts;
 }
@@ -215,11 +217,16 @@ async function pushSingle(
     opts.aiSummary ?? (CODE_TYPES.has(config.local.type) ? { provider: 'local', heuristicFallback: true } : undefined);
 
   if (effectiveAiOpts) {
+    const aiTargets = tests.filter(t => t.steps.length === 0 || !t.description);
+    let aiDone = 0;
     for (const test of tests) {
       const needsSteps = test.steps.length === 0;
       const needsDescription = !test.description;
       if (needsSteps || needsDescription) {
+        opts.onAiProgress?.(aiDone, aiTargets.length, test.title);
         const result = await summarizeTest(test, config.local.type, effectiveAiOpts);
+        aiDone++;
+        opts.onAiProgress?.(aiDone, aiTargets.length, test.title);
         if (needsSteps) {
           test.title = result.title;
           test.steps = result.steps;
@@ -229,6 +236,7 @@ async function pushSingle(
         }
       }
     }
+    if (aiTargets.length > 0) opts.onAiProgress?.(aiTargets.length, aiTargets.length, '');
   }
 
   const client = await AzureClient.create(config);
@@ -563,9 +571,9 @@ async function pullSingle(
 export async function status(
   config: SyncConfig,
   configDir: string,
-  opts: Pick<SyncOpts, 'tags' | 'onProgress' | 'aiSummary'> = {}
+  opts: Pick<SyncOpts, 'tags' | 'onProgress' | 'onAiProgress' | 'aiSummary'> = {}
 ): Promise<SyncResult[]> {
-  return push(config, configDir, { dryRun: true, tags: opts.tags, onProgress: opts.onProgress, aiSummary: opts.aiSummary });
+  return push(config, configDir, { dryRun: true, tags: opts.tags, onProgress: opts.onProgress, onAiProgress: opts.onAiProgress, aiSummary: opts.aiSummary });
 }
 
 // ─── Cache helpers ────────────────────────────────────────────────────────────
