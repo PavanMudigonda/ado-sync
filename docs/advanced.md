@@ -451,6 +451,41 @@ ado-sync push --ai-model "$env:LOCALAPPDATA\ado-sync\models\qwen2.5-coder-1.5b-i
 
 The model is loaded once and reused for all tests in the run — no repeated loading overhead.
 
+### Complete example — C# MSTest with local LLM
+
+A full `ado-sync.yaml` for a C# MSTest project using a local GGUF model (no API key, no internet required at push time):
+
+```yaml
+orgUrl: https://dev.azure.com/your-org
+project: YourProject
+auth:
+  type: pat
+  token: $AZURE_DEVOPS_TOKEN
+testPlan:
+  id: 12345
+  suiteId: 12346
+  suiteMapping: flat
+local:
+  type: csharp
+  include: Tests/**/*.cs
+sync:
+  tagPrefix: tc
+  titleField: System.Title
+  markAutomated: true
+  ai:
+    provider: local
+    model: ~/.cache/ado-sync/models/qwen2.5-coder-7b-instruct-q4_k_m.gguf
+    # Windows: model: $env:LOCALAPPDATA\ado-sync\models\qwen2.5-coder-7b-instruct-q4_k_m.gguf
+```
+
+Run:
+```bash
+export AZURE_DEVOPS_TOKEN=your-pat
+ado-sync push --config ado-sync.yaml
+```
+
+> No `apiKey` or `baseUrl` needed — the model runs entirely in-process via `node-llama-cpp`.
+
 ---
 
 ### Setting up Ollama
