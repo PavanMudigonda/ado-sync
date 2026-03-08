@@ -374,7 +374,7 @@ Local source files are **never modified** by the AI summary feature.
 | `local` *(default)* | Good–Excellent | A GGUF model file (see setup below) |
 | `heuristic` | Basic | Nothing — zero dependencies, works offline |
 | `ollama` | Good–Excellent | [Ollama](https://ollama.com) server running locally |
-| `openai` | Excellent | OpenAI API key |
+| `openai` | Excellent | OpenAI API key, or any OpenAI-compatible proxy (LiteLLM, Azure OpenAI, vLLM, etc.) |
 | `anthropic` | Excellent | Anthropic API key |
 
 > **No setup required to try it.** If no `--ai-model` is passed for `local`, it falls back to `heuristic` silently — so `ado-sync push` always works.
@@ -470,6 +470,47 @@ ado-sync push --ai-provider ollama --ai-model qwen2.5-coder:7b
 ```bash
 ado-sync push --ai-provider openai    --ai-key $OPENAI_API_KEY
 ado-sync push --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
+```
+
+### Using LiteLLM (or any OpenAI-compatible proxy)
+
+[LiteLLM](https://github.com/BerriAI/litellm) is a proxy that exposes an OpenAI-compatible API for 100+ model providers (Azure OpenAI, Bedrock, Gemini, Mistral, Cohere, vLLM, and more). Use the `openai` provider with `--ai-url` pointing at your LiteLLM server:
+
+```bash
+# Start LiteLLM proxy (example)
+litellm --model gpt-4o-mini   # listens on http://localhost:4000 by default
+
+# Push using LiteLLM
+ado-sync push \
+  --ai-provider openai \
+  --ai-url http://localhost:4000 \
+  --ai-key $LITELLM_API_KEY \
+  --ai-model gpt-4o-mini
+```
+
+The same `--ai-url` override works for any other OpenAI-compatible server:
+
+| Service | `--ai-url` |
+|---------|-----------|
+| LiteLLM (local proxy) | `http://localhost:4000` |
+| Azure OpenAI | `https://<resource>.openai.azure.com/openai/deployments/<deployment>` |
+| vLLM | `http://localhost:8000/v1` |
+| LocalAI | `http://localhost:8080/v1` |
+| LM Studio | `http://localhost:1234/v1` |
+
+Config file equivalent:
+
+```json
+{
+  "sync": {
+    "ai": {
+      "provider": "openai",
+      "baseUrl": "http://localhost:4000",
+      "apiKey": "$LITELLM_API_KEY",
+      "model": "gpt-4o-mini"
+    }
+  }
+}
 ```
 
 ### Disabling AI summary
