@@ -4,25 +4,30 @@ Bidirectional sync between local test specs and Azure DevOps Test Cases.
 
 Supports a wide range of test file formats and frameworks:
 
-| `local.type` | Framework / Format | Files |
-|---|---|---|
-| `gherkin` | Cucumber / Gherkin | `.feature` |
-| `markdown` | Prose specs, Playwright test plans | `.md` |
-| `csharp` | MSTest, NUnit | `.cs` |
-| `java` | JUnit 4, JUnit 5, TestNG + Selenium | `.java` |
-| `python` | pytest + Selenium | `.py` |
-| `javascript` | Jest, Jasmine, WebdriverIO | `.js` / `.ts` |
-| `playwright` | Playwright Test | `.js` / `.ts` |
-| `puppeteer` | Puppeteer + Jest or Mocha | `.js` / `.ts` |
-| `cypress` | Cypress | `.cy.js` / `.cy.ts` |
-| `testcafe` | TestCafe | `.js` / `.ts` |
-| `detox` | Detox (React Native E2E) | `.js` / `.ts` |
-| `espresso` | Android Espresso (JUnit 4 / Kotlin) | `.java` / `.kt` |
-| `xcuitest` | iOS / macOS XCUITest | `.swift` |
-| `flutter` | Flutter widget & integration tests | `_test.dart` |
-| Appium | Use `javascript` / `java` / `python` / `csharp` | depends on language binding |
-| `csv` | Azure DevOps tabular export | `.csv` |
-| `excel` | Azure DevOps tabular export | `.xlsx` |
+| `local.type` | Framework / Format | Files | Example config |
+|---|---|---|---|
+| `gherkin` | Cucumber / Gherkin | `.feature` | |
+| `markdown` | Prose specs, Playwright test plans | `.md` | |
+| `csharp` | MSTest | `.cs` | [csharp-mstest.yaml](docs/examples/csharp-mstest.yaml) |
+| `csharp` | NUnit | `.cs` | [csharp-nunit.yaml](docs/examples/csharp-nunit.yaml) |
+| `csharp` | SpecFlow (Gherkin) | `.feature` | [csharp-specflow.yaml](docs/examples/csharp-specflow.yaml) |
+| `java` | JUnit 4, JUnit 5 | `.java` | [java-junit.yaml](docs/examples/java-junit.yaml) |
+| `java` | TestNG + Selenium | `.java` | [java-testng.yaml](docs/examples/java-testng.yaml) |
+| `python` | pytest + Selenium | `.py` | [python-pytest.yaml](docs/examples/python-pytest.yaml) |
+| `javascript` | Jest | `.js` / `.ts` | [js-jest.yaml](docs/examples/js-jest.yaml) |
+| `javascript` | Jasmine / WebdriverIO | `.js` / `.ts` | [js-jasmine-wdio.yaml](docs/examples/js-jasmine-wdio.yaml) |
+| `playwright` | Playwright Test (TypeScript) | `.spec.ts` | [playwright-ts.yaml](docs/examples/playwright-ts.yaml) |
+| `playwright` | Playwright Test (JavaScript) | `.spec.js` | [playwright-js.yaml](docs/examples/playwright-js.yaml) |
+| `puppeteer` | Puppeteer + Jest or Mocha | `.js` / `.ts` | |
+| `cypress` | Cypress | `.cy.js` / `.cy.ts` | |
+| `testcafe` | TestCafe | `.js` / `.ts` | [testcafe.yaml](docs/examples/testcafe.yaml) |
+| `detox` | Detox (React Native E2E) | `.js` / `.ts` | [detox-react-native.yaml](docs/examples/detox-react-native.yaml) |
+| `espresso` | Android Espresso (JUnit 4 / Kotlin) | `.java` / `.kt` | [espresso-android.yaml](docs/examples/espresso-android.yaml) |
+| `xcuitest` | iOS / macOS XCUITest | `.swift` | [xcuitest-ios.yaml](docs/examples/xcuitest-ios.yaml) |
+| `flutter` | Flutter widget & integration tests | `_test.dart` | [flutter-dart.yaml](docs/examples/flutter-dart.yaml) |
+| Appium | Use `javascript` / `java` / `python` / `csharp` | depends on language binding | |
+| `csv` | Azure DevOps tabular export | `.csv` | |
+| `excel` | Azure DevOps tabular export | `.xlsx` | |
 
 Inspired by [SpecSync](https://docs.specsolutions.eu/specsync/).
 
@@ -212,6 +217,7 @@ For code-based test types (`java`, `csharp`, `python`, `javascript`, `playwright
 | `openai` | Excellent | `--ai-key $OPENAI_API_KEY` |
 | `anthropic` | Excellent | `--ai-key $ANTHROPIC_API_KEY` |
 | `openai` + `--ai-url` | Excellent | Any OpenAI-compatible proxy: LiteLLM, Azure OpenAI, vLLM, LM Studio |
+| `openai` + `--ai-url` (HF) | Good–Excellent | [Hugging Face Inference API](https://huggingface.co/settings/tokens) — free, open-source models |
 
 #### Option A — No setup (heuristic, instant)
 
@@ -289,7 +295,23 @@ ado-sync push \
   --ai-model gpt-4o-mini
 ```
 
+> **Hosted LiteLLM + Anthropic models:** Use `--ai-url https://<your-host>/v1` and prefix model names with `anthropic/` (e.g. `anthropic/claude-opus-4-6`). Check your instance's `/v1/models` for registered names.
+
 The same pattern works for Azure OpenAI, vLLM, LM Studio, and LocalAI — just change `--ai-url` to the endpoint's base URL. See [docs/advanced.md](docs/advanced.md) for a full compatibility table.
+
+#### Option F — Hugging Face Inference API (free, open-source models)
+
+[Hugging Face](https://huggingface.co) provides free serverless inference for open-source models via an OpenAI-compatible API:
+
+```bash
+ado-sync push \
+  --ai-provider openai \
+  --ai-url https://router.huggingface.co/v1 \
+  --ai-key $HF_TOKEN \
+  --ai-model Qwen/Qwen2.5-Coder-7B-Instruct
+```
+
+Get a token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) (requires **Inference** permission). Recommended models: `Qwen/Qwen2.5-Coder-7B-Instruct`, `meta-llama/Llama-3.1-8B-Instruct`, `mistralai/Mistral-7B-Instruct-v0.3`.
 
 #### Disable AI entirely
 
