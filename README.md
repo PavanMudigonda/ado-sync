@@ -211,6 +211,7 @@ For code-based test types (`java`, `csharp`, `python`, `javascript`, `playwright
 | `ollama` | Good–Excellent | Install [Ollama](https://ollama.com) + `ollama pull qwen2.5-coder:7b` |
 | `openai` | Excellent | `--ai-key $OPENAI_API_KEY` |
 | `anthropic` | Excellent | `--ai-key $ANTHROPIC_API_KEY` |
+| `openai` + `--ai-url` | Excellent | Any OpenAI-compatible proxy: LiteLLM, Azure OpenAI, vLLM, LM Studio |
 
 #### Option A — No setup (heuristic, instant)
 
@@ -275,6 +276,20 @@ ado-sync push --ai-provider ollama --ai-model qwen2.5-coder:7b
 ado-sync push --ai-provider openai   --ai-key $OPENAI_API_KEY
 ado-sync push --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
 ```
+
+#### Option E — LiteLLM or any OpenAI-compatible proxy
+
+[LiteLLM](https://github.com/BerriAI/litellm) is a proxy that routes to 100+ providers (Azure OpenAI, Bedrock, Gemini, Mistral, vLLM, and more) via a single OpenAI-compatible API. Point the `openai` provider at it with `--ai-url`:
+
+```bash
+ado-sync push \
+  --ai-provider openai \
+  --ai-url http://localhost:4000 \
+  --ai-key $LITELLM_API_KEY \
+  --ai-model gpt-4o-mini
+```
+
+The same pattern works for Azure OpenAI, vLLM, LM Studio, and LocalAI — just change `--ai-url` to the endpoint's base URL. See [docs/advanced.md](docs/advanced.md) for a full compatibility table.
 
 #### Disable AI entirely
 
