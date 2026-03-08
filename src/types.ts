@@ -308,6 +308,32 @@ export interface SyncConfig {
     attachments?: AttachmentsConfig;
     /** Pull-specific configuration. */
     pull?: PullConfig;
+    /**
+     * AI auto-summary configuration. All fields can be overridden by CLI flags.
+     * CLI flags always take precedence over config file values.
+     */
+    ai?: {
+      /**
+       * AI provider for test step generation.
+       * 'local' (default): runs a GGUF model in-process via node-llama-cpp.
+       * 'heuristic': fast regex-based, no model needed.
+       * 'ollama': local Ollama server.
+       * 'openai': OpenAI API or any OpenAI-compatible proxy (LiteLLM, Azure OpenAI, vLLM…).
+       * 'anthropic': Anthropic API.
+       * 'none': disable AI summary entirely.
+       */
+      provider?: 'heuristic' | 'local' | 'ollama' | 'openai' | 'anthropic' | 'none';
+      /**
+       * For 'local': absolute path to a GGUF model file.
+       * For 'ollama': model tag, e.g. 'qwen2.5-coder:7b'.
+       * For 'openai'/'anthropic': model name, e.g. 'gpt-4o-mini'.
+       */
+      model?: string;
+      /** Base URL for 'ollama' or an OpenAI-compatible endpoint. e.g. 'http://localhost:4000' */
+      baseUrl?: string;
+      /** API key for 'openai' or 'anthropic'. Supports $ENV_VAR references. */
+      apiKey?: string;
+    };
   };
 }
 
