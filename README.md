@@ -215,9 +215,11 @@ For code-based test types (`java`, `csharp`, `python`, `javascript`, `playwright
 | `heuristic` | Basic | None — works offline, zero dependencies |
 | `ollama` | Good–Excellent | Install [Ollama](https://ollama.com) + `ollama pull qwen2.5-coder:7b` |
 | `openai` | Excellent | `--ai-key $OPENAI_API_KEY` |
-| `anthropic` | Excellent | `--ai-key $ANTHROPIC_API_KEY` |
-| `openai` + `--ai-url` | Excellent | Any OpenAI-compatible proxy: LiteLLM, Azure OpenAI, vLLM, LM Studio |
+| `anthropic` | Excellent | `--ai-key $ANTHROPIC_API_KEY` — also works with **Claude Code** credentials |
+| `openai` + `--ai-url` | Excellent | Any OpenAI-compatible proxy: LiteLLM, Azure OpenAI, vLLM, LM Studio — also works for **GitHub Copilot Enterprise** (Azure OpenAI) |
 | `openai` + `--ai-url` (HF) | Good–Excellent | [Hugging Face Inference API](https://huggingface.co/settings/tokens) — free, open-source models |
+
+> **GitHub Copilot or Claude Code user?** See [docs/advanced.md — Using GitHub Copilot or Claude Code](docs/advanced.md#using-github-copilot-or-claude-code) for a step-by-step guide on which provider to use and how to invoke ado-sync from within your IDE assistant.
 
 #### Option A — No setup (heuristic, instant)
 
