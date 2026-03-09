@@ -507,6 +507,125 @@ ado-sync push --ai-provider openai    --ai-key $OPENAI_API_KEY
 ado-sync push --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
 ```
 
+---
+
+### Using GitHub Copilot or Claude Code
+
+If you already use **GitHub Copilot** or **Claude Code** as your IDE AI assistant, you can reuse the same credentials with ado-sync. The key point: these tools are IDE plugins — they don't expose an API endpoint ado-sync can call. Instead, use the underlying AI provider they run on.
+
+#### Claude Code → `anthropic` provider
+
+Claude Code is powered by Anthropic's Claude models. If you have an `ANTHROPIC_API_KEY` (required to run Claude Code), pass it directly:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+
+ado-sync push --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
+```
+
+Pin a specific model with `--ai-model` (default is `claude-haiku-4-5-20251001`):
+
+```bash
+# Faster / cheaper
+ado-sync push --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY --ai-model claude-haiku-4-5-20251001
+
+# Higher quality
+ado-sync push --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY --ai-model claude-sonnet-4-6
+```
+
+Config file equivalent — set once, never repeat the flag:
+
+```json
+{
+  "sync": {
+    "ai": {
+      "provider": "anthropic",
+      "apiKey": "$ANTHROPIC_API_KEY",
+      "model": "claude-haiku-4-5-20251001"
+    }
+  }
+}
+```
+
+#### GitHub Copilot → `openai` or `openai` + `--ai-url` provider
+
+GitHub Copilot itself does not expose a public API endpoint. Use one of these alternatives depending on your subscription:
+
+**Option A — OpenAI API key** (Copilot Individual / Team subscribers)
+
+If you have a separate OpenAI API key:
+
+```bash
+ado-sync push --ai-provider openai --ai-key $OPENAI_API_KEY
+```
+
+**Option B — Azure OpenAI** (Copilot Enterprise / corporate Azure customers)
+
+If your org has an Azure OpenAI deployment (which also powers enterprise Copilot):
+
+```bash
+ado-sync push \
+  --ai-provider openai \
+  --ai-url "https://<your-resource>.openai.azure.com/openai/deployments/<deployment>/v1" \
+  --ai-key $AZURE_OPENAI_KEY \
+  --ai-model gpt-4o-mini
+```
+
+Config file equivalent:
+
+```json
+{
+  "sync": {
+    "ai": {
+      "provider": "openai",
+      "baseUrl": "https://<your-resource>.openai.azure.com/openai/deployments/<deployment>/v1",
+      "apiKey": "$AZURE_OPENAI_KEY",
+      "model": "gpt-4o-mini"
+    }
+  }
+}
+```
+
+**Option C — No API key (heuristic)**
+
+Works offline with zero setup — good when you don't want to spend API credits:
+
+```bash
+ado-sync push --ai-provider heuristic
+```
+
+#### Quick reference
+
+| You use | Recommended provider | Command |
+|---------|---------------------|---------|
+| Claude Code | `anthropic` | `ado-sync push --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY` |
+| Copilot Individual / Team | `openai` | `ado-sync push --ai-provider openai --ai-key $OPENAI_API_KEY` |
+| Copilot Enterprise / Azure | `openai` + `--ai-url` | See Azure OpenAI option above |
+| Either, no API budget | `heuristic` | `ado-sync push --ai-provider heuristic` |
+| Privacy-sensitive / air-gapped | `local` | `ado-sync push --ai-model ~/.cache/ado-sync/models/...` |
+
+#### Running ado-sync from within your IDE assistant
+
+Both tools can execute terminal commands, so you can ask them to run ado-sync for you directly.
+
+**Claude Code:**
+
+```
+Run: ado-sync push --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY --dry-run
+```
+
+Claude Code will execute it in the terminal and explain what would change before you commit to a real push.
+
+**GitHub Copilot Chat (VS Code):**
+
+Use the `@terminal` agent in Copilot Chat:
+
+```
+@terminal run ado-sync push --ai-provider heuristic --dry-run and explain the output
+```
+
+Copilot will propose the command in the terminal panel for you to accept and run.
+
 ### Using LiteLLM (or any OpenAI-compatible proxy)
 
 [LiteLLM](https://github.com/BerriAI/litellm) is a proxy that exposes an OpenAI-compatible API for 100+ model providers (Azure OpenAI, Bedrock, Gemini, Mistral, Cohere, vLLM, and more). Use the `openai` provider with `--ai-url` pointing at your LiteLLM server:
