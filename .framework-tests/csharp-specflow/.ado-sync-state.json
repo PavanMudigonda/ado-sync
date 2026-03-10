@@ -1,0 +1,44 @@
+{
+  "32972": {
+    "title": "Scenario: Adding an item increments the cart badge",
+    "stepsHash": "8c77ae699ccaf850920b66a66c69657797ab97d5b7172753ce53a29a8ee53aa4",
+    "descriptionHash": "decf6687806d3b5b83e6878a94b0dad8a8d853f19dd5d2cd31da9ed91a661ecb",
+    "changedDate": "2026-03-06T19:56:58.31Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/csharp-specflow/Features/Cart.feature"
+  },
+  "32973": {
+    "title": "Scenario: Removing an item decrements the cart badge",
+    "stepsHash": "68f3bb979de1c08f437bfa17e264238731f2cd543138a487643fdd0b0c9bf2e6",
+    "descriptionHash": "a7016c9206d1fa87b077c6f4141be20a166443c796ceea21badb8faec77cdc02",
+    "changedDate": "2026-03-06T19:56:59.42Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/csharp-specflow/Features/Cart.feature"
+  },
+  "32974": {
+    "title": "Scenario: Cart page shows correct item price",
+    "stepsHash": "5d0db3134f73c7779aaae4e0ceb03897d7049d6020d7c01ebd35d45f7a524688",
+    "descriptionHash": "93bb9b2c2f8a406bbc48088fd47147ccb9b0d70f6c3e0d6d61e9e6ee02bb30b7",
+    "changedDate": "2026-03-06T19:57:00.333Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/csharp-specflow/Features/Cart.feature"
+  },
+  "32975": {
+    "title": "Scenario: Valid credentials navigate to inventory",
+    "stepsHash": "70190355c4ac3894f361d2a9a85d35fb25b35aed12c6a4c06669fc7f477b1e7c",
+    "descriptionHash": "e269245f4871ad4ceb28a4eba4d024dc91a651ca54c07ef2686f875182c3ee0c",
+    "changedDate": "2026-03-06T19:57:01.37Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/csharp-specflow/Features/Login.feature"
+  },
+  "32976": {
+    "title": "Scenario: Locked out user sees error message",
+    "stepsHash": "7f1455ec1161fba9be315a0593f567bbc62f7aa59869d72c750438e0a167ba5a",
+    "descriptionHash": "77e4f72ea406ec1df9d1d9028a9c5eca8cf880d1efa4b15b65033aa0f5e6a713",
+    "changedDate": "2026-03-06T19:57:02.077Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/csharp-specflow/Features/Login.feature"
+  },
+  "32977": {
+    "title": "Scenario: Empty credentials show username required error",
+    "stepsHash": "ce5c3b1e8145eb38c266877d7dc561ebc14919ea55327d825a7cbeb1c2dee8a2",
+    "descriptionHash": "7f972dd775af7884c16d5ed8f0ca166b992aac2902e74bce9d62285510aa2718",
+    "changedDate": "2026-03-06T19:57:03.09Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/csharp-specflow/Features/Login.feature"
+  }
+}

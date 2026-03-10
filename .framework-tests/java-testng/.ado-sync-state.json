@@ -1,0 +1,23 @@
+{
+  "32984": {
+    "title": "Scenario: Adding a single item updates the cart badge to 1.",
+    "stepsHash": "79fcd403521ba3018092eab87567e38cbf89846d1744ff860e3f117b5845a8af",
+    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "changedDate": "2026-03-07T19:26:00.653Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/java-testng/src/test/java/com/saucedemo/testng/CartTests.java"
+  },
+  "32985": {
+    "title": "Scenario: Adding three items shows count 3 on the cart badge.",
+    "stepsHash": "df57415d5199c2294e6e50b4a6290e0340c821799f8d6624fe5b04573dc55dd2",
+    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "changedDate": "2026-03-07T19:26:01.537Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/java-testng/src/test/java/com/saucedemo/testng/CartTests.java"
+  },
+  "32986": {
+    "title": "Scenario: Cart page lists all added items.",
+    "stepsHash": "a519e1368cb17fc0258d89a8363c2aa2be2d40acdcb32b5790d14dce1dc274c8",
+    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "changedDate": "2026-03-07T19:26:02.33Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/java-testng/src/test/java/com/saucedemo/testng/CartTests.java"
+  }
+}

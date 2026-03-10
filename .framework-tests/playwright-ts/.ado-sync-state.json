@@ -1,0 +1,100 @@
+{
+  "33005": {
+    "title": "Scenario: Inventory page shows six products.",
+    "stepsHash": "ac84c77a6b693a290404a365fa5ce69970da3af5d8d8514c6dcf31d96b7feffe",
+    "descriptionHash": "20fe5a2ec6ce9957f9b1a1f069b787251a4e47c38b2f1b9c5d8fd4875f3935d5",
+    "changedDate": "2026-03-08T01:28:08.557Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-ts/tests/inventory.spec.ts"
+  },
+  "33006": {
+    "title": "Scenario: Sort by price low to high reorders items.",
+    "stepsHash": "cbdf71e84c8b21c7e36c0ef0b3c243b9fa63c77e08bd1faf700ed9197f863f5c",
+    "descriptionHash": "a00b1fb03a57875d8bacda05acfbe391afd23807ea7d86c99dc993a96b38e30f",
+    "changedDate": "2026-03-08T01:28:11.837Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-ts/tests/inventory.spec.ts"
+  },
+  "33007": {
+    "title": "Scenario: Product detail page shows name and price.",
+    "stepsHash": "a2e1c641fb086c8fb54c5602fe7be787775f24d71d7c66edc6f5dd6179726eb0",
+    "descriptionHash": "f5d987af18d49a7da563085f4945aac407c8956fc50a5af83e0ffa181906a8ea",
+    "changedDate": "2026-03-08T01:28:12.5Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-ts/tests/inventory.spec.ts"
+  },
+  "33008": {
+    "title": "Scenario: Valid credentials redirect to the inventory page.",
+    "stepsHash": "962379e9e209e45088b52ad526edff740e86d1b38f42b1969122ea7ad8b0b928",
+    "descriptionHash": "6418902276b1cad4fcd51297644a6c9900c3bb985b6e2110ccf3969661790c6c",
+    "changedDate": "2026-03-08T01:28:13.22Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-ts/tests/login.spec.ts"
+  },
+  "33009": {
+    "title": "Scenario: Locked-out user sees an error banner.",
+    "stepsHash": "a0e066a1b239962eb6bc573a699c5082ee2576bc106eaaafcd14bb25d2bcdcb2",
+    "descriptionHash": "c655f5545364a4bc94b2c04cd7b15029c5353bd7b3b3d073e9f76718226a3b6d",
+    "changedDate": "2026-03-08T01:28:13.827Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-ts/tests/login.spec.ts"
+  },
+  "33010": {
+    "title": "Scenario: Empty username shows a validation error.",
+    "stepsHash": "4343fb827a7da1ff5ad151db9cf615de10278d3c2563f7b8afd6663410249aa2",
+    "descriptionHash": "7a2667183f454478a0dc1454d729a7e939f7047e881f579797bb75ed7a9a1470",
+    "changedDate": "2026-03-08T01:28:14.357Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-ts/tests/login.spec.ts"
+  },
+  "33015": {
+    "title": "Scenario: Cart shows correct item count before checkout.",
+    "stepsHash": "4df2a827dc74ee8c516dc10171f7ee0455d49f7b4588d0257c674cbf1cbce092",
+    "descriptionHash": "7ef4b747ca2437bf10bcb8805f4d71b28e6efd82a3ae06cfb616fc7e630afad3",
+    "changedDate": "2026-03-08T01:28:03.203Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-ts/tests/checkout.spec.ts"
+  },
+  "33016": {
+    "title": "Scenario: Checkout information form accepts valid buyer details.",
+    "stepsHash": "2bcafa647b0d57824170031cd903333df4c9c9bff678df5fbaf1a6d44f8d1603",
+    "descriptionHash": "cc84c57b5f57f2dba50abcb7e3baac7c1f0e205c472a3066efaeb91acc5885eb",
+    "changedDate": "2026-03-08T01:28:04.087Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-ts/tests/checkout.spec.ts"
+  },
+  "33017": {
+    "title": "Scenario: Order summary page shows item total.",
+    "stepsHash": "eed868a0face675adf70265566b9c12e5ded26340d6f419337c03a8b82fc0efe",
+    "descriptionHash": "4c947f2d1e42c526ff31cd43a64da1cb0a6caffb8a133d16f1802d23b3207ef4",
+    "changedDate": "2026-03-08T01:28:04.677Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-ts/tests/checkout.spec.ts"
+  },
+  "33018": {
+    "title": "Scenario: Finish button completes the order and shows confirmation.",
+    "stepsHash": "ae96a88d581d503224b602691ee0d46cc32146173d9fbebd3d76d50fef5e5927",
+    "descriptionHash": "30c36e3b3c3b2e7bb414ddc69631614f2d61325d2ce1bb7409bb3d2e13215f3d",
+    "changedDate": "2026-03-08T01:28:05.367Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-ts/tests/checkout.spec.ts"
+  },
+  "33019": {
+    "title": "Scenario: Tax is applied on the order summary page.",
+    "stepsHash": "594b969e3cfa4686a30fe5aa6fa56d01c1d2e85cc0c21429d0b940e920c887bd",
+    "descriptionHash": "c553418a34a802f33dc8b6ceb974c6559c60982d953e0e55bdb339cec4a7b82c",
+    "changedDate": "2026-03-08T01:28:05.853Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-ts/tests/checkout.spec.ts"
+  },
+  "33020": {
+    "title": "Scenario: Cancel button on step 1 returns the user to the cart.",
+    "stepsHash": "1219bfc5641b2e7f9b89e151dad3bdc425d9062c119bb80feac04abf8550eb5a",
+    "descriptionHash": "797012afd25ad1855844d8d66ac6b31917ad0549c07267aa8d67e17d3e3cdb9a",
+    "changedDate": "2026-03-08T01:28:06.387Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-ts/tests/checkout.spec.ts"
+  },
+  "33021": {
+    "title": "Scenario: Promo code field is visible on the order summary page.",
+    "stepsHash": "606ee12497e0a24d169eff628499c4a9b48b07c03c55eee9758bfa80934a2ae3",
+    "descriptionHash": "48df0045b2d5f567450a0355e2b5f876830919954588768b58f0a00b047624d5",
+    "changedDate": "2026-03-08T01:28:06.93Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-ts/tests/checkout.spec.ts"
+  },
+  "33022": {
+    "title": "Scenario: Checkout with an empty cart shows a warning (currently fails silently).",
+    "stepsHash": "1e0559ca72fd8195674bc081318a52a72f03ae57b4ae30941e37b0c48f828c11",
+    "descriptionHash": "6d264f0208cc1bc84caf5d47351dca99b11b656542ea49df13c2ba5e73ffc07f",
+    "changedDate": "2026-03-08T01:28:08.02Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-ts/tests/checkout.spec.ts"
+  }
+}

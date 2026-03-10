@@ -1,0 +1,130 @@
+{
+  "config": { "rootDir": "/framework-tests/playwright" },
+  "suites": [
+    {
+      "title": "inventory.spec.ts",
+      "file": "tests/inventory.spec.ts",
+      "suites": [
+        {
+          "title": "SauceDemo Inventory",
+          "suites": [],
+          "specs": [
+            {
+              "title": "inventory page shows six products @tc:33005",
+              "ok": true, "tags": ["@tc:33005"],
+              "tests": [{
+                "timeout": 30000, "retries": 0, "status": "expected",
+                "results": [{
+                  "workerIndex": 0, "status": "passed", "duration": 2544,
+                  "errors": [],
+                  "stdout": [{ "text": "Found 6 .inventory_item elements\n" }],
+                  "stderr": [], "retry": 0, "attachments": []
+                }]
+              }]
+            },
+            {
+              "title": "sort by price low to high reorders items @tc:33006",
+              "ok": false, "tags": ["@tc:33006"],
+              "tests": [{
+                "timeout": 30000, "retries": 1, "status": "unexpected",
+                "results": [
+                  {
+                    "workerIndex": 0, "status": "failed", "duration": 3109,
+                    "errors": [{ "message": "Error: expect(locator).toHaveText(expected)\nExpected: \"$9.99\"\nReceived: \"$29.99\"\n    at tests/inventory.spec.ts:22:32" }],
+                    "stdout": [{ "text": "Selected sort: lohi\n" }, { "text": "First price: $29.99\n" }],
+                    "stderr": [], "retry": 0,
+                    "attachments": [{
+                      "name": "screenshot", "contentType": "image/png",
+                      "path": "../test-results/inventory-fail/screenshot-on-failure.png"
+                    }]
+                  },
+                  {
+                    "workerIndex": 0, "status": "failed", "duration": 2988,
+                    "errors": [{ "message": "Error: expect(locator).toHaveText(expected)\nExpected: \"$9.99\"\nReceived: \"$29.99\"\n    at tests/inventory.spec.ts:22:32" }],
+                    "stdout": [], "stderr": [], "retry": 1,
+                    "attachments": [{
+                      "name": "screenshot", "contentType": "image/png",
+                      "path": "../test-results/inventory-fail/screenshot-on-failure.png"
+                    }]
+                  }
+                ]
+              }]
+            },
+            {
+              "title": "product detail page shows name and price @tc:33007",
+              "ok": true, "tags": ["@tc:33007"],
+              "tests": [{
+                "timeout": 30000, "retries": 0, "status": "expected",
+                "results": [{
+                  "workerIndex": 0, "status": "passed", "duration": 2201,
+                  "errors": [],
+                  "stdout": [{ "text": "Detail page: name and price visible\n" }],
+                  "stderr": [], "retry": 0, "attachments": []
+                }]
+              }]
+            }
+          ]
+        }
+      ],
+      "specs": []
+    },
+    {
+      "title": "login.spec.ts",
+      "file": "tests/login.spec.ts",
+      "suites": [
+        {
+          "title": "SauceDemo Login",
+          "suites": [],
+          "specs": [
+            {
+              "title": "valid credentials redirect to inventory page @tc:33008",
+              "ok": true, "tags": ["@tc:33008"],
+              "tests": [{
+                "timeout": 30000, "retries": 0, "status": "expected",
+                "results": [{
+                  "workerIndex": 1, "status": "passed", "duration": 3241,
+                  "errors": [],
+                  "stdout": [{ "text": "URL: https://www.saucedemo.com/inventory.html\n" }],
+                  "stderr": [], "retry": 0, "attachments": []
+                }]
+              }]
+            },
+            {
+              "title": "locked out user sees error banner @tc:33009",
+              "ok": true, "tags": ["@tc:33009"],
+              "tests": [{
+                "timeout": 30000, "retries": 0, "status": "expected",
+                "results": [{
+                  "workerIndex": 1, "status": "passed", "duration": 2198,
+                  "errors": [],
+                  "stdout": [{ "text": "Error banner: 'Epic sadface: Sorry, this user has been locked out.'\n" }],
+                  "stderr": [], "retry": 0, "attachments": []
+                }]
+              }]
+            },
+            {
+              "title": "empty username shows validation error @tc:33010",
+              "ok": false, "tags": ["@tc:33010"],
+              "tests": [{
+                "timeout": 30000, "retries": 0, "status": "unexpected",
+                "results": [{
+                  "workerIndex": 1, "status": "failed", "duration": 2901,
+                  "errors": [{ "message": "Error: expect(locator).toHaveText(expected)\nExpected: \"Epic sadface: Username is required\"\nReceived: \"Epic sadface: Username is required!\"\n    at tests/login.spec.ts:30:12" }],
+                  "stdout": [{ "text": "Submitted with empty username\n" }],
+                  "stderr": [], "retry": 0,
+                  "attachments": [{
+                    "name": "screenshot", "contentType": "image/png",
+                    "path": "../test-results/login-fail/screenshot-on-failure.png"
+                  }]
+                }]
+              }]
+            }
+          ]
+        }
+      ],
+      "specs": []
+    }
+  ],
+  "errors": [],
+  "stats": { "startTime": "2025-03-06T09:00:00.000Z", "duration": 18182, "expected": 4, "unexpected": 2, "skipped": 0 }
+}

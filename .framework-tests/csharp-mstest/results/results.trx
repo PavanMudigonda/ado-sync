@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TestRun id="mstest-run-001" name="MSTest SauceDemo" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <TestDefinitions>
+    <UnitTest name="ValidCredentials_RedirectsToInventory" id="mstest-guid-0001">
+      <Properties><Property><Key>tc</Key><Value>32966</Value></Property></Properties>
+      <TestMethod className="SauceDemo.MSTest.Tests.LoginTests" name="ValidCredentials_RedirectsToInventory" />
+    </UnitTest>
+    <UnitTest name="LockedOutUser_ShowsErrorBanner" id="mstest-guid-0002">
+      <Properties><Property><Key>tc</Key><Value>32967</Value></Property></Properties>
+      <TestMethod className="SauceDemo.MSTest.Tests.LoginTests" name="LockedOutUser_ShowsErrorBanner" />
+    </UnitTest>
+    <UnitTest name="EmptyUsername_ShowsValidationError" id="mstest-guid-0003">
+      <Properties><Property><Key>tc</Key><Value>32968</Value></Property></Properties>
+      <TestMethod className="SauceDemo.MSTest.Tests.LoginTests" name="EmptyUsername_ShowsValidationError" />
+    </UnitTest>
+    <UnitTest name="AddItem_UpdatesCartBadge" id="mstest-guid-0004">
+      <Properties><Property><Key>tc</Key><Value>32963</Value></Property></Properties>
+      <TestMethod className="SauceDemo.MSTest.Tests.CartTests" name="AddItem_UpdatesCartBadge" />
+    </UnitTest>
+    <UnitTest name="RemoveItem_DecrementsCartBadge" id="mstest-guid-0005">
+      <Properties><Property><Key>tc</Key><Value>32964</Value></Property></Properties>
+      <TestMethod className="SauceDemo.MSTest.Tests.CartTests" name="RemoveItem_DecrementsCartBadge" />
+    </UnitTest>
+    <UnitTest name="CartPage_ShowsCorrectItemPrice" id="mstest-guid-0006">
+      <Properties><Property><Key>tc</Key><Value>32965</Value></Property></Properties>
+      <TestMethod className="SauceDemo.MSTest.Tests.CartTests" name="CartPage_ShowsCorrectItemPrice" />
+    </UnitTest>
+  </TestDefinitions>
+  <Results>
+    <UnitTestResult testId="mstest-guid-0001" testName="ValidCredentials_RedirectsToInventory" outcome="Passed" duration="00:00:02.341">
+      <Output><StdOut>Navigated to https://www.saucedemo.com&#xA;Login successful — URL contains inventory.html</StdOut></Output>
+    </UnitTestResult>
+    <UnitTestResult testId="mstest-guid-0002" testName="LockedOutUser_ShowsErrorBanner" outcome="Passed" duration="00:00:01.887">
+      <Output><StdOut>Locked out error banner displayed correctly</StdOut></Output>
+    </UnitTestResult>
+    <UnitTestResult testId="mstest-guid-0003" testName="EmptyUsername_ShowsValidationError" outcome="Failed" duration="00:00:01.654">
+      <Output>
+        <StdOut>Submitted login with empty username&#xA;Error banner appeared with unexpected trailing !</StdOut>
+        <ErrorInfo>
+          <Message>StringAssert.Contains failed. Expected to find: &lt;Epic sadface: Username is required&gt; inside: &lt;Epic sadface: Username is required!&gt;</Message>
+          <StackTrace>   at SauceDemo.MSTest.Tests.LoginTests.EmptyUsername_ShowsValidationError() in LoginTests.cs:line 50</StackTrace>
+        </ErrorInfo>
+        <ResultFiles>
+          <ResultFile path="screenshot-invalid-username.png"/>
+        </ResultFiles>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult testId="mstest-guid-0004" testName="AddItem_UpdatesCartBadge" outcome="Passed" duration="00:00:03.102">
+      <Output><StdOut>Cart badge shows 1 after adding Sauce Labs Backpack</StdOut></Output>
+    </UnitTestResult>
+    <UnitTestResult testId="mstest-guid-0005" testName="RemoveItem_DecrementsCartBadge" outcome="Passed" duration="00:00:03.441">
+      <Output><StdOut>Added 2 items, removed 1, badge shows 1</StdOut></Output>
+    </UnitTestResult>
+    <UnitTestResult testId="mstest-guid-0006" testName="CartPage_ShowsCorrectItemPrice" outcome="Passed" duration="00:00:02.890">
+      <Output><StdOut>Sauce Labs Backpack price in cart: $29.99</StdOut></Output>
+    </UnitTestResult>
+  </Results>
+</TestRun>

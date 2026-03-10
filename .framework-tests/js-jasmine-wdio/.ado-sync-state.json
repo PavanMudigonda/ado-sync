@@ -1,0 +1,44 @@
+{
+  "32999": {
+    "title": "Scenario: Inventory page displays six products.",
+    "stepsHash": "66fbf24e2d02c51332f3c28e81d4cb83a4f83b90ca92747da52d4fe7f40be87b",
+    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "changedDate": "2026-03-07T19:26:03.963Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/js-jasmine-wdio/test/specs/inventory.spec.js"
+  },
+  "33000": {
+    "title": "Scenario: Sorting by price low to high puts the cheapest item first.",
+    "stepsHash": "89d6fe75f742d3059884a2dbf9f55b47a42abaf423e6292e29fd9aa78863bd18",
+    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "changedDate": "2026-03-07T19:26:04.613Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/js-jasmine-wdio/test/specs/inventory.spec.js"
+  },
+  "33001": {
+    "title": "Scenario: Clicking a product name opens the product detail page.",
+    "stepsHash": "8213d131b89038c9a7a98057a32583eefcafe9b77e590a8d6913a7692f3e0793",
+    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "changedDate": "2026-03-07T19:26:05.247Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/js-jasmine-wdio/test/specs/inventory.spec.js"
+  },
+  "33002": {
+    "title": "Scenario: Valid credentials navigate to the inventory page.",
+    "stepsHash": "f803cdcdc5f5ff3581d965794716045989cb08db86b5bbbd5f49226c888f1f2d",
+    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "changedDate": "2026-03-07T19:26:05.907Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/js-jasmine-wdio/test/specs/login.spec.js"
+  },
+  "33003": {
+    "title": "Scenario: Locked-out user sees an error message.",
+    "stepsHash": "c9e82c6f0b7c50dd32d94ce0f81095be0b767eabe7fb6c8fc9ad72b973f5d118",
+    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "changedDate": "2026-03-07T19:26:06.51Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/js-jasmine-wdio/test/specs/login.spec.js"
+  },
+  "33004": {
+    "title": "Scenario: Empty username field shows a validation error.",
+    "stepsHash": "25cc6bc99f5ff37f529e40d12a8f08e989125085f902511cd5abff736d24f233",
+    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "changedDate": "2026-03-07T19:26:07.087Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/js-jasmine-wdio/test/specs/login.spec.js"
+  }
+}

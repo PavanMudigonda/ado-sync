@@ -1,0 +1,44 @@
+{
+  "32963": {
+    "title": "Scenario: Adding an item updates the cart badge to 1.",
+    "stepsHash": "79fcd403521ba3018092eab87567e38cbf89846d1744ff860e3f117b5845a8af",
+    "descriptionHash": "e28e8c5289b72b03b4c88abfb8d5368e7db8e4814c52d560f188c456c20797a7",
+    "changedDate": "2026-03-07T19:25:37.54Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/csharp-mstest/Tests/CartTests.cs"
+  },
+  "32964": {
+    "title": "Scenario: Removing one item from two decrements the cart badge to 1.",
+    "stepsHash": "a7245b1698223cd929226af3adb52067380df10f303e21f504360a686a0f1a92",
+    "descriptionHash": "19b23aec0408f28b79c99c3ef8691e8bbf7e710eee13cd3c80839d3326d70cfb",
+    "changedDate": "2026-03-07T19:25:39.303Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/csharp-mstest/Tests/CartTests.cs"
+  },
+  "32965": {
+    "title": "Scenario: Cart page shows the correct price for the added item.",
+    "stepsHash": "b415e141064d1a96513a3e7da353df99fa7444f0870dd098ac53731354b59a9b",
+    "descriptionHash": "ca02b7da765ae2e7f0195e0257bd44877e444bd36144b9131078e23825b9a389",
+    "changedDate": "2026-03-07T19:25:40.197Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/csharp-mstest/Tests/CartTests.cs"
+  },
+  "32966": {
+    "title": "Scenario: Valid credentials redirect to the inventory page.",
+    "stepsHash": "f803cdcdc5f5ff3581d965794716045989cb08db86b5bbbd5f49226c888f1f2d",
+    "descriptionHash": "657d8c5d5fe3a5213ae4e7e83f36d0a2595220cf889ad708bae59a016d38381d",
+    "changedDate": "2026-03-07T19:25:41.303Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/csharp-mstest/Tests/LoginTests.cs"
+  },
+  "32967": {
+    "title": "Scenario: Locked-out user sees an error banner.",
+    "stepsHash": "c9e82c6f0b7c50dd32d94ce0f81095be0b767eabe7fb6c8fc9ad72b973f5d118",
+    "descriptionHash": "f710ed0616c11fbf8d366de5e4fdf935fd8c3795001c8b1cec8de39eaa236446",
+    "changedDate": "2026-03-07T19:25:42.377Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/csharp-mstest/Tests/LoginTests.cs"
+  },
+  "32968": {
+    "title": "Scenario: Empty username field shows a validation error.",
+    "stepsHash": "25cc6bc99f5ff37f529e40d12a8f08e989125085f902511cd5abff736d24f233",
+    "descriptionHash": "d9c0e460110c96b482314f7a20dbf42d8415e1357e16a099dadc593242061a39",
+    "changedDate": "2026-03-07T19:25:43.35Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/csharp-mstest/Tests/LoginTests.cs"
+  }
+}

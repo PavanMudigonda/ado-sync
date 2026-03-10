@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+  <testsuite name="pytest" tests="6" errors="0" failures="1" skipped="1" time="19.881">
+
+    <testcase classname="tests.test_cart.test_add_item_updates_cart_badge" name="test_add_item_updates_cart_badge" time="3.901">
+      <properties><property name="tc" value="32987"/></properties>
+      <system-out><![CDATA[SETUP    test_add_item_updates_cart_badge
+Added Sauce Labs Backpack — badge: '1'
+assert '1' == '1' -- PASSED
+TEARDOWN test_add_item_updates_cart_badge]]></system-out>
+    </testcase>
+
+    <testcase classname="tests.test_cart.test_remove_item_decrements_cart_badge" name="test_remove_item_decrements_cart_badge" time="4.512">
+      <properties><property name="tc" value="32988"/></properties>
+      <system-out><![CDATA[Added Backpack (1) and Bike Light (2)
+Removed Bike Light — badge should be 1]]></system-out>
+      <failure message="AssertionError: assert '2' == '1'" type="AssertionError"><![CDATA[def test_remove_item_decrements_cart_badge(logged_in_driver):
+    ...
+>   assert badge == "1"
+E   AssertionError: assert '2' == '1'
+    Remove button click may not have propagated
+
+tests/test_cart.py:39: AssertionError]]></failure>
+    </testcase>
+
+    <testcase classname="tests.test_cart.test_cart_page_shows_correct_price" name="test_cart_page_shows_correct_price" time="3.210">
+      <properties><property name="tc" value="32989"/></properties>
+      <system-out><![CDATA[Cart page price for Sauce Labs Backpack: '$29.99' -- PASSED]]></system-out>
+    </testcase>
+
+    <testcase classname="tests.test_login.test_valid_credentials_redirect_to_inventory" name="test_valid_credentials_redirect_to_inventory" time="3.214">
+      <properties><property name="tc" value="32990"/></properties>
+      <system-out><![CDATA[Login with standard_user successful — URL: https://www.saucedemo.com/inventory.html]]></system-out>
+    </testcase>
+
+    <testcase classname="tests.test_login.test_locked_out_user_sees_error" name="test_locked_out_user_sees_error" time="2.187">
+      <properties><property name="tc" value="32991"/></properties>
+      <system-out><![CDATA[Error text: 'Epic sadface: Sorry, this user has been locked out.' -- PASSED]]></system-out>
+    </testcase>
+
+    <testcase classname="tests.test_login.test_empty_username_shows_validation_error" name="test_empty_username_shows_validation_error" time="2.857">
+      <properties><property name="tc" value="32992"/></properties>
+      <skipped message="@pytest.mark.skip: error text assertion updated in conftest v2.1 — test needs refresh"/>
+    </testcase>
+
+  </testsuite>
+</testsuites>

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TestRun id="specflow-run-001" name="SpecFlow SauceDemo" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <TestDefinitions>
+    <UnitTest name="CartFeature.AddingAnItemIncrementsTheCartBadge" id="specflow-guid-0001">
+      <Properties><Property><Key>tc</Key><Value>32972</Value></Property></Properties>
+      <TestMethod className="SauceDemo.SpecFlow.Features.CartFeature" name="AddingAnItemIncrementsTheCartBadge" />
+    </UnitTest>
+    <UnitTest name="CartFeature.RemovingAnItemDecrementsTheCartBadge" id="specflow-guid-0002">
+      <Properties><Property><Key>tc</Key><Value>32973</Value></Property></Properties>
+      <TestMethod className="SauceDemo.SpecFlow.Features.CartFeature" name="RemovingAnItemDecrementsTheCartBadge" />
+    </UnitTest>
+    <UnitTest name="CartFeature.CartPageShowsCorrectItemPrice" id="specflow-guid-0003">
+      <Properties><Property><Key>tc</Key><Value>32974</Value></Property></Properties>
+      <TestMethod className="SauceDemo.SpecFlow.Features.CartFeature" name="CartPageShowsCorrectItemPrice" />
+    </UnitTest>
+    <UnitTest name="LoginFeature.ValidCredentialsNavigateToInventory" id="specflow-guid-0004">
+      <Properties><Property><Key>tc</Key><Value>32975</Value></Property></Properties>
+      <TestMethod className="SauceDemo.SpecFlow.Features.LoginFeature" name="ValidCredentialsNavigateToInventory" />
+    </UnitTest>
+    <UnitTest name="LoginFeature.LockedOutUserSeesErrorMessage" id="specflow-guid-0005">
+      <Properties><Property><Key>tc</Key><Value>32976</Value></Property></Properties>
+      <TestMethod className="SauceDemo.SpecFlow.Features.LoginFeature" name="LockedOutUserSeesErrorMessage" />
+    </UnitTest>
+    <UnitTest name="LoginFeature.EmptyCredentialsShowUsernameRequiredError" id="specflow-guid-0006">
+      <Properties><Property><Key>tc</Key><Value>32977</Value></Property></Properties>
+      <TestMethod className="SauceDemo.SpecFlow.Features.LoginFeature" name="EmptyCredentialsShowUsernameRequiredError" />
+    </UnitTest>
+  </TestDefinitions>
+  <Results>
+    <UnitTestResult testId="specflow-guid-0001" testName="AddingAnItemIncrementsTheCartBadge" outcome="Passed" duration="00:00:02.553">
+      <Output><StdOut>Given I am logged in as "standard_user" -> done&#xA;When I add "Sauce Labs Backpack" to the cart -> done&#xA;Then the cart badge shows "1" -> done</StdOut></Output>
+    </UnitTestResult>
+    <UnitTestResult testId="specflow-guid-0002" testName="RemovingAnItemDecrementsTheCartBadge" outcome="Passed" duration="00:00:03.104">
+      <Output><StdOut>Given I have Backpack and Bike Light in cart -> done&#xA;When I remove Bike Light -> done&#xA;Then badge shows 1 -> done</StdOut></Output>
+    </UnitTestResult>
+    <UnitTestResult testId="specflow-guid-0003" testName="CartPageShowsCorrectItemPrice" outcome="Passed" duration="00:00:02.890">
+      <Output><StdOut>Backpack price in cart: $29.99 -> done</StdOut></Output>
+    </UnitTestResult>
+    <UnitTestResult testId="specflow-guid-0004" testName="ValidCredentialsNavigateToInventory" outcome="Passed" duration="00:00:02.104">
+      <Output><StdOut>Logged in as standard_user -> inventory page loaded -> done</StdOut></Output>
+    </UnitTestResult>
+    <UnitTestResult testId="specflow-guid-0005" testName="LockedOutUserSeesErrorMessage" outcome="Passed" duration="00:00:01.744">
+      <Output><StdOut>Error banner: 'Epic sadface: Sorry, this user has been locked out.' -> done</StdOut></Output>
+    </UnitTestResult>
+    <UnitTestResult testId="specflow-guid-0006" testName="EmptyCredentialsShowUsernameRequiredError" outcome="Failed" duration="00:00:01.988">
+      <Output>
+        <StdOut>Submitted form without credentials&#xA;Error banner appeared with unexpected text</StdOut>
+        <ErrorInfo>
+          <Message>TechTalk.SpecFlow.ScenarioExecutionException: Step threw exception. Expected: 'Epic sadface: Username is required' Actual: 'Epic sadface: Username is required!'</Message>
+          <StackTrace>   at SauceDemo.SpecFlow.StepDefinitions.LoginSteps.ThenISeeTheError(String expected) in LoginSteps.cs:line 62</StackTrace>
+        </ErrorInfo>
+        <ResultFiles>
+          <ResultFile path="screenshot-login-error.png"/>
+        </ResultFiles>
+      </Output>
+    </UnitTestResult>
+  </Results>
+</TestRun>

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<test-run id="1" name="SauceDemo.NUnit.Tests" total="3" passed="2" failed="1" skipped="0" duration="8.113">
+  <test-suite type="TestFixture" fullname="SauceDemo.NUnit.Tests.CheckoutTests" result="Failed" duration="8.113">
+    <test-case fullname="SauceDemo.NUnit.Tests.CheckoutTests.HappyPath_CompletesOrderSuccessfully" result="Passed" duration="3.812">
+      <properties><property name="tc" value="32969"/></properties>
+      <output><![CDATA[Order completed — confirmation message 'Thank you for your order!' shown]]></output>
+    </test-case>
+    <test-case fullname="SauceDemo.NUnit.Tests.CheckoutTests.MissingFirstName_ShowsValidationError" result="Failed" duration="2.210">
+      <properties><property name="tc" value="32970"/></properties>
+      <output><![CDATA[Submitted checkout without first name&#xA;Expected error banner — but element was stale]]></output>
+      <failure>
+        <message><![CDATA[OpenQA.Selenium.StaleElementReferenceException: Element is no longer attached to the DOM
+Expected error text: 'Error: First Name is required']]></message>
+        <stack-trace><![CDATA[at SauceDemo.NUnit.Tests.CheckoutTests.MissingFirstName_ShowsValidationError() in CheckoutTests.cs:line 49]]></stack-trace>
+      </failure>
+      <attachments>
+        <attachment>
+          <filePath>screenshot-first-name-error.png</filePath>
+          <description>Screenshot captured on test failure</description>
+        </attachment>
+      </attachments>
+    </test-case>
+    <test-case fullname="SauceDemo.NUnit.Tests.CheckoutTests.TotalsPage_DisplaysCorrectItemTotal" result="Passed" duration="2.091">
+      <properties><property name="tc" value="32971"/></properties>
+      <output><![CDATA[Subtotal label contains '$29.99' — OK]]></output>
+    </test-case>
+  </test-suite>
+</test-run>

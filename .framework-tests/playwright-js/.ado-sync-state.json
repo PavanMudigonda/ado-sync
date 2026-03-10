@@ -1,0 +1,93 @@
+{
+  "33023": {
+    "title": "Scenario: Adding an item updates the cart badge to 1.",
+    "stepsHash": "af98cc66a010cb30516f715d72739cac1c1f273594c0dbc042f93d4674ceb2bf",
+    "descriptionHash": "ced3a30032a898ce3b65324b3ecd80e53ef19b74fee45406e147d78aedd08ece",
+    "changedDate": "2026-03-08T01:20:00.943Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-js/tests/cart.spec.js"
+  },
+  "33024": {
+    "title": "Scenario: Removing one of two items decrements the cart badge to 1.",
+    "stepsHash": "65d7b8e08f6b56a4c57f8aafa14576a0437c15fc840df64a926023f13886e716",
+    "descriptionHash": "0259af9150d3d288c8aa6eb01bea203a3c9e0428b0b653c11f7ff68a45bdd542",
+    "changedDate": "2026-03-08T01:20:01.853Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-js/tests/cart.spec.js"
+  },
+  "33025": {
+    "title": "Scenario: Cart page shows the correct price for the added item.",
+    "stepsHash": "46e9533383ffa5f62487e8663404f1d9e85a59f47e653a958a7a2d177c09f3f9",
+    "descriptionHash": "723abe556c9b4a058b2518c886fed2f0cec3edb4c4687c101ba07d68b205dcab",
+    "changedDate": "2026-03-08T01:20:02.58Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-js/tests/cart.spec.js"
+  },
+  "33026": {
+    "title": "Scenario: Removing an item from the cart page clears the cart badge.",
+    "stepsHash": "e27bbe5bd8f62e6c156b12c565297356acd5dc398136f7d8da1ff1ba8f754b6f",
+    "descriptionHash": "5d9db2dbf3a4c344c288777e7e4989e224faf28cc540b7b9cf03c88f906c0edb",
+    "changedDate": "2026-03-08T01:20:03.367Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-js/tests/cart.spec.js"
+  },
+  "33027": {
+    "title": "Scenario: Adding all items shows correct badge count.",
+    "stepsHash": "15a8323734e4aaf295a0beebf8acc8643c1a9effec78434596bff321902d20e6",
+    "descriptionHash": "25ce5df68c7a6ec6e46c7cf2a9fcc8a641a2b86f17a9dc1d65ba0e6fb4701c59",
+    "changedDate": "2026-03-08T01:20:04.073Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-js/tests/cart.spec.js"
+  },
+  "33028": {
+    "title": "Scenario: Cart page lists all added items by name.",
+    "stepsHash": "036a77ba8089d4b1ea89b2bb247f4bad7a2fc5243353f4a6b3a88f9287346255",
+    "descriptionHash": "b5572a0b4f53bd98ae5ede5416bfe1a6a691092650263c12e539f97cb4a70492",
+    "changedDate": "2026-03-08T01:20:04.697Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-js/tests/cart.spec.js"
+  },
+  "33029": {
+    "title": "Scenario: Saved cart persists after page reload.",
+    "stepsHash": "389b80688f402a95b11c0585853e48d7016c3b9dd09f041180d5f2ea77cb9dba",
+    "descriptionHash": "74d1a0a1f21b2b1f084bd1a6720d362678c2f755f87d9ed4b50c1160cd5b8306",
+    "changedDate": "2026-03-08T01:20:05.727Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-js/tests/cart.spec.js"
+  },
+  "33030": {
+    "title": "Scenario: Valid credentials redirect to the inventory page.",
+    "stepsHash": "ba1646eaf2a4dc8a7c8ffab86a4bfa5825c63ebcb97903cb4cdc334944ab9f0d",
+    "descriptionHash": "5175e76e74b7189c245279696f0a1cceddde679d55972a3866a4a2e05e1ce924",
+    "changedDate": "2026-03-08T01:20:06.43Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-js/tests/login.spec.js"
+  },
+  "33031": {
+    "title": "Scenario: Locked-out user sees an error banner.",
+    "stepsHash": "a0e066a1b239962eb6bc573a699c5082ee2576bc106eaaafcd14bb25d2bcdcb2",
+    "descriptionHash": "c3d33624f8c3257024251448119fd177e50810b47d1d88828e3038520f36f6f0",
+    "changedDate": "2026-03-08T01:20:07.073Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-js/tests/login.spec.js"
+  },
+  "33032": {
+    "title": "Scenario: Empty username field shows a validation error.",
+    "stepsHash": "1ed972c8602d7b99a16b17ae4fa2d0870b3fe6bda376a7e8d36e8497146158c8",
+    "descriptionHash": "0d2d3e301a19d6306a02e28d58ab7af833ef111cd64e2eab6f06808a9cbf99f5",
+    "changedDate": "2026-03-08T01:20:07.72Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-js/tests/login.spec.js"
+  },
+  "33033": {
+    "title": "Scenario: Empty password field shows a validation error.",
+    "stepsHash": "aea7fec7137384a5082b53d3ce8f8c359371f1e3615da066ecd5bbcfc144eae3",
+    "descriptionHash": "ea00fdf9ed2cf07d82ad42e39b653e0e3d3a506734b2d1b79dae5d84933a870b",
+    "changedDate": "2026-03-08T01:20:08.477Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-js/tests/login.spec.js"
+  },
+  "33034": {
+    "title": "Scenario: Logging out returns the user to the login page.",
+    "stepsHash": "247cfcba9603464655e802fd4b4970e972c3fae2e8a6b911fcc345fbae558ec4",
+    "descriptionHash": "cc72fea62a3041e9bc1188329999d76b2415aa83db23f90a5a922a7daa3b6e33",
+    "changedDate": "2026-03-08T01:20:09.227Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-js/tests/login.spec.js"
+  },
+  "33035": {
+    "title": "Scenario: Navigating to inventory while logged out redirects to login.",
+    "stepsHash": "6363159c0c55eefbff75f7a28f8c4174c770afbf49e00e415089540e188ffa33",
+    "descriptionHash": "f39fe3976a9eb62505bc99970eace14956632503a80a3a4a7834dfb5603e8059",
+    "changedDate": "2026-03-08T01:20:09.883Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/playwright-js/tests/login.spec.js"
+  }
+}

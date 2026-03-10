@@ -1,0 +1,44 @@
+{
+  "32978": {
+    "title": "Scenario: Inventory page shows six products.",
+    "stepsHash": "d0f48ccae7595292b2f0ae30e9ea24b4e1285bfc778c525956c2791d03cb36eb",
+    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "changedDate": "2026-03-07T19:25:55.407Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/java-junit/src/test/java/com/saucedemo/tests/InventoryTests.java"
+  },
+  "32979": {
+    "title": "Scenario: Sorting by price low to high puts the cheapest item first.",
+    "stepsHash": "2f30365367d7ba15e5daba75574c4cb07d0ac6754a85be4354965a8ff4755bec",
+    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "changedDate": "2026-03-07T19:25:56.243Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/java-junit/src/test/java/com/saucedemo/tests/InventoryTests.java"
+  },
+  "32980": {
+    "title": "Scenario: Product detail page shows item name and price.",
+    "stepsHash": "5fefa5f89bf56e3105c21ee4119175dfde9c1738ffcd5173e0704e2b57cc3cce",
+    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "changedDate": "2026-03-07T19:25:56.847Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/java-junit/src/test/java/com/saucedemo/tests/InventoryTests.java"
+  },
+  "32981": {
+    "title": "Scenario: Valid credentials redirect to the inventory page.",
+    "stepsHash": "484d43de732709d909b054ff5cedc14a04d98955b9edc4e1c48ff2c3f0cdffe5",
+    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "changedDate": "2026-03-07T19:25:57.53Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/java-junit/src/test/java/com/saucedemo/tests/LoginTests.java"
+  },
+  "32982": {
+    "title": "Scenario: Locked-out user sees an error banner.",
+    "stepsHash": "c9e82c6f0b7c50dd32d94ce0f81095be0b767eabe7fb6c8fc9ad72b973f5d118",
+    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "changedDate": "2026-03-07T19:25:58.233Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/java-junit/src/test/java/com/saucedemo/tests/LoginTests.java"
+  },
+  "32983": {
+    "title": "Scenario: Empty username field shows a validation error.",
+    "stepsHash": "25cc6bc99f5ff37f529e40d12a8f08e989125085f902511cd5abff736d24f233",
+    "descriptionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "changedDate": "2026-03-07T19:25:58.88Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/.framework-tests/java-junit/src/test/java/com/saucedemo/tests/LoginTests.java"
+  }
+}

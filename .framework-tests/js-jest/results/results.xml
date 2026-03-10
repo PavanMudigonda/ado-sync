@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="jest tests" tests="6" failures="1" errors="0" skipped="0" time="22.114">
+  <testsuite name="cart.test.js" tests="3" failures="0" time="11.540">
+    <testcase name="SauceDemo Cart &gt; adding an item updates the cart badge to 1" classname="cart.test.js" time="3.901">
+      <properties><property name="tc" value="32993"/></properties>
+      <system-out><![CDATA[console.log: Added Sauce Labs Backpack — badge: 1 ✓]]></system-out>
+    </testcase>
+    <testcase name="SauceDemo Cart &gt; removing an item decrements the cart badge" classname="cart.test.js" time="4.709">
+      <properties><property name="tc" value="32994"/></properties>
+      <system-out><![CDATA[console.log: Added 2 items, badge=2; removed Bike Light, badge=1 ✓]]></system-out>
+    </testcase>
+    <testcase name="SauceDemo Cart &gt; cart page shows correct price for added item" classname="cart.test.js" time="2.930">
+      <properties><property name="tc" value="32995"/></properties>
+      <system-out><![CDATA[console.log: Price: $29.99 ✓]]></system-out>
+    </testcase>
+  </testsuite>
+  <testsuite name="login.test.js" tests="3" failures="1" time="10.574">
+    <testcase name="SauceDemo Login &gt; valid credentials redirect to inventory page" classname="login.test.js" time="3.210">
+      <properties><property name="tc" value="32996"/></properties>
+      <system-out><![CDATA[console.log: URL after login: https://www.saucedemo.com/inventory.html ✓]]></system-out>
+    </testcase>
+    <testcase name="SauceDemo Login &gt; locked out user sees error banner" classname="login.test.js" time="2.987">
+      <properties><property name="tc" value="32997"/></properties>
+      <system-out><![CDATA[console.log: Error: Epic sadface: Sorry, this user has been locked out. ✓]]></system-out>
+    </testcase>
+    <testcase name="SauceDemo Login &gt; empty username shows validation error" classname="login.test.js" time="4.377">
+      <properties><property name="tc" value="32998"/></properties>
+      <failure message="expect(received).toBe(expected)" type="Error"><![CDATA[Error: expect(received).toBe(expected)
+Expected: "Epic sadface: Username is required"
+Received: "Epic sadface: Username is required!"
+
+      at tests/login.test.js:39:20]]></failure>
+      <system-out><![CDATA[console.error: Trailing ! found in error banner text — assertion failed]]></system-out>
+    </testcase>
+  </testsuite>
+</testsuites>

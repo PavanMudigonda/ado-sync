@@ -1,0 +1,21 @@
+orgUrl: https://dev.azure.com/tr-ihn-sandbox
+project: Azure-DevOps-Training
+auth:
+  type: pat
+  token: $AZURE_DEVOPS_TOKEN
+testPlan:
+  id: 32949
+  suiteId: 32950
+  suiteMapping: flat
+local:
+  type: gherkin
+  include: Features/**/*.feature
+sync:
+  tagPrefix: tc
+  titleField: System.Title
+  markAutomated: true
+  ai:
+    provider: openai
+    baseUrl: https://router.huggingface.co/v1
+    apiKey: $HF_TOKEN
+    model: Qwen/Qwen2.5-Coder-7B-Instruct

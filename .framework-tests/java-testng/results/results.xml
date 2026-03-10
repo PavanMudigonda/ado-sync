@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="SauceDemo TestNG" tests="3" failures="1" errors="0" skipped="0" time="11.887">
+  <testsuite name="com.saucedemo.testng.CartTests" tests="3" failures="1" time="11.887">
+    <testcase name="addSingleItem_UpdatesBadgeToOne" classname="com.saucedemo.testng.CartTests" time="3.214">
+      <properties><property name="tc" value="32984"/></properties>
+      <system-out><![CDATA[@BeforeMethod: Chrome driver initialized
+Clicked add-to-cart-sauce-labs-backpack
+Badge text: '1' — PASSED
+@AfterMethod: driver closed]]></system-out>
+    </testcase>
+    <testcase name="addThreeItems_BadgeShowsThree" classname="com.saucedemo.testng.CartTests" time="4.441">
+      <properties><property name="tc" value="32985"/></properties>
+      <failure message="Cart badge shows '2' but expected '3'" type="org.testng.AssertionError"><![CDATA[org.testng.AssertionError: expected [3] but found [2]
+	at com.saucedemo.testng.CartTests.addThreeItems_BadgeShowsThree(CartTests.java:41)]]></failure>
+      <system-out><![CDATA[Added Backpack — badge: 1
+Added Bike Light — badge: 2
+Third add-to-cart click did not register — badge remained 2]]></system-out>
+      <system-err><![CDATA[WARN: ElementClickInterceptedException on 3rd add-to-cart — element partially obscured]]></system-err>
+    </testcase>
+    <testcase name="cartPage_ListsAddedItems" classname="com.saucedemo.testng.CartTests" time="4.232">
+      <properties><property name="tc" value="32986"/></properties>
+      <system-out><![CDATA[Added Backpack and Bike Light
+Opened cart page — found 2 cart_item elements — PASSED]]></system-out>
+    </testcase>
+  </testsuite>
+</testsuites>

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="SauceDemo JUnit 5" tests="6" failures="1" errors="0" skipped="0" time="15.421">
+  <testsuite name="com.saucedemo.tests.InventoryTests" tests="3" failures="1" time="7.112">
+    <testcase name="inventoryPage_ShowsSixProducts" classname="com.saucedemo.tests.InventoryTests" time="2.105">
+      <properties><property name="tc" value="32978"/></properties>
+      <system-out><![CDATA[Found 6 inventory items on page — PASSED]]></system-out>
+    </testcase>
+    <testcase name="sortByPriceLowToHigh_FirstItemIsCheapest" classname="com.saucedemo.tests.InventoryTests" time="2.998">
+      <properties><property name="tc" value="32979"/></properties>
+      <failure message="AssertionError: expected [Sauce Labs Backpack ($29.99)] but got [Sauce Labs Bike Light ($9.99)]" type="org.opentest4j.AssertionFailedError"><![CDATA[
+org.opentest4j.AssertionFailedError: expected: <$9.99> but was: <$29.99>
+	at com.saucedemo.tests.InventoryTests.sortByPriceLowToHigh_FirstItemIsCheapest(InventoryTests.java:42)]]></failure>
+      <system-out><![CDATA[Sort dropdown selected: lohi
+First price shown: $29.99 (expected $9.99)]]></system-out>
+      <system-err><![CDATA[ERROR: Sort may not have applied before assertion — consider adding explicit wait]]></system-err>
+    </testcase>
+    <testcase name="productDetailPage_ShowsCorrectInfo" classname="com.saucedemo.tests.InventoryTests" time="2.009">
+      <properties><property name="tc" value="32980"/></properties>
+      <system-out><![CDATA[Clicked first product — detail page loaded, name and price visible — PASSED]]></system-out>
+    </testcase>
+  </testsuite>
+  <testsuite name="com.saucedemo.tests.LoginTests" tests="3" failures="0" time="8.309">
+    <testcase name="validCredentials_redirectsToInventory" classname="com.saucedemo.tests.LoginTests" time="3.214">
+      <properties><property name="tc" value="32981"/></properties>
+      <system-out><![CDATA[Login with standard_user successful — URL contains inventory.html]]></system-out>
+    </testcase>
+    <testcase name="lockedOutUser_showsErrorBanner" classname="com.saucedemo.tests.LoginTests" time="2.187">
+      <properties><property name="tc" value="32982"/></properties>
+      <system-out><![CDATA[Error banner 'locked out' message present — PASSED]]></system-out>
+    </testcase>
+    <testcase name="emptyUsername_showsValidationError" classname="com.saucedemo.tests.LoginTests" time="2.908">
+      <properties><property name="tc" value="32983"/></properties>
+      <system-out><![CDATA[Submitted with empty username — error banner: 'Epic sadface: Username is required' — PASSED]]></system-out>
+    </testcase>
+  </testsuite>
+</testsuites>
