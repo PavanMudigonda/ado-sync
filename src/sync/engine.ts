@@ -425,6 +425,17 @@ async function pushSingle(
     throw new Error(`Conflicts detected (conflictAction=fail):\n${titles}`);
   }
 
+  // Playwright migration: convert existing comment-style IDs to native annotations.
+  // For all other framework types this is a no-op.
+  if (!opts.dryRun && !disableLocal && config.local.type === 'playwright') {
+    const alreadyQueued = new Set(pendingWritebacks.map((wb) => `${wb.test.filePath}:${wb.test.line}`));
+    for (const test of tests) {
+      if (test.azureId && !alreadyQueued.has(`${test.filePath}:${test.line}`)) {
+        pendingWritebacks.push({ test, newId: test.azureId });
+      }
+    }
+  }
+
   // Apply ID writebacks in descending line order per file so earlier insertions
   // don't shift line numbers for subsequent writebacks in the same file.
   if (!opts.dryRun && pendingWritebacks.length) {
