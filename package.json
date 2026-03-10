@@ -1,6 +1,6 @@
 {
   "name": "ado-sync",
-  "version": "0.1.26",
+  "version": "0.1.35",
   "description": "Bidirectional sync between local test specs (Cucumber/Markdown) and Azure DevOps Test Cases",
   "bin": {
     "ado-sync": "./dist/cli.js"
@@ -42,7 +42,8 @@
     "fast-xml-parser": "^4.4.1",
     "glob": "^13.0.6",
     "js-yaml": "^4.1.0",
-    "jszip": "^3.10.1"
+    "jszip": "^3.10.1",
+    "node-llama-cpp": "^3.0.0"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",

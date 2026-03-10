@@ -164,8 +164,33 @@ export interface PublishTestResultsConfig {
   testResultSettings?: {
     comment?: string;
   };
-  /** Controls which attachments are published for passing tests. */
+  /**
+   * Controls which attachments are published for passing tests.
+   * 'none' (default): no attachments for passing tests.
+   * 'files': screenshots/videos only (no console logs) for passing tests.
+   * 'all': all attachments including logs for passing tests.
+   * Failing tests always get all attachments.
+   */
   publishAttachmentsForPassingTests?: 'none' | 'files' | 'all';
+  /**
+   * Scan a directory for screenshots/videos/logs to attach to test results.
+   * Files are matched to individual results by method name; unmatched files
+   * are attached at run level.
+   */
+  attachments?: {
+    /** Folder to scan (relative to config file or absolute). */
+    folder: string;
+    /**
+     * Glob patterns within the folder.
+     * Default: '**\/*.{png,jpg,jpeg,gif,webp,mp4,webm,avi,mov,log,txt,html,zip}'
+     */
+    include?: string | string[];
+    /**
+     * Match files to test results by method name in the filename.
+     * Default: true. Set false to attach all files at run level.
+     */
+    matchByTestName?: boolean;
+  };
 }
 
 // ─── Tool settings configuration ─────────────────────────────────────────────
@@ -208,11 +233,8 @@ export interface SyncConfig {
   testPlans?: TestPlanEntry[];
   /** Local spec sources */
   local: {
-    /** 'gherkin' for .feature files, 'markdown' for .md spec files, 'csharp' for MSTest .cs files,
-     *  'playwright' / 'javascript' / 'cypress' / 'puppeteer' / 'detox' for JS/TS test frameworks,
-     *  'java' / 'espresso' for JUnit/TestNG, 'python' for pytest, 'xcuitest' for Swift XCTest,
-     *  'flutter' for Dart/Flutter, 'testcafe' for TestCafe */
-    type: 'gherkin' | 'markdown' | 'csv' | 'excel' | 'csharp' | 'playwright' | 'javascript' | 'cypress' | 'puppeteer' | 'detox' | 'java' | 'espresso' | 'python' | 'xcuitest' | 'flutter' | 'testcafe';
+    /** 'gherkin' for .feature files, 'markdown' for .md, 'csharp' for MSTest/NUnit .cs, 'java' for JUnit/TestNG .java, 'python' for pytest .py, 'javascript' for Jest/Jasmine/WebdriverIO .js/.ts, 'playwright' for Playwright Test .spec.ts/.spec.js, 'puppeteer' for Puppeteer + Jest/Mocha .js/.ts, 'cypress' for Cypress .cy.js/.cy.ts, 'testcafe' for TestCafe .js/.ts, 'detox' for Detox (React Native) .js/.ts, 'espresso' for Android Espresso .java/.kt, 'xcuitest' for iOS XCUITest .swift, 'flutter' for Flutter/Dart _test.dart */
+    type: 'gherkin' | 'markdown' | 'csv' | 'excel' | 'csharp' | 'java' | 'python' | 'javascript' | 'playwright' | 'puppeteer' | 'cypress' | 'testcafe' | 'detox' | 'espresso' | 'xcuitest' | 'flutter';
     /** Glob pattern(s) relative to config file location */
     include: string | string[];
     /** Glob pattern(s) to exclude */
@@ -286,6 +308,32 @@ export interface SyncConfig {
     attachments?: AttachmentsConfig;
     /** Pull-specific configuration. */
     pull?: PullConfig;
+    /**
+     * AI auto-summary configuration. All fields can be overridden by CLI flags.
+     * CLI flags always take precedence over config file values.
+     */
+    ai?: {
+      /**
+       * AI provider for test step generation.
+       * 'local' (default): runs a GGUF model in-process via node-llama-cpp.
+       * 'heuristic': fast regex-based, no model needed.
+       * 'ollama': local Ollama server.
+       * 'openai': OpenAI API or any OpenAI-compatible proxy (LiteLLM, Azure OpenAI, vLLM…).
+       * 'anthropic': Anthropic API.
+       * 'none': disable AI summary entirely.
+       */
+      provider?: 'heuristic' | 'local' | 'ollama' | 'openai' | 'anthropic' | 'none';
+      /**
+       * For 'local': absolute path to a GGUF model file.
+       * For 'ollama': model tag, e.g. 'qwen2.5-coder:7b'.
+       * For 'openai'/'anthropic': model name, e.g. 'gpt-4o-mini'.
+       */
+      model?: string;
+      /** Base URL for 'ollama' or an OpenAI-compatible endpoint. e.g. 'http://localhost:4000' */
+      baseUrl?: string;
+      /** API key for 'openai' or 'anthropic'. Supports $ENV_VAR references. */
+      apiKey?: string;
+    };
   };
 }
 
