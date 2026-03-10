@@ -689,14 +689,15 @@ function parseAiResponse(
 // ─── Provider implementations ─────────────────────────────────────────────────
 
 // ─── Local LLM session cache ──────────────────────────────────────────────────
-// Llama model and context are expensive to load. Cache them keyed by model path
-// so the same model is only loaded once per process even when summarizing many tests.
+// Cache the loaded model per path, but create a fresh context per summary call.
+// Reusing one context and repeatedly requesting sequences can exhaust available
+// slots and trigger "No sequences left" on later tests.
 
 interface LlamaSession {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   LlamaChatSession: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  context: any;
+  model: any;
 }
 
 const llamaSessionCache = new Map<string, Promise<LlamaSession>>();
@@ -716,8 +717,7 @@ async function getLlamaSession(modelPath: string): Promise<LlamaSession> {
     const { getLlama, LlamaChatSession } = llamaModule;
     const llama = await getLlama();
     const model = await llama.loadModel({ modelPath });
-    const context = await model.createContext();
-    return { LlamaChatSession, context };
+    return { LlamaChatSession, model };
   })();
 
   llamaSessionCache.set(modelPath, promise);
@@ -726,18 +726,26 @@ async function getLlamaSession(modelPath: string): Promise<LlamaSession> {
 
 /**
  * node-llama-cpp provider — runs a GGUF model directly in-process.
- * The llama context is cached per model path so it is only loaded once
- * for the whole push run, regardless of how many tests are summarized.
+ * The llama model is cached per model path; each request gets a fresh
+ * context sequence to avoid exhausting sequence slots across many tests.
  */
 async function localLlamaSummary(
   code: string,
   fallbackTitle: string,
   modelPath: string
 ): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
-  const { LlamaChatSession, context } = await getLlamaSession(modelPath);
-  const session = new LlamaChatSession({ contextSequence: context.getSequence() });
-  const response: string = await session.prompt(buildPrompt(code));
-  return parseAiResponse(response, fallbackTitle);
+  const { LlamaChatSession, model } = await getLlamaSession(modelPath);
+  const context = await model.createContext();
+  try {
+    const session = new LlamaChatSession({ contextSequence: context.getSequence() });
+    const response: string = await session.prompt(buildPrompt(code));
+    return parseAiResponse(response, fallbackTitle);
+  } finally {
+    // Best-effort cleanup for implementations that expose dispose().
+    if (typeof context.dispose === 'function') {
+      await context.dispose();
+    }
+  }
 }
 
 async function ollamaSummary(
