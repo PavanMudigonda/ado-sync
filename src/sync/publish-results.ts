@@ -656,12 +656,23 @@ async function scanAttachmentFolder(
     };
 
     if (matchByTestName) {
-      const fileBase = path.basename(filePath, path.extname(filePath)).toLowerCase();
+      const fileBase = path.basename(filePath, path.extname(filePath)).toLowerCase().replace(/[^a-z0-9]/g, '');
       let matched = false;
       for (let i = 0; i < allResults.length; i++) {
-        // Match on last dotted segment (method/function name) — e.g. "addItemAndCompleteCheckout"
-        const methodName = (allResults[i].testName.split('.').pop() ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        if (methodName && fileBase.replace(/[^a-z0-9]/g, '').includes(methodName)) {
+        // Build candidate segments from the test name using all common separators (. > :)
+        // then check both directions: file-contains-segment OR segment-contains-file.
+        const raw = allResults[i].testName.toLowerCase();
+        const segments = new Set<string>();
+        for (const sep of ['.', '>', ':']) {
+          const parts = raw.split(sep);
+          const last = parts[parts.length - 1].replace(/[^a-z0-9]/g, '');
+          if (last.length >= 4) segments.add(last);
+        }
+        segments.add(raw.replace(/[^a-z0-9]/g, ''));
+        const hit = fileBase.length >= 4 && [...segments].some(seg =>
+          seg.length >= 4 && (fileBase.includes(seg) || seg.includes(fileBase)),
+        );
+        if (hit) {
           const arr = resultAttachments.get(i) ?? [];
           arr.push(att);
           resultAttachments.set(i, arr);
