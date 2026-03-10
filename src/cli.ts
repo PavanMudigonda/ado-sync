@@ -14,6 +14,7 @@ import 'dotenv/config';
 import chalk from 'chalk';
 import { Command } from 'commander';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 
 import pkg from '../package.json';
@@ -48,15 +49,41 @@ function collect(value: string, previous: string[]): string[] {
  */
 function buildAiOpts(
   opts: { aiProvider?: string; aiModel?: string; aiUrl?: string; aiKey?: string },
-  config?: SyncConfig
+  config?: SyncConfig,
+  configDir?: string
 ): AiSummaryOpts | undefined {
   const cfgAi = config?.sync?.ai;
   // CLI --ai-provider none wins over config; config provider='none' also disables
   const provider = opts.aiProvider ?? cfgAi?.provider ?? 'local';
   if (provider === 'none') return undefined;
+
+  const resolveEnvRef = (value?: string): string | undefined => {
+    if (!value) return undefined;
+    if (!value.startsWith('$')) return value;
+    return process.env[value.slice(1)] ?? value;
+  };
+
+  const expandHome = (value?: string): string | undefined => {
+    if (!value) return undefined;
+    if (value === '~') return os.homedir();
+    if (value.startsWith('~/') || value.startsWith('~\\')) {
+      return path.join(os.homedir(), value.slice(2));
+    }
+    return value;
+  };
+
+  let model = opts.aiModel ?? cfgAi?.model;
+  if (provider === 'local' && model) {
+    model = resolveEnvRef(model);
+    model = expandHome(model);
+    if (model && !path.isAbsolute(model)) {
+      model = path.resolve(configDir ?? process.cwd(), model);
+    }
+  }
+
   return {
     provider: provider as AiSummaryOpts['provider'],
-    model:    opts.aiModel ?? cfgAi?.model,
+    model,
     baseUrl:  opts.aiUrl   ?? cfgAi?.baseUrl,
     apiKey:   opts.aiKey   ?? cfgAi?.apiKey,
     heuristicFallback: true,
@@ -113,7 +140,7 @@ program
       if (opts.configOverride?.length) console.log(chalk.dim(`Overrides: ${opts.configOverride.join(', ')}`));
       console.log('');
 
-      const aiSummary = buildAiOpts(opts, config);
+      const aiSummary = buildAiOpts(opts, config, configDir);
       const isTTY = process.stdout.isTTY ?? false;
       const onProgress = createProgressCallback(isTTY);
       const onAiProgress = createAiProgressCallback(isTTY);
@@ -183,7 +210,7 @@ program
       if (opts.tags) console.log(chalk.dim(`Tags:   ${opts.tags}`));
       console.log('');
 
-      const aiSummary = buildAiOpts(opts, config);
+      const aiSummary = buildAiOpts(opts, config, configDir);
       const isTTY = process.stdout.isTTY ?? false;
       const onProgress = createProgressCallback(isTTY);
       const onAiProgress = createAiProgressCallback(isTTY);

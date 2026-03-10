@@ -13,3 +13,4 @@ yarn-error.log
 .framework-tests/
 .cucumber/
 .cucumber
+.framework-tests
