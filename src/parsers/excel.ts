@@ -138,6 +138,50 @@ function parseSheetXml(xml: string, sharedStrings: string[]): string[][] {
   return rows;
 }
 
+// ─── Worksheet discovery ──────────────────────────────────────────────────────
+
+/**
+ * Locate the first worksheet file inside an xlsx ZIP.
+ *
+ * Strategy (in order):
+ *  1. Try common names: sheet.xml, sheet1.xml (case-insensitive).
+ *  2. Read xl/_rels/workbook.xml.rels to find the relationship-mapped path.
+ *  3. Fall back to any file under xl/worksheets/.
+ *
+ * Returns the ZIP entry key (e.g. "xl/worksheets/sheet1.xml") or null.
+ */
+async function findFirstSheetPath(zip: JSZip): Promise<string | null> {
+  // Fast path: common names used by ADO exports and most tools
+  for (const candidate of [
+    'xl/worksheets/sheet.xml',
+    'xl/worksheets/sheet1.xml',
+    'xl/worksheets/Sheet1.xml',
+  ]) {
+    if (zip.file(candidate)) return candidate;
+  }
+
+  // Read workbook relationships to find the actual sheet path
+  const relsEntry = zip.file('xl/_rels/workbook.xml.rels');
+  if (relsEntry) {
+    const relsXml = await relsEntry.async('string');
+    // Match the first Relationship of type worksheet
+    const m = relsXml.match(/Type="[^"]*\/worksheet"[^>]*Target="([^"]+)"/);
+    if (m) {
+      // Target is relative to xl/; strip leading '../' or '/' if present
+      const target = m[1].replace(/^\.\.\//, '').replace(/^\//, '');
+      const fullPath = target.startsWith('xl/') ? target : `xl/${target}`;
+      if (zip.file(fullPath)) return fullPath;
+    }
+  }
+
+  // Last-resort: scan all files under xl/worksheets/
+  const allFiles = Object.keys((zip as any).files as Record<string, unknown>);
+  const sheetFile = allFiles.find(
+    (f) => /^xl\/worksheets\/.+\.xml$/i.test(f) && !f.includes('_rels')
+  );
+  return sheetFile ?? null;
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export async function parseExcelFile(
@@ -154,10 +198,9 @@ export async function parseExcelFile(
     ? parseSharedStrings(await ssEntry.async('string'))
     : [];
 
-  // Find the worksheet XML
-  const sheetEntry =
-    zip.file('xl/worksheets/sheet.xml') ??
-    zip.file('xl/worksheets/sheet1.xml');
+  // Find the worksheet XML (handles non-standard sheet naming)
+  const sheetKey = await findFirstSheetPath(zip);
+  const sheetEntry = sheetKey ? zip.file(sheetKey) : null;
 
   if (!sheetEntry) throw new Error(`No worksheet found in ${filePath}`);
 
@@ -190,11 +233,7 @@ export async function writebackExcel(filePath: string, title: string, id: number
   const buffer = fs.readFileSync(filePath);
   const zip = await JSZip.loadAsync(buffer);
 
-  const sheetKey =
-    zip.file('xl/worksheets/sheet.xml') ? 'xl/worksheets/sheet.xml' :
-    zip.file('xl/worksheets/sheet1.xml') ? 'xl/worksheets/sheet1.xml' :
-    null;
-
+  const sheetKey = await findFirstSheetPath(zip);
   if (!sheetKey) throw new Error(`No worksheet found in ${filePath}`);
 
   const ssEntry = zip.file('xl/sharedStrings.xml');
@@ -233,9 +272,10 @@ export async function writebackExcel(filePath: string, title: string, id: number
 
     const titleVal = titleMatch ? cellValue(titleMatch[0], nsPrefix, sharedStrings) : '';
     const stepVal  = stepMatch  ? cellValue(stepMatch[0],  nsPrefix, sharedStrings) : '';
-    const idVal    = idMatch    ? cellValue(idMatch[0],    nsPrefix, sharedStrings) : '';
 
-    if (!titleVal || stepVal || idVal) return open + content + close;
+    // Match title rows (non-empty title, no step number) by normalised title.
+    // Do NOT guard on existing ID — allows updating the ID when a deleted TC is re-created.
+    if (!titleVal || stepVal) return open + content + close;
     if (normalise(titleVal) !== title) return open + content + close;
 
     // Extract row number from the row's r attribute or first cell reference

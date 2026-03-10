@@ -38,13 +38,13 @@ import { extractLinkRefs, extractPathTags } from './shared';
 
 // ─── Framework detection ──────────────────────────────────────────────────────
 
-type JavaFramework = 'junit5' | 'testng' | 'junit4' | 'unknown';
+export type JavaTestFramework = 'junit5' | 'junit4' | 'testng' | 'unknown';
 
 /**
  * Detect the test framework from import statements.
  * Returns 'junit5' when org.junit.jupiter imports are present.
  */
-export function detectJavaFramework(lines: string[]): JavaFramework {
+export function detectJavaFramework(lines: string[]): JavaTestFramework {
   for (const line of lines) {
     const trimmed = line.trim();
     if (trimmed.startsWith('import org.junit.jupiter.')) return 'junit5';
@@ -90,6 +90,7 @@ function isTestAnnotation(trimmedLine: string): boolean {
  */
 function extractJavadocBefore(lines: string[], testLineIdx: number): string[] {
   let i = testLineIdx - 1;
+
   while (i >= 0) {
     const t = lines[i].trim();
     if (t === '' || t.startsWith('//') || (t.startsWith('@') && !t.endsWith('*/'))) {
@@ -98,7 +99,9 @@ function extractJavadocBefore(lines: string[], testLineIdx: number): string[] {
     }
     break;
   }
+
   if (i < 0 || !lines[i].trim().endsWith('*/')) return [];
+
   const raw: string[] = [];
   raw.unshift(lines[i]);
   i--;
@@ -107,6 +110,7 @@ function extractJavadocBefore(lines: string[], testLineIdx: number): string[] {
     if (lines[i].trim().startsWith('/**')) break;
     i--;
   }
+
   return raw
     .map((l) =>
       l
@@ -128,22 +132,34 @@ function extractJavadocBefore(lines: string[], testLineIdx: number): string[] {
  * Stops at a closing brace or class declaration.
  */
 function extractTcIdAbove(lines: string[], testLineIdx: number, tagPrefix: string): number | undefined {
-  const tagRe = new RegExp(`^@Tag\\(\\s*"${tagPrefix}:(\\d+)"\\s*\\)$`);
+  const tagRe  = new RegExp(`^@Tag\\(\\s*"${tagPrefix}:(\\d+)"\\s*\\)$`);
   const cmmtRe = new RegExp(`//\\s*@${tagPrefix}:(\\d+)`);
+
   for (let i = testLineIdx - 1; i >= 0 && i >= testLineIdx - 25; i--) {
     const trimmed = lines[i].trim();
+
     const tagMatch = trimmed.match(tagRe);
     if (tagMatch) return parseInt(tagMatch[1], 10);
+
     const cmtMatch = trimmed.match(cmmtRe);
     if (cmtMatch) return parseInt(cmtMatch[1], 10);
+
     if (trimmed === '}' || /^\s*(?:(?:public|protected|private|abstract|final)\s+)*class\s+/.test(trimmed)) break;
   }
   return undefined;
 }
 
-function parseTestAnnotationAttrs(testLine: string): { groups: string[]; description: string } {
+// ─── @Test attribute extraction (TestNG groups / description) ─────────────────
+
+interface TestAnnotationAttrs {
+  groups: string[];
+  description: string;
+}
+
+function parseTestAnnotationAttrs(testLine: string): TestAnnotationAttrs {
   const groups: string[] = [];
   let description = '';
+
   const multiGroupMatch = testLine.match(/\bgroups\s*=\s*\{([^}]*)\}/);
   if (multiGroupMatch) {
     const literals = multiGroupMatch[1].match(/"([^"]+)"/g);
@@ -152,8 +168,10 @@ function parseTestAnnotationAttrs(testLine: string): { groups: string[]; descrip
     const singleGroupMatch = testLine.match(/\bgroups\s*=\s*"([^"]+)"/);
     if (singleGroupMatch) groups.push(singleGroupMatch[1]);
   }
+
   const descMatch = testLine.match(/\bdescription\s*=\s*"([^"]+)"/);
   if (descMatch) description = descMatch[1];
+
   return { groups, description };
 }
 
@@ -164,22 +182,30 @@ const JAVA_KEYWORDS = new Set([
   'instanceof', 'assert', 'synchronized',
 ]);
 
-function extractMethodInfo(
-  lines: string[],
-  testLineIdx: number
-): { methodName: string; tagValues: string[]; endLine: number } {
+interface MethodInfo {
+  methodName: string;
+  /** All @Tag values found below @Test (includes potential "tc:N" ID tags). */
+  tagValues: string[];
+  endLine: number;
+}
+
+function extractMethodInfo(lines: string[], testLineIdx: number): MethodInfo {
   const tagValues: string[] = [];
   let methodName = '';
   let endLine = testLineIdx;
+
   // TestNG groups on the @Test line itself — push into tagValues so they surface as TC tags
   const { groups } = parseTestAnnotationAttrs(lines[testLineIdx] ?? '');
   tagValues.push(...groups);
+
   for (let i = testLineIdx + 1; i < lines.length && i < testLineIdx + 30; i++) {
     const trimmed = lines[i].trim();
     endLine = i;
+
     // @Tag("value") — JUnit 5  (includes potential tc:N ID tags)
     const tagMatch = trimmed.match(/^@Tag\(\s*"([^"]+)"\s*\)/);
     if (tagMatch) { tagValues.push(tagMatch[1]); continue; }
+
     // @Category({Smoke.class, Reg.class}) — JUnit 4
     const multiCatMatch = trimmed.match(/^@Category\(\s*\{([^}]*)\}\s*\)/);
     if (multiCatMatch) {
@@ -187,20 +213,29 @@ function extractMethodInfo(
       if (classRefs) tagValues.push(...classRefs.map((c) => c.replace('.class', '')));
       continue;
     }
+
     // @Category(Smoke.class) — single
     const singleCatMatch = trimmed.match(/^@Category\(\s*(\w+)\.class\s*\)/);
     if (singleCatMatch) { tagValues.push(singleCatMatch[1]); continue; }
+
     // Other @Annotation — skip (e.g. @DisplayName, @Timeout, @AzureTestCase)
     if (trimmed.startsWith('@')) continue;
+
     // Blank / comment interior
     if (trimmed === '' || trimmed.startsWith('//') || trimmed.startsWith('*')) continue;
+
     // Method signature: first word before ( that is not a keyword
     if (trimmed.includes('(')) {
       const m = trimmed.match(/(\w+)\s*\(/);
-      if (m && !JAVA_KEYWORDS.has(m[1])) { methodName = m[1]; break; }
+      if (m && !JAVA_KEYWORDS.has(m[1])) {
+        methodName = m[1];
+        break;
+      }
     }
+
     if (trimmed === '{') break;
   }
+
   return { methodName, tagValues, endLine };
 }
 
@@ -217,8 +252,10 @@ function parseSummary(
 ): { title: string; steps: ParsedStep[] } {
   let title = '';
   const steps: ParsedStep[] = [];
+
   for (const line of summaryLines) {
     if (!line || META_RE.test(line)) continue;
+
     const numMatch = NUMBERED_STEP_RE.exec(line);
     if (numMatch) {
       const content = numMatch[1].trim();
@@ -230,11 +267,14 @@ function parseSummary(
       }
       continue;
     }
+
     if (!title) title = line;
   }
+
   if (!title) {
     title = descriptionFallback || methodName.replace(/([A-Z])/g, ' $1').trim();
   }
+
   return { title, steps };
 }
 
@@ -247,23 +287,33 @@ export function parseJavaFile(
 ): ParsedTest[] {
   const source = fs.readFileSync(filePath, 'utf8');
   const lines = source.split('\n');
+
   const pkg = extractPackage(lines);
   const className = extractClassName(lines);
   const pathTags = extractPathTags(filePath);
+
   // ID tag regex: matches e.g. "tc:12345" inside a @Tag value
   const idTagValueRe = new RegExp(`^${tagPrefix}:(\\d+)$`);
+
   const results: ParsedTest[] = [];
+
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trim();
     if (!isTestAnnotation(trimmed)) continue;
+
     const testAnnotationLineIdx = i;
+
     const summaryLines = extractJavadocBefore(lines, testAnnotationLineIdx);
-    const { description: testNgDescription, groups: testNgGroups } = parseTestAnnotationAttrs(lines[testAnnotationLineIdx] ?? '');
+    const { description: testNgDescription, groups: testNgGroups } = parseTestAnnotationAttrs(
+      lines[testAnnotationLineIdx] ?? ''
+    );
     const { methodName, tagValues, endLine } = extractMethodInfo(lines, testAnnotationLineIdx);
+
     if (!methodName) {
       i = endLine;
       continue;
     }
+
     // Separate tc-ID tags from regular @Tag values (JUnit 5)
     let azureId: number | undefined;
     const regularTagValues: string[] = [];
@@ -275,13 +325,16 @@ export function parseJavaFile(
         regularTagValues.push(tv);
       }
     }
+
     // Fallback: look for ID above @Test (@Tag or comment)
     if (azureId === undefined) {
       azureId = extractTcIdAbove(lines, testAnnotationLineIdx, tagPrefix);
     }
+
     const allTags = [...new Set([...pathTags, ...regularTagValues, ...testNgGroups])];
     const { title, steps } = parseSummary(summaryLines, methodName, testNgDescription);
     const fqmn = [pkg, className, methodName].filter(Boolean).join('.');
+
     results.push({
       filePath,
       title,
@@ -292,7 +345,9 @@ export function parseJavaFile(
       linkRefs: extractLinkRefs(allTags, linkConfigs),
       automatedTestName: fqmn || undefined,
     });
+
     i = endLine;
   }
+
   return results;
 }
