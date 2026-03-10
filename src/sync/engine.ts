@@ -23,7 +23,13 @@ import { parseCsharpFile } from '../parsers/csharp';
 import { parseCsvFile } from '../parsers/csv';
 import { parseExcelFile } from '../parsers/excel';
 import { parseGherkinFile } from '../parsers/gherkin';
+import { parseJavaFile } from '../parsers/java';
+import { parseJavaScriptFile } from '../parsers/javascript';
 import { parseMarkdownFile } from '../parsers/markdown';
+import { parsePythonFile } from '../parsers/python';
+import { parseSwiftFile } from '../parsers/swift';
+import { parseDartFile } from '../parsers/dart';
+import { parseTestCafeFile } from '../parsers/testcafe';
 import { AzureTestCase, ParsedStep, ParsedTest, SyncConfig, SyncResult, TestPlanEntry } from '../types';
 import { CacheEntry, hashSteps, hashString, loadCache, saveCache,SyncCache } from './cache';
 import { writebackId } from './writeback';
@@ -96,6 +102,29 @@ async function parseLocalFiles(
           break;
         case 'csharp':
           tests = parseCsharpFile(fp, tagPrefix, linkConfigs);
+          break;
+        case 'playwright':
+        case 'javascript':
+        case 'cypress':
+        case 'puppeteer':
+        case 'detox':
+          tests = parseJavaScriptFile(fp, tagPrefix, linkConfigs);
+          break;
+        case 'java':
+        case 'espresso':
+          tests = parseJavaFile(fp, tagPrefix, linkConfigs);
+          break;
+        case 'python':
+          tests = parsePythonFile(fp, tagPrefix, linkConfigs);
+          break;
+        case 'xcuitest':
+          tests = parseSwiftFile(fp, tagPrefix, linkConfigs);
+          break;
+        case 'flutter':
+          tests = parseDartFile(fp, tagPrefix, linkConfigs);
+          break;
+        case 'testcafe':
+          tests = parseTestCafeFile(fp, tagPrefix, linkConfigs);
           break;
         default:
           tests = parseMarkdownFile(fp, tagPrefix, linkConfigs, attachmentsConfig);
@@ -319,6 +348,17 @@ async function pushSingle(
     throw new Error(`Conflicts detected (conflictAction=fail):\n${titles}`);
   }
 
+  // Playwright migration: convert existing comment-style IDs to native annotations.
+  // For all other framework types this is a no-op.
+  if (!opts.dryRun && !disableLocal && config.local.type === 'playwright') {
+    const alreadyQueued = new Set(pendingWritebacks.map((wb) => `${wb.test.filePath}:${wb.test.line}`));
+    for (const test of tests) {
+      if (test.azureId && !alreadyQueued.has(`${test.filePath}:${test.line}`)) {
+        pendingWritebacks.push({ test, newId: test.azureId });
+      }
+    }
+  }
+
   // Apply ID writebacks in descending line order per file so earlier insertions
   // don't shift line numbers for subsequent writebacks in the same file.
   if (!opts.dryRun && pendingWritebacks.length) {
@@ -530,7 +570,7 @@ function applyRemoteToLocal(
   newTitle: string,
   newSteps: ParsedStep[],
   newDescription: string | undefined,
-  localType: 'gherkin' | 'markdown' | 'csv' | 'excel' | 'csharp',
+  localType: string,
   tagPrefix: string
 ): void {
   if (localType === 'gherkin') {

@@ -144,9 +144,10 @@ function validateConfig(cfg: SyncConfig, filePath: string): void {
   if (!cfg.testPlan?.id && !cfg.testPlans?.length) {
     err('"testPlan.id" or "testPlans" array is required');
   }
-  if (!cfg.local?.type) err('"local.type" is required (gherkin | markdown | csv | excel)');
-  if (!['gherkin', 'markdown', 'csv', 'excel'].includes(cfg.local.type))
-    err(`"local.type" must be one of: gherkin, markdown, csv, excel (got "${cfg.local.type}")`);
+  const VALID_LOCAL_TYPES = ['gherkin', 'markdown', 'csv', 'excel', 'csharp', 'playwright', 'javascript', 'cypress', 'puppeteer', 'detox', 'java', 'espresso', 'python', 'xcuitest', 'flutter', 'testcafe'];
+  if (!cfg.local?.type) err(`"local.type" is required (${VALID_LOCAL_TYPES.join(' | ')})`);
+  if (!VALID_LOCAL_TYPES.includes(cfg.local.type))
+    err(`"local.type" must be one of: ${VALID_LOCAL_TYPES.join(', ')} (got "${cfg.local.type}")`);
   if (!cfg.local?.include) err('"local.include" is required');
 }
 
