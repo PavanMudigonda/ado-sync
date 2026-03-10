@@ -1,0 +1,21 @@
+orgUrl: https://dev.azure.com/your-org
+project: YourProject
+auth:
+  type: pat
+  token: $AZURE_DEVOPS_TOKEN
+testPlan:
+  id: 12345            # replace with your test plan ID
+  suiteId: 12346       # replace with your root suite ID
+  suiteMapping: flat
+local:
+  type: java
+  include: src/test/java/**/*.java
+sync:
+  tagPrefix: tc
+  titleField: System.Title
+  markAutomated: true
+  ai:
+    provider: openai
+    baseUrl: https://router.huggingface.co/v1
+    apiKey: $HF_TOKEN
+    model: Qwen/Qwen2.5-Coder-7B-Instruct

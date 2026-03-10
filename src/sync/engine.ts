@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import { glob } from 'glob';
 import * as path from 'path';
 
+import { AiSummaryOpts, summarizeTest } from '../ai/summarizer';
 import { AzureClient } from '../azure/client';
 import {
   addTestCaseToConditionSuites,
@@ -20,7 +21,8 @@ import {
   updateTestCase,
 } from '../azure/test-cases';
 import { parseCsharpFile } from '../parsers/csharp';
-import { parseCsvFile } from '../parsers/csv';
+import { applyRemoteToCsv, parseCsvFile } from '../parsers/csv';
+import { parseDartFile } from '../parsers/dart';
 import { parseExcelFile } from '../parsers/excel';
 import { parseGherkinFile } from '../parsers/gherkin';
 import { parseJavaFile } from '../parsers/java';
@@ -28,10 +30,9 @@ import { parseJavaScriptFile } from '../parsers/javascript';
 import { parseMarkdownFile } from '../parsers/markdown';
 import { parsePythonFile } from '../parsers/python';
 import { parseSwiftFile } from '../parsers/swift';
-import { parseDartFile } from '../parsers/dart';
 import { parseTestCafeFile } from '../parsers/testcafe';
 import { AzureTestCase, ParsedStep, ParsedTest, SyncConfig, SyncResult, TestPlanEntry } from '../types';
-import { CacheEntry, hashSteps, hashString, loadCache, saveCache,SyncCache } from './cache';
+import { CacheEntry, hashSteps, hashString, loadCache, saveCache, SyncCache } from './cache';
 import { writebackId } from './writeback';
 
 // ─── Tag filtering ────────────────────────────────────────────────────────────
@@ -103,28 +104,30 @@ async function parseLocalFiles(
         case 'csharp':
           tests = parseCsharpFile(fp, tagPrefix, linkConfigs);
           break;
-        case 'playwright':
-        case 'javascript':
-        case 'cypress':
-        case 'puppeteer':
-        case 'detox':
-          tests = parseJavaScriptFile(fp, tagPrefix, linkConfigs);
-          break;
         case 'java':
-        case 'espresso':
           tests = parseJavaFile(fp, tagPrefix, linkConfigs);
           break;
         case 'python':
           tests = parsePythonFile(fp, tagPrefix, linkConfigs);
+          break;
+        case 'javascript':
+        case 'playwright':
+        case 'puppeteer':
+        case 'cypress':
+        case 'detox':
+          tests = parseJavaScriptFile(fp, tagPrefix, linkConfigs);
+          break;
+        case 'testcafe':
+          tests = parseTestCafeFile(fp, tagPrefix, linkConfigs);
+          break;
+        case 'espresso':
+          tests = parseJavaFile(fp, tagPrefix, linkConfigs);
           break;
         case 'xcuitest':
           tests = parseSwiftFile(fp, tagPrefix, linkConfigs);
           break;
         case 'flutter':
           tests = parseDartFile(fp, tagPrefix, linkConfigs);
-          break;
-        case 'testcafe':
-          tests = parseTestCafeFile(fp, tagPrefix, linkConfigs);
           break;
         default:
           tests = parseMarkdownFile(fp, tagPrefix, linkConfigs, attachmentsConfig);
@@ -150,6 +153,12 @@ export interface SyncOpts {
   tags?: string;
   /** Called after each test case is processed. Useful for rendering a live progress bar. */
   onProgress?: (done: number, total: number, result: SyncResult) => void;
+  /** Called during AI summarisation phase (before sync loop). done=0 signals start of a test. */
+  onAiProgress?: (done: number, total: number, title: string) => void;
+  /** AI auto-summary options: generate title/steps for tests that have none. */
+  aiSummary?: AiSummaryOpts;
+  /** Internal: pre-parsed tests injected by multi-plan push to skip re-parsing. */
+  _preloadedTests?: ParsedTest[];
 }
 
 // ─── Multi-plan helpers ───────────────────────────────────────────────────────
@@ -181,12 +190,44 @@ export async function push(
   configDir: string,
   opts: SyncOpts = {}
 ): Promise<SyncResult[]> {
-  // Multi-plan: delegate to each plan entry
+  // Multi-plan: run AI summarisation across all plans first so progress totals
+  // are correct, then delegate each plan's sync loop (with AI already applied).
   if (config.testPlans?.length) {
-    const all: SyncResult[] = [];
+    // Collect all tests across plans and run AI in one pass
+    const planTests: Array<{ entryConfig: SyncConfig; tests: ParsedTest[] }> = [];
     for (const entry of config.testPlans) {
       const entryConfig = configForPlanEntry(config, entry);
-      all.push(...await pushSingle(entryConfig, configDir, opts));
+      const files = await discoverFiles(entryConfig.local.include, entryConfig.local.exclude, configDir);
+      const tests = await parseLocalFiles(files, entryConfig, opts.tags);
+      planTests.push({ entryConfig, tests });
+    }
+    if (opts.aiSummary) {
+      const CODE_TYPES = new Set(['javascript', 'playwright', 'puppeteer', 'cypress', 'testcafe', 'detox', 'espresso', 'xcuitest', 'flutter', 'java', 'csharp', 'python']);
+      const allTargets = planTests.flatMap(({ entryConfig, tests }) =>
+        CODE_TYPES.has(entryConfig.local.type) ? tests.filter(t => t.steps.length === 0 || !t.description) : []
+      );
+      let aiDone = 0;
+      for (const { entryConfig, tests } of planTests) {
+        if (!CODE_TYPES.has(entryConfig.local.type)) continue;
+        for (const test of tests) {
+          const needsSteps = test.steps.length === 0;
+          const needsDescription = !test.description;
+          if (needsSteps || needsDescription) {
+            opts.onAiProgress?.(aiDone, allTargets.length, test.title);
+            const result = await summarizeTest(test, entryConfig.local.type, opts.aiSummary);
+            aiDone++;
+            opts.onAiProgress?.(aiDone, allTargets.length, test.title);
+            if (needsSteps) { test.title = result.title; test.steps = result.steps; }
+            if (needsDescription && result.description) test.description = result.description;
+          }
+        }
+      }
+      if (allTargets.length > 0) opts.onAiProgress?.(allTargets.length, allTargets.length, '');
+    }
+    // Run sync loop per plan (AI already applied, skip AI phase inside pushSingle)
+    const all: SyncResult[] = [];
+    for (const { entryConfig, tests } of planTests) {
+      all.push(...await pushSingle(entryConfig, configDir, { ...opts, aiSummary: undefined, onAiProgress: undefined, _preloadedTests: tests } as SyncOpts));
     }
     return all;
   }
@@ -198,8 +239,44 @@ async function pushSingle(
   configDir: string,
   opts: SyncOpts
 ): Promise<SyncResult[]> {
-  const files = await discoverFiles(config.local.include, config.local.exclude, configDir);
-  const tests = await parseLocalFiles(files, config, opts.tags);
+  const files = opts._preloadedTests
+    ? []
+    : await discoverFiles(config.local.include, config.local.exclude, configDir);
+  const tests = opts._preloadedTests
+    ?? await parseLocalFiles(files, config, opts.tags);
+
+  // AI auto-summary: for code-based local types, default to the local node-llama-cpp
+  // provider (with heuristic fallback) when no explicit aiSummary opts are provided.
+  // If no GGUF model path is set, the local provider transparently falls back to
+  // heuristic mode so the push always succeeds even without a model installed.
+  const CODE_TYPES = new Set(['javascript', 'playwright', 'puppeteer', 'cypress', 'testcafe', 'detox', 'espresso', 'xcuitest', 'flutter', 'java', 'csharp', 'python']);
+  const effectiveAiOpts: AiSummaryOpts | undefined =
+    opts._preloadedTests ? undefined  // AI already applied in multi-plan pre-pass
+    : opts.aiSummary ?? (CODE_TYPES.has(config.local.type) ? { provider: 'local', heuristicFallback: true } : undefined);
+
+  if (effectiveAiOpts) {
+    const aiTargets = tests.filter(t => t.steps.length === 0 || !t.description);
+    let aiDone = 0;
+    for (const test of tests) {
+      const needsSteps = test.steps.length === 0;
+      const needsDescription = !test.description;
+      if (needsSteps || needsDescription) {
+        opts.onAiProgress?.(aiDone, aiTargets.length, test.title);
+        const result = await summarizeTest(test, config.local.type, effectiveAiOpts);
+        aiDone++;
+        opts.onAiProgress?.(aiDone, aiTargets.length, test.title);
+        if (needsSteps) {
+          test.title = result.title;
+          test.steps = result.steps;
+        }
+        if (needsDescription && result.description) {
+          test.description = result.description;
+        }
+      }
+    }
+    if (aiTargets.length > 0) opts.onAiProgress?.(aiTargets.length, aiTargets.length, '');
+  }
+
   const client = await AzureClient.create(config);
   const tagPrefix = config.sync?.tagPrefix ?? 'tc';
   const titleField = config.sync?.titleField ?? 'System.Title';
@@ -543,9 +620,9 @@ async function pullSingle(
 export async function status(
   config: SyncConfig,
   configDir: string,
-  opts: Pick<SyncOpts, 'tags' | 'onProgress'> = {}
+  opts: Pick<SyncOpts, 'tags' | 'onProgress' | 'onAiProgress' | 'aiSummary'> = {}
 ): Promise<SyncResult[]> {
-  return push(config, configDir, { dryRun: true, tags: opts.tags, onProgress: opts.onProgress });
+  return push(config, configDir, { dryRun: true, tags: opts.tags, onProgress: opts.onProgress, onAiProgress: opts.onAiProgress, aiSummary: opts.aiSummary });
 }
 
 // ─── Cache helpers ────────────────────────────────────────────────────────────
@@ -570,15 +647,18 @@ function applyRemoteToLocal(
   newTitle: string,
   newSteps: ParsedStep[],
   newDescription: string | undefined,
-  localType: string,
+  localType: 'gherkin' | 'markdown' | 'csv' | 'excel' | 'csharp' | 'java' | 'python' | 'javascript' | 'playwright' | 'puppeteer' | 'cypress' | 'testcafe' | 'detox' | 'espresso' | 'xcuitest' | 'flutter',
   tagPrefix: string
 ): void {
   if (localType === 'gherkin') {
     applyRemoteToGherkin(test, newTitle, newSteps);
   } else if (localType === 'markdown') {
     applyRemoteToMarkdown(test, newTitle, newSteps, newDescription, tagPrefix);
+  } else if (localType === 'csv') {
+    applyRemoteToCsv(test.filePath, test.title, newTitle, newSteps);
   }
-  // csv / excel: pull not supported (files are typically generated by external tools)
+  // excel: pull not yet supported (in-place XML surgery for xlsx is complex)
+  // csharp / java / python / javascript: pull not supported (code files are managed locally)
 }
 
 function applyRemoteToGherkin(test: ParsedTest, newTitle: string, newSteps: ParsedStep[]): void {

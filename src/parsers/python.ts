@@ -40,11 +40,13 @@ import { extractLinkRefs, extractPathTags } from './shared';
 export function derivePythonModulePath(filePath: string): string {
   const parts = filePath.replace(/\\/g, '/').split('/');
   const fileNameNoExt = (parts.pop() ?? '').replace(/\.py$/, '');
+
   const rootNames = new Set(['tests', 'test', 'src', 'lib']);
   let rootIdx = -1;
   for (let i = parts.length - 1; i >= 0; i--) {
     if (rootNames.has(parts[i])) { rootIdx = i; break; }
   }
+
   if (rootIdx >= 0) return [...parts.slice(rootIdx), fileNameNoExt].join('.');
   return fileNameNoExt;
 }
@@ -57,10 +59,12 @@ export function derivePythonModulePath(filePath: string): string {
  */
 function findEnclosingClass(lines: string[], defLineIdx: number): string {
   const defIndent = (lines[defLineIdx].match(/^(\s*)/) ?? ['', ''])[1].length;
+
   for (let i = defLineIdx - 1; i >= 0; i--) {
     const line = lines[i];
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
+
     const lineIndent = (line.match(/^(\s*)/) ?? ['', ''])[1].length;
     if (lineIndent < defIndent) {
       const m = trimmed.match(/^class\s+(\w+)/);
@@ -93,13 +97,17 @@ function extractDocstring(lines: string[], defLineIdx: number): string[] {
   while (i < lines.length && !lines[i - 1].trim().endsWith(':') && lines[i].trim() === '') i++;
   // Skip blank lines between def and body
   while (i < lines.length && lines[i].trim() === '') i++;
+
   if (i >= lines.length) return [];
+
   const firstLine = lines[i].trim();
-  let quote: string;
-  if (firstLine.startsWith('"""')) quote = '"""';
+  let quote: '"""' | "'''";
+  if (firstLine.startsWith('"""'))      quote = '"""';
   else if (firstLine.startsWith("'''")) quote = "'''";
   else return [];
+
   const afterOpen = firstLine.slice(3);
+
   // Single-line: """text"""
   if (afterOpen.endsWith(quote)) {
     const text = afterOpen.slice(0, afterOpen.length - 3).trim();
@@ -109,6 +117,7 @@ function extractDocstring(lines: string[], defLineIdx: number): string[] {
   const content: string[] = [];
   if (afterOpen.trim()) content.push(afterOpen.trim());
   i++;
+
   while (i < lines.length) {
     const trimmed = lines[i].trim();
     if (trimmed.endsWith(quote)) {
@@ -119,6 +128,7 @@ function extractDocstring(lines: string[], defLineIdx: number): string[] {
     content.push(trimmed);
     i++;
   }
+
   // Drop leading/trailing blank lines inside the docstring
   while (content.length && content[0] === '') content.shift();
   while (content.length && content[content.length - 1] === '') content.pop();
@@ -131,6 +141,11 @@ function extractDocstring(lines: string[], defLineIdx: number): string[] {
 const PYTEST_BUILTINS = new Set([
   'parametrize', 'skip', 'skipif', 'xfail', 'usefixtures', 'filterwarnings',
 ]);
+
+interface PythonDecorators {
+  marks: string[];
+  azureId?: number;
+}
 
 /**
  * Scan backward from defLineIdx to collect pytest marks and a TC ID.
@@ -147,35 +162,51 @@ function extractDecoratorsAbove(
   lines: string[],
   defLineIdx: number,
   tagPrefix: string
-): { marks: string[]; azureId: number | undefined } {
+): PythonDecorators {
   const marks: string[] = [];
   let azureId: number | undefined;
-  const idMarkRe = new RegExp(`^@pytest\\.mark\\.${tagPrefix}\\((\\d+)\\)\\s*$`);
-  const markRe = /^@pytest\.mark\.(\w+)(?:\s*\(.*)?$/;
+
+  const idMarkRe   = new RegExp(`^@pytest\\.mark\\.${tagPrefix}\\((\\d+)\\)\\s*$`);
+  const markRe     = /^@pytest\.mark\.(\w+)(?:\s*\(.*)?$/;
   const commentIdRe = new RegExp(`#\\s*@${tagPrefix}:(\\d+)`);
+
   let parenDepth = 0; // track open parens for multi-line decorators
+
   for (let i = defLineIdx - 1; i >= 0 && i >= defLineIdx - 50; i--) {
     const line = lines[i];
     const trimmed = line.trim();
+
     // Track parenthesis depth (scanning backward, so ) opens, ( closes)
     for (const ch of trimmed) {
       if (ch === ')') parenDepth++;
       if (ch === '(') parenDepth = Math.max(0, parenDepth - 1);
     }
+
     // While inside a multi-line decorator argument, keep going
     if (parenDepth > 0) continue;
+
     // Blank line — decorators must be adjacent
     if (trimmed === '') break;
+
     // Another function or class definition
     if (/^(?:async\s+)?def\s+/.test(trimmed) || /^class\s+/.test(trimmed)) break;
+
     // Comment with an ID: # @tc:12345
     const cmtMatch = trimmed.match(commentIdRe);
-    if (cmtMatch && azureId === undefined) { azureId = parseInt(cmtMatch[1], 10); continue; }
+    if (cmtMatch && azureId === undefined) {
+      azureId = parseInt(cmtMatch[1], 10);
+      continue;
+    }
+
     // Decorator line
     if (trimmed.startsWith('@')) {
       // ID mark: @pytest.mark.tc(12345)
       const idMatch = trimmed.match(idMarkRe);
-      if (idMatch) { if (azureId === undefined) azureId = parseInt(idMatch[1], 10); continue; }
+      if (idMatch) {
+        if (azureId === undefined) azureId = parseInt(idMatch[1], 10);
+        continue;
+      }
+
       // Regular mark: @pytest.mark.smoke
       const markMatch = trimmed.match(markRe);
       if (markMatch) {
@@ -183,12 +214,15 @@ function extractDecoratorsAbove(
         if (!PYTEST_BUILTINS.has(name) && name !== tagPrefix) marks.push(name);
         continue;
       }
+
       // Other decorator (@staticmethod, @classmethod, etc.) — ignore
       continue;
     }
+
     // Any other source line → stop
     break;
   }
+
   return { marks, azureId };
 }
 
@@ -196,7 +230,7 @@ function extractDecoratorsAbove(
 
 const NUMBERED_STEP_RE = /^\d+\.\s+(.+)$/;
 const CHECK_RE = /^[Cc]heck:\s+(.+)$/;
-const META_RE = /^(?:test\s+case|user\s+story)[\s:]/i;
+const META_RE  = /^(?:test\s+case|user\s+story)[\s:]/i;
 
 function parseSummary(
   docLines: string[],
@@ -204,8 +238,10 @@ function parseSummary(
 ): { title: string; steps: ParsedStep[] } {
   let title = '';
   const steps: ParsedStep[] = [];
+
   for (const line of docLines) {
     if (!line || META_RE.test(line)) continue;
+
     const numMatch = NUMBERED_STEP_RE.exec(line);
     if (numMatch) {
       const content = numMatch[1].trim();
@@ -217,12 +253,15 @@ function parseSummary(
       }
       continue;
     }
+
     if (!title) title = line;
   }
+
   if (!title) {
     // Convert snake_case to readable words:  test_user_login → user login
     title = methodName.replace(/^test_/, '').replace(/_/g, ' ');
   }
+
   return { title, steps };
 }
 
@@ -235,21 +274,27 @@ export function parsePythonFile(
 ): ParsedTest[] {
   const source = fs.readFileSync(filePath, 'utf8');
   const lines = source.split('\n');
+
   const modulePath = derivePythonModulePath(filePath);
-  const pathTags = extractPathTags(filePath);
+  const pathTags   = extractPathTags(filePath);
   const results: ParsedTest[] = [];
+
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trim();
     if (!isTestFunction(trimmed)) continue;
+
     const defLineIdx = i;
     const methodName = extractMethodName(trimmed);
     if (!methodName) continue;
-    const className = findEnclosingClass(lines, defLineIdx);
-    const docLines = extractDocstring(lines, defLineIdx);
+
+    const className  = findEnclosingClass(lines, defLineIdx);
+    const docLines   = extractDocstring(lines, defLineIdx);
     const { marks, azureId } = extractDecoratorsAbove(lines, defLineIdx, tagPrefix);
+
     const allTags = [...new Set([...pathTags, ...marks])];
     const { title, steps } = parseSummary(docLines, methodName);
     const fqmn = [modulePath, className, methodName].filter(Boolean).join('.');
+
     results.push({
       filePath,
       title,
@@ -261,5 +306,6 @@ export function parsePythonFile(
       automatedTestName: fqmn || undefined,
     });
   }
+
   return results;
 }

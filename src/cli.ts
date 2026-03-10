@@ -17,10 +17,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import pkg from '../package.json';
+import { AiSummaryOpts } from './ai/summarizer';
 import { applyOverrides, CONFIG_TEMPLATE_JSON, CONFIG_TEMPLATE_YAML, loadConfig, resolveConfigPath } from './config';
 import { pull, push, status } from './sync/engine';
 import { publishTestResults } from './sync/publish-results';
-import { SyncResult } from './types';
+import { SyncConfig, SyncResult } from './types';
 
 // ─── CLI definition ───────────────────────────────────────────────────────────
 
@@ -37,6 +38,29 @@ program.option('-c, --config <path>', 'Path to config file (default: ado-sync.js
 /** Collect repeatable option values into an array. */
 function collect(value: string, previous: string[]): string[] {
   return [...previous, value];
+}
+
+// ─── AI summary helper ────────────────────────────────────────────────────────
+
+/**
+ * Build AiSummaryOpts from parsed CLI opts, falling back to config file values.
+ * CLI flags always take precedence. Returns undefined when provider is 'none'.
+ */
+function buildAiOpts(
+  opts: { aiProvider?: string; aiModel?: string; aiUrl?: string; aiKey?: string },
+  config?: SyncConfig
+): AiSummaryOpts | undefined {
+  const cfgAi = config?.sync?.ai;
+  // CLI --ai-provider none wins over config; config provider='none' also disables
+  const provider = opts.aiProvider ?? cfgAi?.provider ?? 'local';
+  if (provider === 'none') return undefined;
+  return {
+    provider: provider as AiSummaryOpts['provider'],
+    model:    opts.aiModel ?? cfgAi?.model,
+    baseUrl:  opts.aiUrl   ?? cfgAi?.baseUrl,
+    apiKey:   opts.aiKey   ?? cfgAi?.apiKey,
+    heuristicFallback: true,
+  };
 }
 
 // ─── init ─────────────────────────────────────────────────────────────────────
@@ -68,6 +92,10 @@ program
   .option('--dry-run', 'Show what would change without making any modifications')
   .option('--tags <expression>', 'Only sync scenarios matching this tag expression (e.g. "@smoke and not @wip")')
   .option('--config-override <path=value>', 'Override a config value (repeatable, e.g. --config-override sync.tagPrefix=mytag)', collect, [])
+  .option('--ai-provider <provider>', 'AI provider for test step generation: local (default, node-llama-cpp), heuristic, ollama, openai, anthropic, none (disable)')
+  .option('--ai-model <model>', 'local: path to GGUF file; ollama: model tag; openai/anthropic: model name')
+  .option('--ai-url <url>', 'Base URL for ollama or OpenAI-compatible endpoint')
+  .option('--ai-key <key>', 'API key for openai or anthropic')
   .action(async (opts) => {
     const globalOpts = program.opts();
     try {
@@ -85,9 +113,11 @@ program
       if (opts.configOverride?.length) console.log(chalk.dim(`Overrides: ${opts.configOverride.join(', ')}`));
       console.log('');
 
+      const aiSummary = buildAiOpts(opts, config);
       const isTTY = process.stdout.isTTY ?? false;
       const onProgress = createProgressCallback(isTTY);
-      const results = await push(config, configDir, { dryRun: opts.dryRun, tags: opts.tags, onProgress });
+      const onAiProgress = createAiProgressCallback(isTTY);
+      const results = await push(config, configDir, { dryRun: opts.dryRun, tags: opts.tags, onProgress, onAiProgress, aiSummary });
       if (isTTY) clearProgressLine();
       printResults(results, config.toolSettings?.outputLevel);
     } catch (err: any) {
@@ -136,6 +166,10 @@ program
   .description('Show diff between local specs and Azure DevOps without making changes')
   .option('--tags <expression>', 'Only check scenarios matching this tag expression')
   .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
+  .option('--ai-provider <provider>', 'AI provider for test step generation: local (default, node-llama-cpp), heuristic, ollama, openai, anthropic, none (disable)')
+  .option('--ai-model <model>', 'local: path to GGUF file; ollama: model tag; openai/anthropic: model name')
+  .option('--ai-url <url>', 'Base URL for ollama or OpenAI-compatible endpoint')
+  .option('--ai-key <key>', 'API key for openai or anthropic')
   .action(async (opts) => {
     const globalOpts = program.opts();
     try {
@@ -149,9 +183,11 @@ program
       if (opts.tags) console.log(chalk.dim(`Tags:   ${opts.tags}`));
       console.log('');
 
+      const aiSummary = buildAiOpts(opts, config);
       const isTTY = process.stdout.isTTY ?? false;
       const onProgress = createProgressCallback(isTTY);
-      const results = await status(config, configDir, { tags: opts.tags, onProgress });
+      const onAiProgress = createAiProgressCallback(isTTY);
+      const results = await status(config, configDir, { tags: opts.tags, onProgress, onAiProgress, aiSummary });
       if (isTTY) clearProgressLine();
       printResults(results, config.toolSettings?.outputLevel);
     } catch (err: any) {
@@ -166,7 +202,8 @@ program
   .command('publish-test-results')
   .description('Publish test results from result files (TRX, JUnit, Cucumber JSON) to Azure DevOps')
   .option('--testResult <path>', 'Path to a test result file (repeatable)', collect, [])
-  .option('--testResultFormat <format>', 'Result file format: trx, junit, cucumberJson')
+  .option('--testResultFormat <format>', 'Result file format: trx, nunitXml, junit, cucumberJson, playwrightJson')
+  .option('--attachmentsFolder <path>', 'Folder with screenshots/videos/logs to attach to test results')
   .option('--runName <name>', 'Name for the test run in Azure DevOps')
   .option('--buildId <id>', 'Build ID to associate with the test run')
   .option('--dry-run', 'Parse results and show summary without publishing')
@@ -188,6 +225,7 @@ program
         dryRun: opts.dryRun,
         resultFiles: opts.testResult?.length ? opts.testResult : undefined,
         resultFormat: opts.testResultFormat,
+        attachmentsFolder: opts.attachmentsFolder,
         runName: opts.runName,
         buildId: opts.buildId ? parseInt(opts.buildId) : undefined,
       });
@@ -246,6 +284,29 @@ function createProgressCallback(
 /** Erase the progress bar line (call once before printing results). */
 function clearProgressLine(): void {
   process.stdout.write(`\r${' '.repeat(process.stdout.columns ?? 80)}\r`);
+}
+
+/**
+ * Returns an onAiProgress callback if stdout is a TTY.
+ * Shows a spinner-style line during the AI summarisation phase.
+ */
+function createAiProgressCallback(
+  isTTY: boolean
+): ((done: number, total: number, title: string) => void) | undefined {
+  if (!isTTY) return undefined;
+
+  return (done: number, total: number, title: string) => {
+    if (total === 0 || (done === total && title === '')) {
+      process.stdout.write(`\r${' '.repeat(process.stdout.columns ?? 80)}\r`);
+      return;
+    }
+    const filled = total > 0 ? Math.round((done / total) * PROGRESS_WIDTH) : 0;
+    const bar = '█'.repeat(filled) + '░'.repeat(PROGRESS_WIDTH - filled);
+    const maxTitle = 38;
+    const t = title.length > maxTitle ? title.slice(0, maxTitle - 1) + '…' : title;
+    const line = `  [${bar}] ${done}/${total}  ${chalk.dim('✦')} ${chalk.dim('ai')} ${t}`;
+    process.stdout.write(`\r${line.padEnd(process.stdout.columns ?? 80)}`);
+  };
 }
 
 // ─── Output helpers ───────────────────────────────────────────────────────────
