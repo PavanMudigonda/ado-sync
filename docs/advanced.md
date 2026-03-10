@@ -348,3 +348,430 @@ ado-sync push --config-override sync.disableLocalChanges=true
 When a scenario is deleted from a local file but its Test Case still exists in the Azure suite, ado-sync detects this on the next `push` and appends the tag `ado-sync:removed` to the Azure Test Case (without deleting it). A `−` removed line is printed in the output.
 
 To completely remove the Test Case from Azure, delete it manually in Test Plans after reviewing.
+
+---
+
+## AI auto-summary for code tests
+
+When pushing code-based test types (`java`, `csharp`, `python`, `javascript`, `playwright`), ado-sync reads each test function body and automatically generates a TC **title**, **description**, and numbered **steps**.
+
+**What gets generated and when:**
+
+| Test state | What AI generates |
+|------------|------------------|
+| No doc comment at all | Title + description + all steps |
+| Has doc comment steps but no description | Description only (existing steps kept) |
+| Has both steps and a description | Nothing — left unchanged |
+
+Local source files are **never modified** by the AI summary feature.
+
+---
+
+### Providers
+
+| Provider | Quality | Requires |
+|----------|---------|---------|
+| `local` *(default)* | Good–Excellent | A GGUF model file (see setup below) |
+| `heuristic` | Basic | Nothing — zero dependencies, works offline |
+| `ollama` | Good–Excellent | [Ollama](https://ollama.com) server running locally |
+| `openai` | Excellent | OpenAI API key, or any OpenAI-compatible proxy (LiteLLM, Azure OpenAI, vLLM, etc.) |
+| `anthropic` | Excellent | Anthropic API key |
+
+> **No setup required to try it.** If no `--ai-model` is passed for `local`, it falls back to `heuristic` silently — so `ado-sync push` always works.
+
+### CLI flags
+
+| Flag | Description |
+|------|-------------|
+| `--ai-provider <p>` | Provider to use. Default: `local`. Pass `none` to disable entirely. |
+| `--ai-model <m>` | For `local`: path to `.gguf` file. For `ollama`/`openai`/`anthropic`: model name/tag. |
+| `--ai-url <url>` | Base URL for `ollama` or an OpenAI-compatible endpoint. |
+| `--ai-key <key>` | API key for `openai` or `anthropic`. Supports `$ENV_VAR` references. |
+
+---
+
+### Setting up the local provider (step by step)
+
+`node-llama-cpp` is bundled with ado-sync — **no separate install needed**. You only need to download a model file once.
+
+#### Step 1 — Choose a model size
+
+All models use the `Q4_K_M` quantization (best balance of size and quality).
+
+| Model | RAM needed | Quality | HF repo |
+|-------|-----------|---------|---------|
+| 0.5B | ~400 MB | Minimal | `Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF` |
+| **1.5B** *(start here)* | ~1.1 GB | Good | `Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF` |
+| 3B | ~2 GB | Better | `Qwen/Qwen2.5-Coder-3B-Instruct-GGUF` |
+| 7B | ~4.5 GB | Best local | `Qwen/Qwen2.5-Coder-7B-Instruct-GGUF` |
+| 14B | ~8.5 GB | Excellent | `Qwen/Qwen2.5-Coder-14B-Instruct-GGUF` |
+
+#### Step 2 — Download the model
+
+**macOS / Linux:**
+```bash
+mkdir -p ~/.cache/ado-sync/models
+
+# curl (no extra tools needed)
+curl -L -o ~/.cache/ado-sync/models/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf \
+  "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
+
+# or huggingface-cli (shows a progress bar — useful for larger models)
+pip install -U huggingface_hub
+huggingface-cli download Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF \
+  qwen2.5-coder-1.5b-instruct-q4_k_m.gguf \
+  --local-dir ~/.cache/ado-sync/models
+```
+
+**Windows (PowerShell):**
+```powershell
+New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\ado-sync\models"
+
+# Invoke-WebRequest
+Invoke-WebRequest `
+  -Uri "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf" `
+  -OutFile "$env:LOCALAPPDATA\ado-sync\models\qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
+
+# or huggingface-cli (shows a progress bar)
+pip install -U huggingface_hub
+huggingface-cli download Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF `
+  qwen2.5-coder-1.5b-instruct-q4_k_m.gguf `
+  --local-dir "$env:LOCALAPPDATA\ado-sync\models"
+```
+
+#### Step 3 — Push with the model
+
+```bash
+# macOS / Linux
+ado-sync push --ai-model ~/.cache/ado-sync/models/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf
+
+# Windows
+ado-sync push --ai-model "$env:LOCALAPPDATA\ado-sync\models\qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
+```
+
+The model is loaded once and reused for all tests in the run — no repeated loading overhead.
+
+### Complete example — C# MSTest with local LLM
+
+A full `ado-sync.yaml` for a C# MSTest project using a local GGUF model (no API key, no internet required at push time):
+
+```yaml
+orgUrl: https://dev.azure.com/your-org
+project: YourProject
+auth:
+  type: pat
+  token: $AZURE_DEVOPS_TOKEN
+testPlan:
+  id: 12345
+  suiteId: 12346
+  suiteMapping: flat
+local:
+  type: csharp
+  include: Tests/**/*.cs
+sync:
+  tagPrefix: tc
+  titleField: System.Title
+  markAutomated: true
+  ai:
+    provider: local
+    model: ~/.cache/ado-sync/models/qwen2.5-coder-7b-instruct-q4_k_m.gguf
+    # Windows: model: $env:LOCALAPPDATA\ado-sync\models\qwen2.5-coder-7b-instruct-q4_k_m.gguf
+```
+
+Run:
+```bash
+export AZURE_DEVOPS_TOKEN=your-pat
+ado-sync push --config ado-sync.yaml
+```
+
+> No `apiKey` or `baseUrl` needed — the model runs entirely in-process via `node-llama-cpp`.
+
+---
+
+### Setting up Ollama
+
+```bash
+# 1. Install Ollama from https://ollama.com
+
+# 2. Pull a model
+ollama pull qwen2.5-coder:7b
+
+# 3. Push (Ollama server must be running)
+ado-sync push --ai-provider ollama --ai-model qwen2.5-coder:7b
+```
+
+### Setting up OpenAI / Anthropic
+
+```bash
+ado-sync push --ai-provider openai    --ai-key $OPENAI_API_KEY
+ado-sync push --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
+```
+
+---
+
+### Using GitHub Copilot or Claude Code
+
+If you already use **GitHub Copilot** or **Claude Code** as your IDE AI assistant, you can reuse the same credentials with ado-sync. The key point: these tools are IDE plugins — they don't expose an API endpoint ado-sync can call. Instead, use the underlying AI provider they run on.
+
+#### Claude Code → `anthropic` provider
+
+Claude Code is powered by Anthropic's Claude models. If you have an `ANTHROPIC_API_KEY` (required to run Claude Code), pass it directly:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+
+ado-sync push --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
+```
+
+Pin a specific model with `--ai-model` (default is `claude-haiku-4-5-20251001`):
+
+```bash
+# Faster / cheaper
+ado-sync push --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY --ai-model claude-haiku-4-5-20251001
+
+# Higher quality
+ado-sync push --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY --ai-model claude-sonnet-4-6
+```
+
+Config file equivalent — set once, never repeat the flag:
+
+```json
+{
+  "sync": {
+    "ai": {
+      "provider": "anthropic",
+      "apiKey": "$ANTHROPIC_API_KEY",
+      "model": "claude-haiku-4-5-20251001"
+    }
+  }
+}
+```
+
+#### GitHub Copilot → `openai` or `openai` + `--ai-url` provider
+
+GitHub Copilot itself does not expose a public API endpoint. Use one of these alternatives depending on your subscription:
+
+**Option A — OpenAI API key** (Copilot Individual / Team subscribers)
+
+If you have a separate OpenAI API key:
+
+```bash
+ado-sync push --ai-provider openai --ai-key $OPENAI_API_KEY
+```
+
+**Option B — Azure OpenAI** (Copilot Enterprise / corporate Azure customers)
+
+If your org has an Azure OpenAI deployment (which also powers enterprise Copilot):
+
+```bash
+ado-sync push \
+  --ai-provider openai \
+  --ai-url "https://<your-resource>.openai.azure.com/openai/deployments/<deployment>/v1" \
+  --ai-key $AZURE_OPENAI_KEY \
+  --ai-model gpt-4o-mini
+```
+
+Config file equivalent:
+
+```json
+{
+  "sync": {
+    "ai": {
+      "provider": "openai",
+      "baseUrl": "https://<your-resource>.openai.azure.com/openai/deployments/<deployment>/v1",
+      "apiKey": "$AZURE_OPENAI_KEY",
+      "model": "gpt-4o-mini"
+    }
+  }
+}
+```
+
+**Option C — No API key (heuristic)**
+
+Works offline with zero setup — good when you don't want to spend API credits:
+
+```bash
+ado-sync push --ai-provider heuristic
+```
+
+#### Quick reference
+
+| You use | Recommended provider | Command |
+|---------|---------------------|---------|
+| Claude Code | `anthropic` | `ado-sync push --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY` |
+| Copilot Individual / Team | `openai` | `ado-sync push --ai-provider openai --ai-key $OPENAI_API_KEY` |
+| Copilot Enterprise / Azure | `openai` + `--ai-url` | See Azure OpenAI option above |
+| Either, no API budget | `heuristic` | `ado-sync push --ai-provider heuristic` |
+| Privacy-sensitive / air-gapped | `local` | `ado-sync push --ai-model ~/.cache/ado-sync/models/...` |
+
+#### Running ado-sync from within your IDE assistant
+
+Both tools can execute terminal commands, so you can ask them to run ado-sync for you directly.
+
+**Claude Code:**
+
+```
+Run: ado-sync push --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY --dry-run
+```
+
+Claude Code will execute it in the terminal and explain what would change before you commit to a real push.
+
+**GitHub Copilot Chat (VS Code):**
+
+Use the `@terminal` agent in Copilot Chat:
+
+```
+@terminal run ado-sync push --ai-provider heuristic --dry-run and explain the output
+```
+
+Copilot will propose the command in the terminal panel for you to accept and run.
+
+### Using LiteLLM (or any OpenAI-compatible proxy)
+
+[LiteLLM](https://github.com/BerriAI/litellm) is a proxy that exposes an OpenAI-compatible API for 100+ model providers (Azure OpenAI, Bedrock, Gemini, Mistral, Cohere, vLLM, and more). Use the `openai` provider with `--ai-url` pointing at your LiteLLM server:
+
+```bash
+# Start LiteLLM proxy (example)
+litellm --model gpt-4o-mini   # listens on http://localhost:4000 by default
+
+# Push using LiteLLM
+ado-sync push \
+  --ai-provider openai \
+  --ai-url http://localhost:4000 \
+  --ai-key $LITELLM_API_KEY \
+  --ai-model gpt-4o-mini
+```
+
+The same `--ai-url` override works for any other OpenAI-compatible server:
+
+| Service | `--ai-url` |
+|---------|-----------|
+| LiteLLM (local proxy) | `http://localhost:4000` |
+| LiteLLM (hosted) | `https://<your-litellm-host>/v1` |
+| Hugging Face Inference | `https://router.huggingface.co/v1` |
+| Azure OpenAI | `https://<resource>.openai.azure.com/openai/deployments/<deployment>` |
+| vLLM | `http://localhost:8000/v1` |
+| LocalAI | `http://localhost:8080/v1` |
+| LM Studio | `http://localhost:1234/v1` |
+
+> **Note:** `api-inference.huggingface.co` is deprecated — use `router.huggingface.co` instead.
+
+### Using Hugging Face Inference API
+
+[Hugging Face](https://huggingface.co) provides a free serverless inference API for open-source models. Use the `openai` provider since HF exposes an OpenAI-compatible endpoint:
+
+```bash
+ado-sync push \
+  --ai-provider openai \
+  --ai-url https://router.huggingface.co/v1 \
+  --ai-key $HF_TOKEN \
+  --ai-model Qwen/Qwen2.5-Coder-7B-Instruct
+```
+
+Get a token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) (requires the **Inference** permission).
+
+Recommended open-source models:
+
+| Model | Notes |
+|-------|-------|
+| `Qwen/Qwen2.5-Coder-7B-Instruct` | Best for code/test understanding |
+| `meta-llama/Llama-3.1-8B-Instruct` | Good general purpose |
+| `mistralai/Mistral-7B-Instruct-v0.3` | Lightweight and fast |
+
+Config file equivalent:
+
+```json
+{
+  "sync": {
+    "ai": {
+      "provider": "openai",
+      "baseUrl": "https://router.huggingface.co/v1",
+      "apiKey": "$HF_TOKEN",
+      "model": "Qwen/Qwen2.5-Coder-7B-Instruct"
+    }
+  }
+}
+```
+
+> **LiteLLM model names:** When using a hosted LiteLLM instance that proxies Anthropic models, prefix the model name with `anthropic/`, e.g. `anthropic/claude-opus-4-6`. Check your instance's `/v1/models` endpoint for registered model names.
+
+Config file equivalent — set any `--ai-*` flag in `sync.ai` to avoid repeating it on every push. CLI flags always take precedence over config values:
+
+```json
+{
+  "sync": {
+    "ai": {
+      "provider": "openai",
+      "baseUrl": "http://localhost:4000",
+      "apiKey": "$LITELLM_API_KEY",
+      "model": "gpt-4o-mini"
+    }
+  }
+}
+```
+
+The `sync.ai` block works for any provider:
+
+```json
+{ "sync": { "ai": { "provider": "ollama", "model": "qwen2.5-coder:7b" } } }
+```
+
+```json
+{ "sync": { "ai": { "provider": "anthropic", "apiKey": "$ANTHROPIC_API_KEY" } } }
+```
+
+```json
+{ "sync": { "ai": { "provider": "none" } } }
+```
+
+### Complete example — C# MSTest with Hugging Face
+
+A full `ado-sync.yaml` for a C# MSTest project using the Hugging Face Inference API for AI-generated test steps:
+
+```yaml
+orgUrl: https://dev.azure.com/your-org
+project: YourProject
+auth:
+  type: pat
+  token: $AZURE_DEVOPS_TOKEN
+testPlan:
+  id: 12345
+  suiteId: 12346
+  suiteMapping: flat
+local:
+  type: csharp
+  include: Tests/**/*.cs
+sync:
+  tagPrefix: tc
+  titleField: System.Title
+  markAutomated: true
+  ai:
+    provider: openai
+    baseUrl: https://router.huggingface.co/v1
+    apiKey: $HF_TOKEN
+    model: Qwen/Qwen2.5-Coder-7B-Instruct
+```
+
+Run:
+```bash
+export AZURE_DEVOPS_TOKEN=your-pat
+export HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxx
+ado-sync push --config ado-sync.yaml
+```
+
+### Disabling AI summary
+
+```bash
+ado-sync push --ai-provider none
+```
+
+---
+
+### How it works internally
+
+1. After parsing local files, ado-sync checks each test for a missing description or missing steps.
+2. For each test that needs either, ado-sync extracts the raw function body from the source file.
+3. The body is sent to the configured provider with a prompt requesting `Title:`, `Description:`, and `N. Step` / `N. Check:` lines.
+4. Title and steps are applied only when the test had no existing steps. Description is applied only when the test had no existing description.
+5. If the LLM call fails (network error, model not found, etc.), it automatically falls back to `heuristic`.
+6. The `local` provider caches the GGUF model in memory for the entire push run — a 50-test suite loads it only once.

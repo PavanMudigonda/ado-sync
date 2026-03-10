@@ -52,6 +52,7 @@ function getIndentLength(line: string): number {
 
 function findEnclosingClass(lines: string[], methodLineIdx: number): string | undefined {
   const methodIndent = getIndentLength(lines[methodLineIdx]);
+
   for (let i = methodLineIdx - 1; i >= 0; i--) {
     const lineIndent = getIndentLength(lines[i]);
     if (lineIndent < methodIndent) {
@@ -59,6 +60,7 @@ function findEnclosingClass(lines: string[], methodLineIdx: number): string | un
       if (m) return m[1];
     }
   }
+
   return undefined;
 }
 
@@ -71,16 +73,16 @@ function findEnclosingClass(lines: string[], methodLineIdx: number): string | un
  */
 function extractDocBefore(lines: string[], methodLineIdx: number): string[] {
   let i = methodLineIdx - 1;
+
   // Skip blank lines and non-doc single-line comments
   while (i >= 0) {
     const t = lines[i].trim();
-    if (t === '' || (t.startsWith('//') && !t.startsWith('///'))) {
-      i--;
-      continue;
-    }
+    if (t === '' || (t.startsWith('//') && !t.startsWith('///'))) { i--; continue; }
     break;
   }
+
   if (i < 0) return [];
+
   // /// triple-slash style (Swift idiomatic)
   if (lines[i].trim().startsWith('///')) {
     const docLines: string[] = [];
@@ -90,8 +92,10 @@ function extractDocBefore(lines: string[], methodLineIdx: number): string[] {
     }
     return docLines.filter((l) => l !== '');
   }
+
   // /** ... */ block style
   if (!lines[i].trim().endsWith('*/')) return [];
+
   const raw: string[] = [];
   raw.unshift(lines[i]);
   i--;
@@ -100,6 +104,7 @@ function extractDocBefore(lines: string[], methodLineIdx: number): string[] {
     if (lines[i].trim().startsWith('/**') || lines[i].trim().startsWith('/*')) break;
     i--;
   }
+
   return raw
     .map((l) =>
       l
@@ -111,36 +116,50 @@ function extractDocBefore(lines: string[], methodLineIdx: number): string[] {
     .filter((l) => l !== '');
 }
 
+// ─── TC ID and tags from comments above the func ──────────────────────────────
+
+interface CommentMetadata {
+  azureId?: number;
+  tags: string[];
+}
+
 function extractCommentMetadataAbove(
   lines: string[],
   methodLineIdx: number,
   tagPrefix: string
-): { azureId: number | undefined; tags: string[] } {
+): CommentMetadata {
   const tags: string[] = [];
   let azureId: number | undefined;
-  const idRe = new RegExp(`//\\s*@${tagPrefix}:(\\d+)`);
+
+  const idRe       = new RegExp(`//\\s*@${tagPrefix}:(\\d+)`);
   const tagsListRe = /\/\/\s*@tags?\s*:\s*(.+)/i;
   const singleTagRe = /\/\/\s*@(\w+)\s*$/;
+
   for (let i = methodLineIdx - 1; i >= 0 && i >= methodLineIdx - 25; i--) {
     const trimmed = lines[i].trim();
+
     if (trimmed === '') break;
     if (!trimmed.startsWith('//') && !trimmed.startsWith('*') && !trimmed.startsWith('/*')) break;
+
     const idMatch = trimmed.match(idRe);
     if (idMatch && azureId === undefined) {
       azureId = parseInt(idMatch[1], 10);
       continue;
     }
+
     const tagsMatch = trimmed.match(tagsListRe);
     if (tagsMatch) {
       tags.push(...tagsMatch[1].split(',').map((t) => t.trim()).filter(Boolean));
       continue;
     }
+
     const singleTag = trimmed.match(singleTagRe);
     if (singleTag && singleTag[1] !== tagPrefix) {
       tags.push(singleTag[1]);
       continue;
     }
   }
+
   return { azureId, tags };
 }
 
@@ -166,8 +185,8 @@ function methodNameToTitle(name: string): string {
 // ─── Doc → title + steps ─────────────────────────────────────────────────────
 
 const NUMBERED_STEP_RE = /^\d+\.\s+(.+)$/;
-const CHECK_RE = /^[Cc]heck:\s+(.+)$/;
-const META_RE = /^(?:test\s+case|user\s+story)[\s:]/i;
+const CHECK_RE         = /^[Cc]heck:\s+(.+)$/;
+const META_RE          = /^(?:test\s+case|user\s+story)[\s:]/i;
 
 function parseSummary(
   docLines: string[],
@@ -175,11 +194,13 @@ function parseSummary(
 ): { title: string; steps: ParsedStep[] } {
   let title = '';
   const steps: ParsedStep[] = [];
+
   for (const line of docLines) {
     if (!line || META_RE.test(line)) continue;
+
     const numMatch = NUMBERED_STEP_RE.exec(line);
     if (numMatch) {
-      const content = numMatch[1].trim();
+      const content    = numMatch[1].trim();
       const checkMatch = CHECK_RE.exec(content);
       if (checkMatch) {
         steps.push({ keyword: 'Then', text: checkMatch[1].trim() });
@@ -188,8 +209,10 @@ function parseSummary(
       }
       continue;
     }
+
     if (!title) title = line;
   }
+
   return { title: title || fallbackTitle, steps };
 }
 
@@ -201,24 +224,31 @@ export function parseSwiftFile(
   linkConfigs?: LinkConfig[]
 ): ParsedTest[] {
   const source = fs.readFileSync(filePath, 'utf8');
-  const lines = source.split('\n');
+  const lines  = source.split('\n');
+
   const fileBaseName = path.basename(filePath).replace(/\.swift$/, '');
   const pathTags = extractPathTags(filePath);
   const results: ParsedTest[] = [];
+
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(TEST_METHOD_RE);
     if (!m) continue;
-    const methodName = m[1];
+
+    const methodName    = m[1];
     const methodLineIdx = i;
-    const docLines = extractDocBefore(lines, methodLineIdx);
+
+    const docLines              = extractDocBefore(lines, methodLineIdx);
     const { azureId, tags: cTags } = extractCommentMetadataAbove(lines, methodLineIdx, tagPrefix);
-    const className = findEnclosingClass(lines, methodLineIdx);
+    const className             = findEnclosingClass(lines, methodLineIdx);
+
     const allTags = [...new Set([...pathTags, ...cTags])];
     const fallbackTitle = methodNameToTitle(methodName);
     const { title, steps } = parseSummary(docLines, fallbackTitle);
+
     const automatedTestName = className
       ? [fileBaseName, className, methodName].join(' > ')
       : [fileBaseName, methodName].join(' > ');
+
     results.push({
       filePath,
       title,
@@ -230,5 +260,6 @@ export function parseSwiftFile(
       automatedTestName,
     });
   }
+
   return results;
 }
