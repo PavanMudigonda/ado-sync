@@ -25,6 +25,24 @@ export interface SuiteCondition {
   tags?: string;
 }
 
+/**
+ * Routes a test case to a specific primary suite based on a tag expression.
+ * Evaluated in order; the first matching route wins.
+ * When no route matches, falls back to suiteId or plan root suite.
+ */
+export interface SuiteRoute {
+  /**
+   * Tag expression filter (e.g. '@smoke', '@regression and not @wip').
+   * When omitted, this route acts as a catch-all default.
+   */
+  tags?: string;
+  /**
+   * Target suite: a suite name (created if absent) or a numeric suite ID.
+   * e.g. "Smoke Tests"  or  12345
+   */
+  suite: string | number;
+}
+
 export interface TestPlanEntry {
   id: number;
   suiteId?: number;
@@ -34,6 +52,26 @@ export interface TestPlanEntry {
   include?: string | string[];
   /** Override local.exclude for this plan */
   exclude?: string | string[];
+  /**
+   * Tag-condition-based primary suite routing for this plan entry.
+   * Routes are evaluated in order; the first match wins.
+   * Allows multiple suites under a single test plan without separate testPlans entries.
+   *
+   * Example:
+   *   suiteRouting:
+   *     - tags: "@smoke"
+   *       suite: "Smoke Tests"
+   *     - tags: "@regression"
+   *       suite: "Regression"
+   *     - suite: "All Tests"    # catch-all
+   */
+  suiteRouting?: SuiteRoute[];
+  /**
+   * Additional condition-based suite assignment for this plan entry.
+   * Overrides sync.suiteConditions for this plan. TCs are added to each
+   * matching suite in addition to the primary suite.
+   */
+  suiteConditions?: SuiteCondition[];
 }
 
 // ─── State configuration ─────────────────────────────────────────────────────
@@ -228,13 +266,27 @@ export interface SyncConfig {
     suiteId?: number;
     /** 'flat' (default) or 'byFolder' to mirror folder structure as nested suites */
     suiteMapping?: 'flat' | 'byFolder';
+    /**
+     * Tag-condition-based primary suite routing.
+     * Routes are evaluated in order; the first match wins.
+     * Allows multiple suites under a single test plan.
+     *
+     * Example:
+     *   suiteRouting:
+     *     - tags: "@smoke"
+     *       suite: "Smoke Tests"
+     *     - tags: "@regression"
+     *       suite: "Regression Suite"
+     *     - suite: "All Tests"    # catch-all default
+     */
+    suiteRouting?: SuiteRoute[];
   };
   /** Multi-plan mode: if present, overrides testPlan for each entry */
   testPlans?: TestPlanEntry[];
   /** Local spec sources */
   local: {
-    /** 'gherkin' for .feature files, 'markdown' for .md, 'csharp' for MSTest/NUnit .cs, 'java' for JUnit/TestNG .java, 'python' for pytest .py, 'javascript' for Jest/Jasmine/WebdriverIO .js/.ts, 'playwright' for Playwright Test .spec.ts/.spec.js, 'puppeteer' for Puppeteer + Jest/Mocha .js/.ts, 'cypress' for Cypress .cy.js/.cy.ts, 'testcafe' for TestCafe .js/.ts, 'detox' for Detox (React Native) .js/.ts, 'espresso' for Android Espresso .java/.kt, 'xcuitest' for iOS XCUITest .swift, 'flutter' for Flutter/Dart _test.dart */
-    type: 'gherkin' | 'markdown' | 'csv' | 'excel' | 'csharp' | 'java' | 'python' | 'javascript' | 'playwright' | 'puppeteer' | 'cypress' | 'testcafe' | 'detox' | 'espresso' | 'xcuitest' | 'flutter';
+    /** 'gherkin' for .feature files, 'reqnroll' for ReqNRoll .feature files (SpecFlow successor), 'markdown' for .md, 'csharp' for MSTest/NUnit .cs, 'java' for JUnit/TestNG .java, 'python' for pytest .py, 'javascript' for Jest/Jasmine/WebdriverIO .js/.ts, 'playwright' for Playwright Test .spec.ts/.spec.js, 'puppeteer' for Puppeteer + Jest/Mocha .js/.ts, 'cypress' for Cypress .cy.js/.cy.ts, 'testcafe' for TestCafe .js/.ts, 'detox' for Detox (React Native) .js/.ts, 'espresso' for Android Espresso .java/.kt, 'xcuitest' for iOS XCUITest .swift, 'flutter' for Flutter/Dart _test.dart */
+    type: 'gherkin' | 'reqnroll' | 'markdown' | 'csv' | 'excel' | 'csharp' | 'java' | 'python' | 'javascript' | 'playwright' | 'puppeteer' | 'cypress' | 'testcafe' | 'detox' | 'espresso' | 'xcuitest' | 'flutter';
     /** Glob pattern(s) relative to config file location */
     include: string | string[];
     /** Glob pattern(s) to exclude */
@@ -326,13 +378,20 @@ export interface SyncConfig {
       /**
        * For 'local': absolute path to a GGUF model file.
        * For 'ollama': model tag, e.g. 'qwen2.5-coder:7b'.
-       * For 'openai'/'anthropic': model name, e.g. 'gpt-4o-mini'.
+       * For 'openai'/'anthropic': model name, e.g. 'gpt-4o-mini' or 'claude-sonnet-4-6'.
        */
       model?: string;
       /** Base URL for 'ollama' or an OpenAI-compatible endpoint. e.g. 'http://localhost:4000' */
       baseUrl?: string;
       /** API key for 'openai' or 'anthropic'. Supports $ENV_VAR references. */
       apiKey?: string;
+      /**
+       * When true, use AI to analyze test failure messages and generate a human-readable
+       * root cause summary. The summary is added as a comment on the Azure test result.
+       * Only applies when publishing test results. Requires a non-heuristic provider.
+       * Default: false.
+       */
+      analyzeFailures?: boolean;
     };
   };
 }
