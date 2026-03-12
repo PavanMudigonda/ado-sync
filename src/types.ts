@@ -46,8 +46,8 @@ export interface SuiteRoute {
 export interface TestPlanEntry {
   id: number;
   suiteId?: number;
-  /** 'flat' (default) or 'byFolder' to mirror folder structure as nested suites */
-  suiteMapping?: 'flat' | 'byFolder';
+  /** 'flat' (default), 'byFolder' to mirror folder hierarchy, or 'byFile' to give each spec file its own suite */
+  suiteMapping?: 'flat' | 'byFolder' | 'byFile';
   /** Override local.include for this plan */
   include?: string | string[];
   /** Override local.exclude for this plan */
@@ -264,8 +264,13 @@ export interface SyncConfig {
     id: number;
     /** Root suite to create new test cases under. Defaults to plan root suite. */
     suiteId?: number;
-    /** 'flat' (default) or 'byFolder' to mirror folder structure as nested suites */
-    suiteMapping?: 'flat' | 'byFolder';
+    /**
+     * 'flat' (default): all tests go to suiteId (or plan root).
+     * 'byFolder': mirrors the folder hierarchy as nested suites.
+     * 'byFile': each spec file gets its own suite (named after the file, without extension),
+     *           nested inside folder suites when subdirectories exist.
+     */
+    suiteMapping?: 'flat' | 'byFolder' | 'byFile';
     /**
      * Tag-condition-based primary suite routing.
      * Routes are evaluated in order; the first match wins.

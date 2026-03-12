@@ -823,7 +823,12 @@ export async function getOrCreateNamedSuite(
 }
 
 /**
- * Get or create a nested suite matching the folder path of the given file.
+ * Get or create a nested suite for a spec file, respecting suiteMapping mode:
+ *
+ *   byFolder — mirrors the directory path as nested suites (filename excluded).
+ *   byFile   — mirrors directory path AND creates one more child suite named after
+ *              the file (without its extension). Each spec file gets its own suite.
+ *
  * Uses suiteCache (Map<relPath, suiteId>) to avoid redundant API calls.
  */
 export async function getOrCreateSuiteForFile(
@@ -836,8 +841,15 @@ export async function getOrCreateSuiteForFile(
   const rootSuiteId = await resolveRootSuiteId(client, config);
 
   const relFile = path.relative(configDir, filePath);
-  const segments = relFile.split(path.sep).slice(0, -1);
-  const cleanSegments = segments.map((s) => s.replace(/^@/, '')).filter(Boolean);
+  const allSegments = relFile.split(path.sep);
+
+  // byFile: include the filename (without extension) as the deepest suite segment
+  const byFile = config.testPlan.suiteMapping === 'byFile';
+  const dirSegments = allSegments.slice(0, -1);
+  const fileName = path.basename(filePath, path.extname(filePath));
+
+  const rawSegments = byFile ? [...dirSegments, fileName] : dirSegments;
+  const cleanSegments = rawSegments.map((s) => s.replace(/^@/, '')).filter(Boolean);
 
   if (!cleanSegments.length) return rootSuiteId;
 
