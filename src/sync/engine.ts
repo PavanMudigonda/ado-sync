@@ -331,7 +331,7 @@ async function pushSingle(
   const titleField = config.sync?.titleField ?? 'System.Title';
   const conflictAction = config.sync?.conflictAction ?? 'overwrite';
   const disableLocal = config.sync?.disableLocalChanges ?? false;
-  const byFolder = config.testPlan.suiteMapping === 'byFolder';
+  const byFolder = config.testPlan.suiteMapping === 'byFolder' || config.testPlan.suiteMapping === 'byFile';
   const suiteCache = new Map<string, number>();
   const conditionSuiteCache = new Map<string, number>();
   const results: SyncResult[] = [];

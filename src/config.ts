@@ -199,6 +199,10 @@ const CONFIG_TEMPLATE_OBJECT = {
   testPlan: {
     id: 0,
     suiteId: 0,
+    // suiteMapping options:
+    //   'flat'     — all tests go to suiteId (default)
+    //   'byFolder' — mirror folder hierarchy as nested suites
+    //   'byFile'   — each spec file gets its own suite (named after the file)
     suiteMapping: 'flat',
     // suiteRouting: routes tests to different suites within this plan based on tags.
     // Routes are evaluated in order; the first match wins.
