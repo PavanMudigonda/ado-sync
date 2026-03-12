@@ -20,7 +20,12 @@ Config files can be JSON (`.json`) or YAML (`.yml` / `.yaml`). Run `ado-sync ini
   "testPlan": {
     "id": 1234,
     "suiteId": 5678,
-    "suiteMapping": "flat"
+    "suiteMapping": "flat",
+    "suiteRouting": [
+      { "tags": "@smoke", "suite": "Smoke" },
+      { "tags": "@regression", "suite": "Regression" },
+      { "suite": "General" }
+    ]
   },
 
   "local": {
@@ -78,6 +83,9 @@ Config files can be JSON (`.json`) or YAML (`.yml` / `.yaml`). Run `ado-sync ini
     "pull": {
       "enableCreatingNewLocalTestCases": false,
       "targetFolder": "specs/pulled"
+    },
+    "ai": {
+      "provider": "heuristic"
     }
   },
 
@@ -141,19 +149,28 @@ Azure DevOps project name.
 |-------|---------|-------------|
 | `id` | *(required)* | ID of the Azure DevOps Test Plan. |
 | `suiteId` | plan root | ID of the Test Suite within the plan. Defaults to the plan's root suite. |
-| `suiteMapping` | `"flat"` | `"flat"` — all TCs go into one suite. `"byFolder"` — folder structure mirrored as nested child suites. |
+| `suiteMapping` | `"flat"` | `"flat"` — all TCs go into one suite. `"byFolder"` — folder hierarchy mirrored as nested child suites. `"byFile"` — each spec file gets its own child suite named after the file. |
+| `suiteRouting` | *(none)* | Tag-condition-based primary suite routing. Routes are evaluated in order; first match wins. See [Multi-suite routing](advanced.md#multi-suite-routing). |
 
 ---
 
 ### `testPlans` (multi-plan)
 
-Use `testPlans` instead of `testPlan` to sync one repo against multiple Test Plans.
+Use `testPlans` instead of `testPlan` to sync one repo against multiple Test Plans in a single config.
 
 ```json
 {
   "testPlans": [
-    { "id": 1001, "suiteId": 2001, "include": "specs/smoke/**/*.feature" },
-    { "id": 1002, "suiteId": 2002, "include": "specs/regression/**/*.feature", "suiteMapping": "byFolder" }
+    {
+      "id": 1001,
+      "suiteId": 2001,
+      "include": "specs/smoke/**/*.feature",
+      "suiteRouting": [
+        { "tags": "@critical", "suite": "Critical" },
+        { "suite": "Smoke" }
+      ]
+    },
+    { "id": 1002, "suiteId": 2002, "include": "specs/regression/**/*.feature", "suiteMapping": "byFile" }
   ]
 }
 ```
@@ -162,9 +179,11 @@ Use `testPlans` instead of `testPlan` to sync one repo against multiple Test Pla
 |-------|-------------|
 | `id` | Test Plan ID |
 | `suiteId` | *(Optional)* Target suite ID |
-| `suiteMapping` | *(Optional)* `"flat"` or `"byFolder"` |
+| `suiteMapping` | *(Optional)* `"flat"`, `"byFolder"`, or `"byFile"` |
 | `include` | *(Optional)* Override `local.include` for this plan |
 | `exclude` | *(Optional)* Override `local.exclude` for this plan |
+| `suiteRouting` | *(Optional)* Per-plan tag-based primary suite routing (overrides base `testPlan.suiteRouting`) |
+| `suiteConditions` | *(Optional)* Per-plan additive suite conditions (overrides base `sync.suiteConditions`) |
 
 ---
 
@@ -205,7 +224,8 @@ Use `testPlans` instead of `testPlan` to sync one repo against multiple Test Pla
 | `format` | *(none)* | TC content formatting options — see [Format configuration](advanced.md#format-configuration). |
 | `attachments` | *(none)* | File attachment sync — see [Attachments](advanced.md#attachments). |
 | `pull` | *(none)* | Pull-specific options — see [Pull configuration](advanced.md#pull-configuration). |
-| `suiteConditions` | *(none)* | Per-tag suite routing rules. |
+| `suiteConditions` | *(none)* | Per-tag additive suite routing rules. |
+| `ai` | *(none)* | AI provider config for auto-summarization and failure analysis — see [AI auto-summary](advanced.md#ai-auto-summary-for-code-tests). |
 
 ---
 
@@ -241,6 +261,10 @@ testPlan:
   id: 1234
   suiteId: 5678
   suiteMapping: byFolder
+  suiteRouting:
+    - tags: "@smoke"
+      suite: Smoke
+    - suite: General
 
 local:
   type: gherkin
@@ -262,6 +286,8 @@ sync:
   format:
     prefixTitle: true
     useExpectedResult: false
+  ai:
+    provider: heuristic
 ```
 
 ---

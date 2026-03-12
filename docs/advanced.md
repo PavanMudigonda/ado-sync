@@ -267,7 +267,9 @@ Generated files use the format matching `local.type` (`.feature` for Gherkin, `.
 
 ## Suite hierarchy
 
-By default, all Test Cases go into a single flat suite (`suiteMapping: "flat"`). Setting `suiteMapping: "byFolder"` mirrors the local folder structure as nested child suites in Azure.
+By default, all Test Cases go into a single flat suite (`suiteMapping: "flat"`). Two additional modes mirror local structure as child suites in Azure.
+
+### `byFolder` — mirror folder structure
 
 ```json
 {
@@ -282,12 +284,88 @@ By default, all Test Cases go into a single flat suite (`suiteMapping: "flat"`).
 ```
 specs/
   login/
-    basic.feature    → suite "login" → TC "Successful login"
+    basic.feature    → suite "login"    → TC "Successful login"
   checkout/
     happy.feature    → suite "checkout" → TC "Add item and checkout"
 ```
 
+### `byFile` — one suite per spec file
+
+```json
+{
+  "testPlan": {
+    "id": 1234,
+    "suiteId": 5678,
+    "suiteMapping": "byFile"
+  }
+}
+```
+
+```
+specs/
+  login/
+    basic.feature    → suite "login / basic"    → TC "Successful login"
+  checkout/
+    happy.feature    → suite "checkout / happy" → TC "Add item and checkout"
+```
+
+With `byFile`, each spec file gets its own dedicated child suite named after the file (without extension). The folder hierarchy is still reflected as parent suites. All Test Cases from the same file land in the same leaf suite.
+
 Child suites are created automatically if they do not exist. The suite hierarchy is re-used across runs.
+
+---
+
+## Multi-suite routing
+
+`testPlan.suiteRouting` routes each Test Case to a specific child suite based on its tags. This is separate from `suiteMapping` — it assigns a **primary suite** per test based on tag expressions evaluated in order. The first matching route wins.
+
+```json
+{
+  "testPlan": {
+    "id": 1234,
+    "suiteId": 5678,
+    "suiteRouting": [
+      { "tags": "@smoke",      "suite": "Smoke" },
+      { "tags": "@regression", "suite": "Regression" },
+      { "suite": "General" }
+    ]
+  }
+}
+```
+
+A route with no `tags` is a catch-all — it matches every test that didn't match an earlier route.
+
+The `suite` value can be:
+- A **string** — the named child suite is auto-created under `suiteId` if it doesn't exist.
+- A **number** — the exact suite ID is used directly (must already exist).
+
+If no route matches and no catch-all is defined, the test falls back to `suiteId`.
+
+### Combining routing with multi-plan mode
+
+Each `testPlans` entry can define its own `suiteRouting`, overriding any base routing:
+
+```json
+{
+  "testPlans": [
+    {
+      "id": 1001,
+      "suiteId": 2001,
+      "include": "specs/smoke/**/*.feature",
+      "suiteRouting": [
+        { "tags": "@critical", "suite": "Critical" },
+        { "suite": "Smoke" }
+      ]
+    },
+    {
+      "id": 1002,
+      "suiteId": 2002,
+      "include": "specs/regression/**/*.feature",
+      "suiteMapping": "byFile"
+    }
+  ]
+}
+```
 
 ---
 
@@ -364,6 +442,26 @@ When pushing code-based test types (`java`, `csharp`, `python`, `javascript`, `p
 | Has both steps and a description | Nothing — left unchanged |
 
 Local source files are **never modified** by the AI summary feature.
+
+### AI failure analysis
+
+When `sync.ai.analyzeFailures: true` is set (and the provider is `ollama`, `openai`, or `anthropic`), ado-sync uses the AI provider to generate a root-cause summary for failing test results during `publish-test-results`. The summary is attached as a comment on the Azure Test Run result.
+
+```json
+{
+  "sync": {
+    "ai": {
+      "provider": "anthropic",
+      "apiKey": "$ANTHROPIC_API_KEY",
+      "analyzeFailures": true
+    }
+  }
+}
+```
+
+The AI receives the test name, error message, and stack trace (if available) and returns a `rootCause` and `suggestion`. These are appended to the Azure test result comment for easy triage.
+
+> `analyzeFailures` has no effect for the `heuristic` and `local` providers, which do not perform failure analysis.
 
 ---
 
