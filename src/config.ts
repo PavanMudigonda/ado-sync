@@ -144,7 +144,7 @@ function validateConfig(cfg: SyncConfig, filePath: string): void {
   if (!cfg.testPlan?.id && !cfg.testPlans?.length) {
     err('"testPlan.id" or "testPlans" array is required');
   }
-  const validLocalTypes = ['gherkin', 'markdown', 'csv', 'excel', 'csharp', 'java', 'javascript', 'python', 'playwright', 'puppeteer', 'cypress', 'testcafe', 'detox', 'espresso', 'xcuitest', 'flutter'];
+  const validLocalTypes = ['gherkin', 'reqnroll', 'markdown', 'csv', 'excel', 'csharp', 'java', 'javascript', 'python', 'playwright', 'puppeteer', 'cypress', 'testcafe', 'detox', 'espresso', 'xcuitest', 'flutter'];
   if (!cfg.local?.type) err(`"local.type" is required (${validLocalTypes.join(' | ')})`);
   if (!validLocalTypes.includes(cfg.local.type))
     err(`"local.type" must be one of: ${validLocalTypes.join(', ')} (got "${cfg.local.type}")`);
@@ -200,7 +200,19 @@ const CONFIG_TEMPLATE_OBJECT = {
     id: 0,
     suiteId: 0,
     suiteMapping: 'flat',
+    // suiteRouting: routes tests to different suites within this plan based on tags.
+    // Routes are evaluated in order; the first match wins.
+    // Remove or leave empty to use suiteId for all tests.
+    suiteRouting: [],
   },
+  // testPlans: multi-plan mode — sync to multiple test plans in one config.
+  // When present, overrides testPlan for each entry.
+  // Each entry supports id, suiteId, suiteMapping, include, exclude, suiteRouting, suiteConditions.
+  // Example:
+  // testPlans: [
+  //   { id: 100, suiteId: 200, include: 'specs/smoke/**/*.feature', suiteRouting: [{ tags: '@critical', suite: 'Critical' }, { suite: 'Smoke' }] },
+  //   { id: 101, suiteId: 300, include: 'specs/regression/**/*.feature' },
+  // ],
   local: {
     type: 'gherkin',
     include: 'specs/**/*.feature',
@@ -238,6 +250,16 @@ const CONFIG_TEMPLATE_OBJECT = {
       enabled: false,
       enableCreatingNewLocalTestCases: false,
     },
+    // AI summarization for code-based test types (playwright, cypress, jest, etc.)
+    ai: {
+      provider: 'heuristic',
+      // provider: 'anthropic', model: 'claude-sonnet-4-6', apiKey: '$ANTHROPIC_API_KEY'
+      // provider: 'openai',    model: 'gpt-4o-mini',       apiKey: '$OPENAI_API_KEY'
+      // provider: 'ollama',    model: 'qwen2.5-coder:7b',  baseUrl: 'http://localhost:11434'
+      analyzeFailures: false,
+    },
+    // Condition-based suite assignment (additive — tests are added to each matching suite)
+    suiteConditions: [],
   },
   customizations: {
     fieldDefaults: {

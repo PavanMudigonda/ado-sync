@@ -14,6 +14,7 @@ import {
   addTestCaseToRootSuite,
   addTestCaseToSuite,
   createTestCase,
+  getOrCreateNamedSuite,
   getOrCreateSuiteForFile,
   getTestCase,
   getTestCasesInSuite,
@@ -31,7 +32,7 @@ import { parseMarkdownFile } from '../parsers/markdown';
 import { parsePythonFile } from '../parsers/python';
 import { parseSwiftFile } from '../parsers/swift';
 import { parseTestCafeFile } from '../parsers/testcafe';
-import { AzureTestCase, ParsedStep, ParsedTest, SyncConfig, SyncResult, TestPlanEntry } from '../types';
+import { AzureTestCase, ParsedStep, ParsedTest, SuiteRoute, SyncConfig, SyncResult, TestPlanEntry } from '../types';
 import { CacheEntry, hashSteps, hashString, loadCache, saveCache, SyncCache } from './cache';
 import { writebackId } from './writeback';
 
@@ -93,6 +94,7 @@ async function parseLocalFiles(
       let tests: ParsedTest[];
       switch (config.local.type) {
         case 'gherkin':
+        case 'reqnroll':
           tests = parseGherkinFile(fp, tagPrefix, linkConfigs, attachmentsConfig);
           break;
         case 'csv':
@@ -166,14 +168,22 @@ export interface SyncOpts {
 /**
  * Build an effective config for a single plan entry in testPlans[] mode.
  * Overrides testPlan and local include/exclude without mutating the original.
+ * Also merges per-entry suiteConditions and suiteRouting.
  */
 function configForPlanEntry(base: SyncConfig, entry: TestPlanEntry): SyncConfig {
+  // Merge suiteConditions: entry-level overrides base sync.suiteConditions when present
+  const mergedSync = entry.suiteConditions !== undefined
+    ? { ...base.sync, suiteConditions: entry.suiteConditions }
+    : base.sync;
+
   return {
     ...base,
+    sync: mergedSync,
     testPlan: {
       id: entry.id,
       suiteId: entry.suiteId ?? base.testPlan.suiteId,
       suiteMapping: entry.suiteMapping ?? base.testPlan.suiteMapping,
+      suiteRouting: entry.suiteRouting ?? base.testPlan.suiteRouting,
     },
     local: {
       ...base.local,
@@ -181,6 +191,45 @@ function configForPlanEntry(base: SyncConfig, entry: TestPlanEntry): SyncConfig 
       exclude: entry.exclude ?? base.local.exclude,
     },
   };
+}
+
+/**
+ * Resolve the primary suite ID for a test case using suiteRouting rules.
+ * Routes are evaluated in order; the first matching tag expression wins.
+ * When a route's suite is a string, the suite is looked up or created under the plan.
+ * Returns undefined if no route matches (caller falls back to suiteId or root suite).
+ */
+async function resolveTargetSuiteFromRouting(
+  client: AzureClient,
+  config: SyncConfig,
+  test: ParsedTest,
+  suiteCache: Map<string, number>
+): Promise<number | undefined> {
+  const routes: SuiteRoute[] | undefined = config.testPlan.suiteRouting;
+  if (!routes?.length) return undefined;
+
+  for (const route of routes) {
+    const matches = !route.tags || matchesTags(test, route.tags);
+    if (!matches) continue;
+
+    // Numeric suite ID — use directly
+    if (typeof route.suite === 'number') return route.suite;
+
+    // Named suite — look up or create under the plan
+    const cacheKey = `route:${config.testPlan.id}:${route.suite}`;
+    if (suiteCache.has(cacheKey)) return suiteCache.get(cacheKey)!;
+
+    try {
+      const suiteId = await getOrCreateNamedSuite(client, config, route.suite as string);
+      suiteCache.set(cacheKey, suiteId);
+      return suiteId;
+    } catch {
+      // If suite creation fails, fall through to the next route
+      continue;
+    }
+  }
+
+  return undefined;
 }
 
 // ─── Push ─────────────────────────────────────────────────────────────────────
@@ -311,7 +360,7 @@ async function pushSingle(
           if (!opts.dryRun) {
             const suiteIdOverride = byFolder
               ? await getOrCreateSuiteForFile(client, config, test.filePath, configDir, suiteCache)
-              : undefined;
+              : await resolveTargetSuiteFromRouting(client, config, test, suiteCache);
             newId = await createTestCase(client, test, config, suiteIdOverride, configDir);
             createdIds.add(newId);
             if (!disableLocal) {
@@ -383,7 +432,7 @@ async function pushSingle(
           // changed in config, or if the TC was imported with an ID but never pushed before).
           const updateSuiteId = byFolder
             ? await getOrCreateSuiteForFile(client, config, test.filePath, configDir, suiteCache)
-            : config.testPlan.suiteId;
+            : await resolveTargetSuiteFromRouting(client, config, test, suiteCache) ?? config.testPlan.suiteId;
           if (updateSuiteId) {
             await addTestCaseToSuite(client, config, test.azureId, updateSuiteId);
           } else {
@@ -402,7 +451,7 @@ async function pushSingle(
         if (!opts.dryRun) {
           const suiteIdOverride = byFolder
             ? await getOrCreateSuiteForFile(client, config, test.filePath, configDir, suiteCache)
-            : undefined;
+            : await resolveTargetSuiteFromRouting(client, config, test, suiteCache);
           newId = await createTestCase(client, test, config, suiteIdOverride, configDir);
           createdIds.add(newId);
           if (!disableLocal) {
@@ -647,10 +696,10 @@ function applyRemoteToLocal(
   newTitle: string,
   newSteps: ParsedStep[],
   newDescription: string | undefined,
-  localType: 'gherkin' | 'markdown' | 'csv' | 'excel' | 'csharp' | 'java' | 'python' | 'javascript' | 'playwright' | 'puppeteer' | 'cypress' | 'testcafe' | 'detox' | 'espresso' | 'xcuitest' | 'flutter',
+  localType: 'gherkin' | 'reqnroll' | 'markdown' | 'csv' | 'excel' | 'csharp' | 'java' | 'python' | 'javascript' | 'playwright' | 'puppeteer' | 'cypress' | 'testcafe' | 'detox' | 'espresso' | 'xcuitest' | 'flutter',
   tagPrefix: string
 ): void {
-  if (localType === 'gherkin') {
+  if (localType === 'gherkin' || localType === 'reqnroll') {
     applyRemoteToGherkin(test, newTitle, newSteps);
   } else if (localType === 'markdown') {
     applyRemoteToMarkdown(test, newTitle, newSteps, newDescription, tagPrefix);
@@ -822,13 +871,13 @@ function createLocalFileFromRemote(
 ): string {
   const localType = config.local.type;
   const safeTitle = tc.title.replace(/[<>:"/\\|?*]/g, '_').replace(/\s+/g, '_');
-  const ext = localType === 'gherkin' ? '.feature' : '.md';
+  const ext = (localType === 'gherkin' || localType === 'reqnroll') ? '.feature' : '.md';
   const baseDir = path.resolve(configDir, config.sync?.pull?.targetFolder ?? '.');
   if (write) fs.mkdirSync(baseDir, { recursive: true });
   const filePath = path.join(baseDir, `${safeTitle}${ext}`);
 
   if (write) {
-    if (localType === 'gherkin') {
+    if (localType === 'gherkin' || localType === 'reqnroll') {
       const lines: string[] = [];
       lines.push(`@${tagPrefix}:${tc.id}`);
       for (const tag of tc.tags) {
