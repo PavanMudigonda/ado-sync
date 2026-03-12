@@ -810,6 +810,19 @@ async function getOrCreateChildSuite(
 }
 
 /**
+ * Get or create a named static suite directly under the plan's root suite.
+ * Used by suiteRouting to resolve named route targets.
+ */
+export async function getOrCreateNamedSuite(
+  client: AzureClient,
+  config: SyncConfig,
+  suiteName: string
+): Promise<number> {
+  const rootSuiteId = await resolveRootSuiteId(client, config);
+  return getOrCreateChildSuite(client, config, rootSuiteId, suiteName);
+}
+
+/**
  * Get or create a nested suite matching the folder path of the given file.
  * Uses suiteCache (Map<relPath, suiteId>) to avoid redundant API calls.
  */

@@ -583,11 +583,12 @@ export function writebackJava(test: ParsedTest, id: number, tagPrefix: string): 
 export async function writebackId(
   test: ParsedTest,
   id: number,
-  localType: 'gherkin' | 'markdown' | 'csv' | 'excel' | 'csharp' | 'java' | 'python' | 'javascript' | 'playwright' | 'puppeteer' | 'cypress' | 'testcafe' | 'detox' | 'espresso' | 'xcuitest' | 'flutter',
+  localType: 'gherkin' | 'reqnroll' | 'markdown' | 'csv' | 'excel' | 'csharp' | 'java' | 'python' | 'javascript' | 'playwright' | 'puppeteer' | 'cypress' | 'testcafe' | 'detox' | 'espresso' | 'xcuitest' | 'flutter',
   tagPrefix: string
 ): Promise<void> {
   switch (localType) {
     case 'gherkin':
+    case 'reqnroll':
       writebackGherkin(test, id, tagPrefix);
       break;
     case 'markdown':

@@ -56,7 +56,7 @@ export interface AiSummaryOpts {
 }
 
 type LocalType =
-  | 'gherkin' | 'markdown' | 'csv' | 'excel'
+  | 'gherkin' | 'reqnroll' | 'markdown' | 'csv' | 'excel'
   | 'csharp' | 'java' | 'python' | 'javascript' | 'playwright'
   | 'puppeteer' | 'cypress' | 'testcafe'
   | 'detox' | 'espresso' | 'xcuitest' | 'flutter';
@@ -861,6 +861,118 @@ function resolveEnvVar(value: string): string {
   return value;
 }
 
+// ─── Failure analysis ─────────────────────────────────────────────────────────
+
+const FAILURE_ANALYSIS_PROMPT = `You are a test failure analyst. Given the test name and error details below, provide a concise root-cause analysis and a suggested fix.
+
+Rules:
+- Root cause: 1-2 sentences identifying what likely went wrong (assertion failure, timeout, environment issue, etc.)
+- Suggestion: 1-2 sentences on how to investigate or fix the issue.
+- Output ONLY in this exact format — no preamble or explanation.
+
+Expected output format:
+Root cause: <root cause>
+Suggestion: <suggested fix>
+
+Test name: {TEST_NAME}
+Error message: {ERROR_MESSAGE}
+Stack trace (if available):
+{STACK_TRACE}`;
+
+function buildFailurePrompt(testName: string, errorMessage: string, stackTrace?: string): string {
+  return FAILURE_ANALYSIS_PROMPT
+    .replace('{TEST_NAME}', testName)
+    .replace('{ERROR_MESSAGE}', errorMessage.slice(0, 2000))
+    .replace('{STACK_TRACE}', (stackTrace ?? '(not available)').slice(0, 2000));
+}
+
+function parseFailureAnalysis(raw: string): { rootCause: string; suggestion: string } {
+  const lines = raw.trim().split('\n').map((l) => l.trim()).filter(Boolean);
+  let rootCause = '';
+  let suggestion = '';
+  for (const line of lines) {
+    const rcM = line.match(/^Root cause:\s*(.+)$/i);
+    if (rcM) { rootCause = rcM[1].trim(); continue; }
+    const sgM = line.match(/^Suggestion:\s*(.+)$/i);
+    if (sgM) { suggestion = sgM[1].trim(); continue; }
+  }
+  return { rootCause, suggestion };
+}
+
+/**
+ * Use AI to analyze a test failure and return a structured root-cause summary.
+ * The result can be added as a comment on the Azure test result.
+ */
+export async function analyzeFailure(
+  testName: string,
+  errorMessage: string,
+  stackTrace: string | undefined,
+  opts: AiSummaryOpts
+): Promise<{ rootCause: string; suggestion: string } | null> {
+  if (!errorMessage || opts.provider === 'heuristic' || opts.provider === 'local') {
+    return null; // heuristic/local providers aren't suited for failure analysis
+  }
+
+  const prompt = buildFailurePrompt(testName, errorMessage, stackTrace);
+
+  try {
+    let raw = '';
+    switch (opts.provider) {
+      case 'ollama': {
+        const res = await fetchWithRetry(
+          `${opts.baseUrl ?? 'http://localhost:11434'}/api/generate`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: opts.model ?? 'qwen2.5-coder:7b', prompt, stream: false }),
+            signal: AbortSignal.timeout(30_000),
+          },
+          'ollama'
+        );
+        if (!res.ok) throw new Error(`Ollama ${res.status}`);
+        raw = ((await res.json()) as any).response ?? '';
+        break;
+      }
+      case 'openai': {
+        const res = await fetchWithRetry(
+          `${opts.baseUrl ?? 'https://api.openai.com/v1'}/chat/completions`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${resolveEnvVar(opts.apiKey ?? '')}` },
+            body: JSON.stringify({ model: opts.model ?? 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: 256 }),
+            signal: AbortSignal.timeout(30_000),
+          },
+          'openai'
+        );
+        if (!res.ok) throw new Error(`openai ${res.status}`);
+        raw = ((await res.json()) as any).choices?.[0]?.message?.content ?? '';
+        break;
+      }
+      case 'anthropic': {
+        const res = await fetchWithRetry(
+          `${(opts.baseUrl ?? 'https://api.anthropic.com/v1').replace(/\/$/, '')}/messages`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-api-key': resolveEnvVar(opts.apiKey ?? ''), 'anthropic-version': '2023-06-01' },
+            body: JSON.stringify({ model: opts.model ?? 'claude-haiku-4-5-20251001', max_tokens: 256, messages: [{ role: 'user', content: prompt }] }),
+            signal: AbortSignal.timeout(30_000),
+          },
+          'anthropic'
+        );
+        if (!res.ok) throw new Error(`anthropic ${res.status}`);
+        raw = ((await res.json()) as any).content?.[0]?.text ?? '';
+        break;
+      }
+      default:
+        return null;
+    }
+    if (!raw) return null;
+    return parseFailureAnalysis(raw);
+  } catch {
+    return null;
+  }
+}
+
 // ─── Public entry point ───────────────────────────────────────────────────────
 
 /**
@@ -916,7 +1028,7 @@ export async function summarizeTest(
       case 'anthropic':
         return await anthropicSummary(
           body, fallbackTitle,
-          opts.model ?? 'claude-haiku-4-5-20251001',
+          opts.model ?? 'claude-haiku-4-5-20251001', // upgrade to claude-sonnet-4-6 for better quality
           resolveEnvVar(opts.apiKey ?? ''),
           opts.baseUrl ?? 'https://api.anthropic.com/v1'
         );
