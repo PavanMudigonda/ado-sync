@@ -142,7 +142,7 @@ export interface FormatConfig {
   syncDataTableAsText?: boolean;
   /** When true, background steps get a "Background:" prefix. Default: true. */
   prefixBackgroundSteps?: boolean;
-  /** When true, TC title gets "Scenario:" or "Scenario Outline:" prefix. Default: true. */
+  /** When true, TC title gets "Scenario:" or "Scenario Outline:" prefix. Default: false. */
   prefixTitle?: boolean;
   /** Control parameter list step: 'whenUnusedParameters' | 'always' | 'never'. Default: 'whenUnusedParameters'. */
   showParameterListStep?: 'whenUnusedParameters' | 'always' | 'never';
