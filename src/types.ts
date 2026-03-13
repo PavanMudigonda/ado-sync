@@ -391,6 +391,13 @@ export interface SyncConfig {
       /** API key for 'openai' or 'anthropic'. Supports $ENV_VAR references. */
       apiKey?: string;
       /**
+       * Path to a markdown file containing additional domain context or instructions
+       * for the AI (e.g. glossary, naming conventions, step style guidelines).
+       * The file content is injected into the prompt before the test code.
+       * Relative paths are resolved from the config file directory.
+       */
+      contextFile?: string;
+      /**
        * When true, use AI to analyze test failure messages and generate a human-readable
        * root cause summary. The summary is added as a comment on the Azure test result.
        * Only applies when publishing test results. Requires a non-heuristic provider.
