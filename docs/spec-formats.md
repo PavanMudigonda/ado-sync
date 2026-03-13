@@ -2,6 +2,37 @@
 
 ---
 
+## Feature support matrix
+
+| `local.type` | Push | Pull | AI summary | Outline expansion | Attachments | Path auto-tags |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| `gherkin` | ✓ | ✓ | — | ✓ | ✓ | ✓ |
+| `reqnroll` | ✓ | ✓ | — | ✓ | ✓ | ✓ |
+| `markdown` | ✓ | ✓ | — | — | ✓ | ✓ |
+| `csv` | ✓ | — | — | — | — | — |
+| `excel` | ✓ | — | — | — | — | — |
+| `csharp` | ✓ | — | ✓ | — | — | ✓ |
+| `java` | ✓ | — | ✓ | — | — | ✓ |
+| `python` | ✓ | — | ✓ | — | — | ✓ |
+| `javascript` | ✓ | — | ✓ | — | — | ✓ |
+| `playwright` | ✓ | — | ✓ | — | — | ✓ |
+| `puppeteer` | ✓ | — | ✓ | — | — | ✓ |
+| `cypress` | ✓ | — | ✓ | — | — | ✓ |
+| `testcafe` | ✓ | — | ✓ | — | — | ✓ |
+| `detox` | ✓ | — | ✓ | — | — | ✓ |
+| `espresso` | ✓ | — | ✓ | — | — | ✓ |
+| `xcuitest` | ✓ | — | ✓ | — | — | ✓ |
+| `flutter` | ✓ | — | ✓ | — | — | ✓ |
+
+**Column notes:**
+- **Pull** — `ado-sync pull` can create/update local files from Azure Test Cases.
+- **AI summary** — `sync.ai` auto-generates title, description and steps from the test function body. Requires a non-`heuristic` provider for best results; `heuristic` regex matching works for all code-based types.
+- **Outline expansion** — Scenario Outline / `Examples` tables create a single parametrized TC (not one TC per row).
+- **Attachments** — `sync.attachments` file-attachment sync via `@attachment:` tags.
+- **Path auto-tags** — directories starting with `@` (e.g. `specs/@smoke/`) are automatically applied as tags.
+
+---
+
 ## Gherkin `.feature`
 
 Set `local.type: "gherkin"`. Standard Gherkin syntax is supported:
