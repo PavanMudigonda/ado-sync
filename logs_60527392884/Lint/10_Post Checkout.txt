@@ -1,0 +1,32 @@
+﻿2026-03-13T17:30:37.2467020Z Post job cleanup.
+2026-03-13T17:30:37.3310510Z [command]/usr/bin/git version
+2026-03-13T17:30:37.3347765Z git version 2.53.0
+2026-03-13T17:30:37.3389971Z Temporarily overriding HOME='/home/runner/work/_temp/c21ef402-db00-430f-8ecc-59d4196e6fad' before making global git config changes
+2026-03-13T17:30:37.3391514Z Adding repository directory to the temporary git global config as a safe directory
+2026-03-13T17:30:37.3395926Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/ado-sync/ado-sync
+2026-03-13T17:30:37.3429284Z Removing SSH command configuration
+2026-03-13T17:30:37.3436308Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-03-13T17:30:37.3471533Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-03-13T17:30:37.3761043Z Removing HTTP extra header
+2026-03-13T17:30:37.3767408Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-03-13T17:30:37.3804162Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-03-13T17:30:37.4040475Z Removing includeIf entries pointing to credentials config files
+2026-03-13T17:30:37.4061768Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-03-13T17:30:37.4079282Z includeif.gitdir:/home/runner/work/ado-sync/ado-sync/.git.path
+2026-03-13T17:30:37.4080404Z includeif.gitdir:/home/runner/work/ado-sync/ado-sync/.git/worktrees/*.path
+2026-03-13T17:30:37.4081268Z includeif.gitdir:/github/workspace/.git.path
+2026-03-13T17:30:37.4081992Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-03-13T17:30:37.4092633Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/ado-sync/ado-sync/.git.path
+2026-03-13T17:30:37.4117037Z /home/runner/work/_temp/git-credentials-47c225af-1f52-401e-804e-af7bf02aed22.config
+2026-03-13T17:30:37.4130742Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/ado-sync/ado-sync/.git.path /home/runner/work/_temp/git-credentials-47c225af-1f52-401e-804e-af7bf02aed22.config
+2026-03-13T17:30:37.4168579Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/ado-sync/ado-sync/.git/worktrees/*.path
+2026-03-13T17:30:37.4194942Z /home/runner/work/_temp/git-credentials-47c225af-1f52-401e-804e-af7bf02aed22.config
+2026-03-13T17:30:37.4206379Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/ado-sync/ado-sync/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-47c225af-1f52-401e-804e-af7bf02aed22.config
+2026-03-13T17:30:37.4240413Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-03-13T17:30:37.4263894Z /github/runner_temp/git-credentials-47c225af-1f52-401e-804e-af7bf02aed22.config
+2026-03-13T17:30:37.4274626Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-47c225af-1f52-401e-804e-af7bf02aed22.config
+2026-03-13T17:30:37.4308660Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-03-13T17:30:37.4333299Z /github/runner_temp/git-credentials-47c225af-1f52-401e-804e-af7bf02aed22.config
+2026-03-13T17:30:37.4343554Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-47c225af-1f52-401e-804e-af7bf02aed22.config
+2026-03-13T17:30:37.4381127Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-03-13T17:30:37.4616294Z Removing credentials config '/home/runner/work/_temp/git-credentials-47c225af-1f52-401e-804e-af7bf02aed22.config'
