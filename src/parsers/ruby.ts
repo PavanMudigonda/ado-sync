@@ -31,9 +31,6 @@ const IT_RE = /^\s*it\s+(['"])(.*?)\1/;
 // Matches: describe/context/RSpec.describe blocks
 const DESCRIBE_RE = /^\s*(?:RSpec\.)?(?:describe|context|feature)\s+(['"])(.*?)\1/;
 
-// Matches end of a block
-const END_RE = /^\s*end\s*$/;
-
 // ─── Enclosing context building ───────────────────────────────────────────────
 
 interface IndentBlock {

@@ -1,0 +1,208 @@
+﻿2026-03-13T17:30:16.2133163Z Current runner version: '2.332.0'
+2026-03-13T17:30:16.2162010Z ##[group]Runner Image Provisioner
+2026-03-13T17:30:16.2162951Z Hosted Compute Agent
+2026-03-13T17:30:16.2163569Z Version: 20260213.493
+2026-03-13T17:30:16.2164234Z Commit: 5c115507f6dd24b8de37d8bbe0bb4509d0cc0fa3
+2026-03-13T17:30:16.2165163Z Build Date: 2026-02-13T00:28:41Z
+2026-03-13T17:30:16.2165900Z Worker ID: {1f6cafd3-0bab-4266-8963-0684b17326b2}
+2026-03-13T17:30:16.2166610Z Azure Region: westus
+2026-03-13T17:30:16.2167126Z ##[endgroup]
+2026-03-13T17:30:16.2169241Z ##[group]Operating System
+2026-03-13T17:30:16.2169868Z Ubuntu
+2026-03-13T17:30:16.2170376Z 24.04.3
+2026-03-13T17:30:16.2170827Z LTS
+2026-03-13T17:30:16.2171455Z ##[endgroup]
+2026-03-13T17:30:16.2171943Z ##[group]Runner Image
+2026-03-13T17:30:16.2172505Z Image: ubuntu-24.04
+2026-03-13T17:30:16.2173115Z Version: 20260309.50.1
+2026-03-13T17:30:16.2174354Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260309.50/images/ubuntu/Ubuntu2404-Readme.md
+2026-03-13T17:30:16.2176348Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260309.50
+2026-03-13T17:30:16.2177285Z ##[endgroup]
+2026-03-13T17:30:16.2178489Z ##[group]GITHUB_TOKEN Permissions
+2026-03-13T17:30:16.2180922Z Contents: read
+2026-03-13T17:30:16.2181482Z Metadata: read
+2026-03-13T17:30:16.2182086Z Packages: read
+2026-03-13T17:30:16.2182558Z ##[endgroup]
+2026-03-13T17:30:16.2185108Z Secret source: Actions
+2026-03-13T17:30:16.2185916Z Prepare workflow directory
+2026-03-13T17:30:16.2513688Z Prepare all required actions
+2026-03-13T17:30:16.2557514Z Getting action download info
+2026-03-13T17:30:16.7187949Z Download action repository 'actions/checkout@v6.0.2' (SHA:de0fac2e4500dabe0009e67214ff5f5447ce83dd)
+2026-03-13T17:30:16.8418780Z Download action repository 'actions/setup-node@v6.3.0' (SHA:53b83947a5a98c8d113130e565377fae1a50d02f)
+2026-03-13T17:30:17.8541875Z Complete job name: Build & type-check (22.x)
+2026-03-13T17:30:17.9207847Z ##[group]Run actions/checkout@v6.0.2
+2026-03-13T17:30:17.9208789Z with:
+2026-03-13T17:30:17.9209248Z   repository: PavanMudigonda/ado-sync
+2026-03-13T17:30:17.9209971Z   token: ***
+2026-03-13T17:30:17.9210382Z   ssh-strict: true
+2026-03-13T17:30:17.9210806Z   ssh-user: git
+2026-03-13T17:30:17.9211225Z   persist-credentials: true
+2026-03-13T17:30:17.9211701Z   clean: true
+2026-03-13T17:30:17.9212131Z   sparse-checkout-cone-mode: true
+2026-03-13T17:30:17.9212639Z   fetch-depth: 1
+2026-03-13T17:30:17.9213051Z   fetch-tags: false
+2026-03-13T17:30:17.9213480Z   show-progress: true
+2026-03-13T17:30:17.9213912Z   lfs: false
+2026-03-13T17:30:17.9214323Z   submodules: false
+2026-03-13T17:30:17.9214993Z   set-safe-directory: true
+2026-03-13T17:30:17.9215756Z ##[endgroup]
+2026-03-13T17:30:18.0180297Z Syncing repository: PavanMudigonda/ado-sync
+2026-03-13T17:30:18.0182153Z ##[group]Getting Git version info
+2026-03-13T17:30:18.0182996Z Working directory is '/home/runner/work/ado-sync/ado-sync'
+2026-03-13T17:30:18.0184245Z [command]/usr/bin/git version
+2026-03-13T17:30:18.0236944Z git version 2.53.0
+2026-03-13T17:30:18.0260240Z ##[endgroup]
+2026-03-13T17:30:18.0275944Z Temporarily overriding HOME='/home/runner/work/_temp/15329362-9e68-409e-b74c-803cf86c7186' before making global git config changes
+2026-03-13T17:30:18.0278652Z Adding repository directory to the temporary git global config as a safe directory
+2026-03-13T17:30:18.0281351Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/ado-sync/ado-sync
+2026-03-13T17:30:18.0322535Z Deleting the contents of '/home/runner/work/ado-sync/ado-sync'
+2026-03-13T17:30:18.0327195Z ##[group]Initializing the repository
+2026-03-13T17:30:18.0332251Z [command]/usr/bin/git init /home/runner/work/ado-sync/ado-sync
+2026-03-13T17:30:18.0433511Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-03-13T17:30:18.0435209Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-03-13T17:30:18.0436844Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-03-13T17:30:18.0438173Z hint: call:
+2026-03-13T17:30:18.0439113Z hint:
+2026-03-13T17:30:18.0440116Z hint: 	git config --global init.defaultBranch <name>
+2026-03-13T17:30:18.0441321Z hint:
+2026-03-13T17:30:18.0442471Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-03-13T17:30:18.0444322Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-03-13T17:30:18.0445923Z hint:
+2026-03-13T17:30:18.0446650Z hint: 	git branch -m <name>
+2026-03-13T17:30:18.0447556Z hint:
+2026-03-13T17:30:18.0448826Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-03-13T17:30:18.0450928Z Initialized empty Git repository in /home/runner/work/ado-sync/ado-sync/.git/
+2026-03-13T17:30:18.0453777Z [command]/usr/bin/git remote add origin https://github.com/PavanMudigonda/ado-sync
+2026-03-13T17:30:18.0486144Z ##[endgroup]
+2026-03-13T17:30:18.0487508Z ##[group]Disabling automatic garbage collection
+2026-03-13T17:30:18.0490161Z [command]/usr/bin/git config --local gc.auto 0
+2026-03-13T17:30:18.0520100Z ##[endgroup]
+2026-03-13T17:30:18.0521523Z ##[group]Setting up auth
+2026-03-13T17:30:18.0522596Z Removing SSH command configuration
+2026-03-13T17:30:18.0528369Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-03-13T17:30:18.0562583Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-03-13T17:30:18.0901429Z Removing HTTP extra header
+2026-03-13T17:30:18.0907677Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-03-13T17:30:18.0942656Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-03-13T17:30:18.1169521Z Removing includeIf entries pointing to credentials config files
+2026-03-13T17:30:18.1176421Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-03-13T17:30:18.1210816Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-03-13T17:30:18.1449188Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-4cf2d4d7-496a-45cb-934b-18f2ff009cc6.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-03-13T17:30:18.1487205Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/ado-sync/ado-sync/.git.path /home/runner/work/_temp/git-credentials-4cf2d4d7-496a-45cb-934b-18f2ff009cc6.config
+2026-03-13T17:30:18.1521359Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/ado-sync/ado-sync/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-4cf2d4d7-496a-45cb-934b-18f2ff009cc6.config
+2026-03-13T17:30:18.1553330Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-4cf2d4d7-496a-45cb-934b-18f2ff009cc6.config
+2026-03-13T17:30:18.1586438Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-4cf2d4d7-496a-45cb-934b-18f2ff009cc6.config
+2026-03-13T17:30:18.1614937Z ##[endgroup]
+2026-03-13T17:30:18.1616349Z ##[group]Fetching the repository
+2026-03-13T17:30:18.1624490Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +1e4dad2bc5d50c2e7dafff3d86f029d7fa53eaf6:refs/remotes/origin/main
+2026-03-13T17:30:18.6518880Z From https://github.com/PavanMudigonda/ado-sync
+2026-03-13T17:30:18.6520253Z  * [new ref]         1e4dad2bc5d50c2e7dafff3d86f029d7fa53eaf6 -> origin/main
+2026-03-13T17:30:18.6559750Z [command]/usr/bin/git branch --list --remote origin/main
+2026-03-13T17:30:18.6584459Z   origin/main
+2026-03-13T17:30:18.6592581Z [command]/usr/bin/git rev-parse refs/remotes/origin/main
+2026-03-13T17:30:18.6619704Z 1e4dad2bc5d50c2e7dafff3d86f029d7fa53eaf6
+2026-03-13T17:30:18.6625428Z ##[endgroup]
+2026-03-13T17:30:18.6626716Z ##[group]Determining the checkout info
+2026-03-13T17:30:18.6628151Z ##[endgroup]
+2026-03-13T17:30:18.6631609Z [command]/usr/bin/git sparse-checkout disable
+2026-03-13T17:30:18.6671455Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-03-13T17:30:18.6699945Z ##[group]Checking out the ref
+2026-03-13T17:30:18.6704211Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+2026-03-13T17:30:18.6826569Z Switched to a new branch 'main'
+2026-03-13T17:30:18.6829714Z branch 'main' set up to track 'origin/main'.
+2026-03-13T17:30:18.6835764Z ##[endgroup]
+2026-03-13T17:30:18.6874298Z [command]/usr/bin/git log -1 --format=%H
+2026-03-13T17:30:18.6899697Z 1e4dad2bc5d50c2e7dafff3d86f029d7fa53eaf6
+2026-03-13T17:30:18.7164631Z ##[group]Run actions/setup-node@v6.3.0
+2026-03-13T17:30:18.7165522Z with:
+2026-03-13T17:30:18.7165950Z   node-version: 22.x
+2026-03-13T17:30:18.7166384Z   cache: npm
+2026-03-13T17:30:18.7166795Z   check-latest: false
+2026-03-13T17:30:18.7167395Z   token: ***
+2026-03-13T17:30:18.7167817Z   package-manager-cache: true
+2026-03-13T17:30:18.7168317Z ##[endgroup]
+2026-03-13T17:30:18.8745564Z Found in cache @ /opt/hostedtoolcache/node/22.22.1/x64
+2026-03-13T17:30:18.8749522Z ##[group]Environment details
+2026-03-13T17:30:19.2177677Z node: v22.22.1
+2026-03-13T17:30:19.2178514Z npm: 10.9.4
+2026-03-13T17:30:19.2179100Z yarn: 1.22.22
+2026-03-13T17:30:19.2180326Z ##[endgroup]
+2026-03-13T17:30:19.2197821Z [command]/opt/hostedtoolcache/node/22.22.1/x64/bin/npm config get cache
+2026-03-13T17:30:19.3499859Z /home/runner/.npm
+2026-03-13T17:30:19.6467063Z Cache hit for: node-cache-Linux-x64-npm-3b3d19169c11ce14fad6c0eb0a605c47d3b7c604580911a78556de671214fd69
+2026-03-13T17:30:20.9231445Z Received 12582912 of 402283230 (3.1%), 12.0 MBs/sec
+2026-03-13T17:30:21.9233409Z Received 134217728 of 402283230 (33.4%), 64.0 MBs/sec
+2026-03-13T17:30:22.9797090Z Received 268435456 of 402283230 (66.7%), 83.8 MBs/sec
+2026-03-13T17:30:23.8574389Z Received 402283230 of 402283230 (100.0%), 97.5 MBs/sec
+2026-03-13T17:30:23.8577355Z Cache Size: ~384 MB (402283230 B)
+2026-03-13T17:30:23.8651042Z [command]/usr/bin/tar -xf /home/runner/work/_temp/1455da7b-7572-497e-9124-c37a6ca19aab/cache.tzst -P -C /home/runner/work/ado-sync/ado-sync --use-compress-program unzstd
+2026-03-13T17:30:24.4633095Z Cache restored successfully
+2026-03-13T17:30:24.5427421Z Cache restored from key: node-cache-Linux-x64-npm-3b3d19169c11ce14fad6c0eb0a605c47d3b7c604580911a78556de671214fd69
+2026-03-13T17:30:24.5630085Z ##[group]Run npm ci
+2026-03-13T17:30:24.5630394Z [36;1mnpm ci[0m
+2026-03-13T17:30:24.5693773Z shell: /usr/bin/bash -e {0}
+2026-03-13T17:30:24.5694047Z ##[endgroup]
+2026-03-13T17:30:34.5031062Z 
+2026-03-13T17:30:34.5040531Z added 346 packages, and audited 347 packages in 10s
+2026-03-13T17:30:34.5041070Z 
+2026-03-13T17:30:34.5041401Z 107 packages are looking for funding
+2026-03-13T17:30:34.5041938Z   run `npm fund` for details
+2026-03-13T17:30:34.5067248Z 
+2026-03-13T17:30:34.5067985Z 2 high severity vulnerabilities
+2026-03-13T17:30:34.5068361Z 
+2026-03-13T17:30:34.5068568Z To address all issues, run:
+2026-03-13T17:30:34.5068971Z   npm audit fix
+2026-03-13T17:30:34.5069180Z 
+2026-03-13T17:30:34.5069391Z Run `npm audit` for details.
+2026-03-13T17:30:34.6134576Z ##[group]Run npx tsc --noEmit
+2026-03-13T17:30:34.6135200Z [36;1mnpx tsc --noEmit[0m
+2026-03-13T17:30:34.6248297Z shell: /usr/bin/bash -e {0}
+2026-03-13T17:30:34.6248632Z ##[endgroup]
+2026-03-13T17:30:38.5035576Z ##[group]Run npm run build
+2026-03-13T17:30:38.5035951Z [36;1mnpm run build[0m
+2026-03-13T17:30:38.5084325Z shell: /usr/bin/bash -e {0}
+2026-03-13T17:30:38.5084580Z ##[endgroup]
+2026-03-13T17:30:38.6051414Z 
+2026-03-13T17:30:38.6052068Z > ado-sync@0.1.41 build
+2026-03-13T17:30:38.6052673Z > tsc
+2026-03-13T17:30:38.6052866Z 
+2026-03-13T17:30:42.4794327Z ##[group]Run node dist/cli.js --version
+2026-03-13T17:30:42.4795216Z [36;1mnode dist/cli.js --version[0m
+2026-03-13T17:30:42.4843347Z shell: /usr/bin/bash -e {0}
+2026-03-13T17:30:42.4843639Z ##[endgroup]
+2026-03-13T17:30:42.8182374Z 0.1.41
+2026-03-13T17:30:42.8336565Z Post job cleanup.
+2026-03-13T17:30:42.9682988Z Cache hit occurred on the primary key node-cache-Linux-x64-npm-3b3d19169c11ce14fad6c0eb0a605c47d3b7c604580911a78556de671214fd69, not saving cache.
+2026-03-13T17:30:42.9837859Z Post job cleanup.
+2026-03-13T17:30:43.0676725Z [command]/usr/bin/git version
+2026-03-13T17:30:43.0718808Z git version 2.53.0
+2026-03-13T17:30:43.0760304Z Temporarily overriding HOME='/home/runner/work/_temp/881ba284-b524-4215-b96b-ef5cd6fc3933' before making global git config changes
+2026-03-13T17:30:43.0761790Z Adding repository directory to the temporary git global config as a safe directory
+2026-03-13T17:30:43.0766334Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/ado-sync/ado-sync
+2026-03-13T17:30:43.0799156Z Removing SSH command configuration
+2026-03-13T17:30:43.0805359Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-03-13T17:30:43.0842205Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-03-13T17:30:43.1088952Z Removing HTTP extra header
+2026-03-13T17:30:43.1094209Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-03-13T17:30:43.1131429Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-03-13T17:30:43.1367105Z Removing includeIf entries pointing to credentials config files
+2026-03-13T17:30:43.1374161Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-03-13T17:30:43.1400162Z includeif.gitdir:/home/runner/work/ado-sync/ado-sync/.git.path
+2026-03-13T17:30:43.1401245Z includeif.gitdir:/home/runner/work/ado-sync/ado-sync/.git/worktrees/*.path
+2026-03-13T17:30:43.1402112Z includeif.gitdir:/github/workspace/.git.path
+2026-03-13T17:30:43.1402935Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-03-13T17:30:43.1410165Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/ado-sync/ado-sync/.git.path
+2026-03-13T17:30:43.1434267Z /home/runner/work/_temp/git-credentials-4cf2d4d7-496a-45cb-934b-18f2ff009cc6.config
+2026-03-13T17:30:43.1445238Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/ado-sync/ado-sync/.git.path /home/runner/work/_temp/git-credentials-4cf2d4d7-496a-45cb-934b-18f2ff009cc6.config
+2026-03-13T17:30:43.1481328Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/ado-sync/ado-sync/.git/worktrees/*.path
+2026-03-13T17:30:43.1505088Z /home/runner/work/_temp/git-credentials-4cf2d4d7-496a-45cb-934b-18f2ff009cc6.config
+2026-03-13T17:30:43.1514548Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/ado-sync/ado-sync/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-4cf2d4d7-496a-45cb-934b-18f2ff009cc6.config
+2026-03-13T17:30:43.1545840Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-03-13T17:30:43.1569040Z /github/runner_temp/git-credentials-4cf2d4d7-496a-45cb-934b-18f2ff009cc6.config
+2026-03-13T17:30:43.1578817Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-4cf2d4d7-496a-45cb-934b-18f2ff009cc6.config
+2026-03-13T17:30:43.1611543Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-03-13T17:30:43.1634315Z /github/runner_temp/git-credentials-4cf2d4d7-496a-45cb-934b-18f2ff009cc6.config
+2026-03-13T17:30:43.1644166Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-4cf2d4d7-496a-45cb-934b-18f2ff009cc6.config
+2026-03-13T17:30:43.1678427Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-03-13T17:30:43.1912564Z Removing credentials config '/home/runner/work/_temp/git-credentials-4cf2d4d7-496a-45cb-934b-18f2ff009cc6.config'
+2026-03-13T17:30:43.2056882Z Cleaning up orphan processes
