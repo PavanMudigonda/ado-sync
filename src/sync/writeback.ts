@@ -578,12 +578,199 @@ export function writebackJava(test: ParsedTest, id: number, tagPrefix: string): 
   fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
 }
 
+// ─── Robot Framework writeback ────────────────────────────────────────────────
+
+/**
+ * Write (or update) the TC ID in a Robot Framework .robot file.
+ *
+ * Strategy:
+ *  1. Find the test case name line (test.line - 1, 0-based).
+ *  2. Scan forward within the test body (up to 15 lines) for a [Tags] row.
+ *  3. If found: replace existing tc:N tag in it, or append tc:ID.
+ *  4. If not found: insert a new [Tags] row on the line after the test name.
+ */
+export function writebackRobot(test: ParsedTest, id: number, tagPrefix: string): void {
+  const raw = fs.readFileSync(test.filePath, 'utf8');
+  const lines = raw.split('\n');
+
+  const testNameLineIdx = test.line - 1; // 0-based
+
+  // Detect indentation from the first indented body line or default 4 spaces
+  const indent = '    ';
+  const tagToken  = `${tagPrefix}:${id}`;
+  const existingRe = new RegExp(`\\b${tagPrefix}:\\d+\\b`, 'i');
+  const tagsRowRe  = /^\s*\[tags\]/i;
+
+  const scanEnd = Math.min(testNameLineIdx + 20, lines.length);
+  let replaced = false;
+
+  for (let i = testNameLineIdx + 1; i < scanEnd; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // Next non-indented line = next test case → stop
+    if (trimmed && !/^\s/.test(line)) break;
+
+    if (tagsRowRe.test(trimmed)) {
+      if (existingRe.test(trimmed)) {
+        lines[i] = trimmed.replace(existingRe, tagToken);
+      } else {
+        // Append the new tag (with separator)
+        lines[i] = `${trimmed}    ${tagToken}`;
+      }
+      replaced = true;
+      break;
+    }
+  }
+
+  if (!replaced) {
+    // Insert [Tags] row immediately after the test name line
+    lines.splice(testNameLineIdx + 1, 0, `${indent}[Tags]    ${tagToken}`);
+  }
+
+  fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+}
+
+// ─── Ruby writeback ───────────────────────────────────────────────────────────
+
+/**
+ * Write (or update) the TC ID in a Ruby RSpec file.
+ * Format:  # @tc:12345  inserted immediately above the it line.
+ */
+export function writebackRuby(test: ParsedTest, id: number, tagPrefix: string): void {
+  const raw = fs.readFileSync(test.filePath, 'utf8');
+  const lines = raw.split('\n');
+
+  const itLineIdx = test.line - 1; // 0-based
+
+  const indentMatch = (lines[itLineIdx] ?? '').match(/^(\s*)/);
+  const indent = indentMatch ? indentMatch[1] : '';
+
+  const comment    = `# @${tagPrefix}:${id}`;
+  const existingRe = new RegExp(`#\\s*@${tagPrefix}:\\d+`);
+
+  let replaced = false;
+  for (let i = itLineIdx - 1; i >= 0 && i >= itLineIdx - 25; i--) {
+    const trimmed = lines[i].trim();
+
+    if (existingRe.test(trimmed)) {
+      lines[i] = lines[i].replace(existingRe, comment.trim());
+      replaced = true;
+      break;
+    }
+
+    if (trimmed === '') break;
+  }
+
+  if (!replaced) {
+    lines.splice(itLineIdx, 0, `${indent}${comment}`);
+  }
+
+  fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+}
+
+// ─── PHP writeback ────────────────────────────────────────────────────────────
+
+/**
+ * Write (or update) the TC ID in a PHP PHPUnit file.
+ * Format:  * @tc N  inside the docblock above the method.
+ * If no docblock exists, inserts one.
+ */
+export function writebackPhp(test: ParsedTest, id: number, tagPrefix: string): void {
+  const raw = fs.readFileSync(test.filePath, 'utf8');
+  const lines = raw.split('\n');
+
+  const methodLineIdx = test.line - 1; // 0-based
+
+  const indentMatch = (lines[methodLineIdx] ?? '').match(/^(\s*)/);
+  const indent = indentMatch ? indentMatch[1] : '    ';
+
+  const existingRe = new RegExp(`@${tagPrefix}\\s+\\d+`);
+  const newAnnotation = `@${tagPrefix} ${id}`;
+
+  // Find end of docblock (*/), scanning backward
+  let docEnd = -1;
+  let docStart = -1;
+  for (let i = methodLineIdx - 1; i >= 0 && i >= methodLineIdx - 5; i--) {
+    const trimmed = lines[i].trim();
+    if (trimmed === '') continue;
+    if (trimmed.endsWith('*/')) { docEnd = i; break; }
+    // Attributes / annotations between doc and method are fine
+    if (trimmed.startsWith('#[') || trimmed.startsWith('@')) continue;
+    break;
+  }
+
+  if (docEnd >= 0) {
+    // Walk backward to find docblock start and check for existing @tc
+    for (let i = docEnd - 1; i >= 0 && i >= docEnd - 50; i--) {
+      const trimmed = lines[i].trim();
+      if (existingRe.test(trimmed)) {
+        lines[i] = lines[i].replace(existingRe, newAnnotation);
+        fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+        return;
+      }
+      if (trimmed.startsWith('/**') || trimmed === '/*') { docStart = i; break; }
+    }
+
+    // No existing @tc — insert before closing */
+    lines.splice(docEnd, 0, `${indent} * ${newAnnotation}`);
+  } else {
+    // No docblock — insert one above the method
+    lines.splice(methodLineIdx, 0,
+      `${indent}/**`,
+      `${indent} * ${newAnnotation}`,
+      `${indent} */`
+    );
+  }
+
+  fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+}
+
+// ─── Rust writeback ───────────────────────────────────────────────────────────
+
+/**
+ * Write (or update) the TC ID in a Rust file.
+ * Format:  // @tc:12345  inserted immediately above the #[test] line.
+ */
+export function writebackRust(test: ParsedTest, id: number, tagPrefix: string): void {
+  const raw = fs.readFileSync(test.filePath, 'utf8');
+  const lines = raw.split('\n');
+
+  const attrLineIdx = test.line - 1; // 0-based — points at #[test]
+
+  const indentMatch = (lines[attrLineIdx] ?? '').match(/^(\s*)/);
+  const indent = indentMatch ? indentMatch[1] : '';
+
+  const comment    = `// @${tagPrefix}:${id}`;
+  const existingRe = new RegExp(`//\\s*@${tagPrefix}:\\d+`);
+
+  // Scan backward for existing annotation (may be within doc comments above #[test])
+  let replaced = false;
+  for (let i = attrLineIdx - 1; i >= 0 && i >= attrLineIdx - 20; i--) {
+    const trimmed = lines[i].trim();
+
+    if (existingRe.test(trimmed)) {
+      lines[i] = lines[i].replace(existingRe, comment.trim());
+      replaced = true;
+      break;
+    }
+
+    if (trimmed === '') break;
+  }
+
+  if (!replaced) {
+    lines.splice(attrLineIdx, 0, `${indent}${comment}`);
+  }
+
+  fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+}
+
 // ─── Dispatcher ──────────────────────────────────────────────────────────────
 
 export async function writebackId(
   test: ParsedTest,
   id: number,
-  localType: 'gherkin' | 'reqnroll' | 'markdown' | 'csv' | 'excel' | 'csharp' | 'java' | 'python' | 'javascript' | 'playwright' | 'puppeteer' | 'cypress' | 'testcafe' | 'detox' | 'espresso' | 'xcuitest' | 'flutter',
+  localType: 'gherkin' | 'reqnroll' | 'markdown' | 'csv' | 'excel' | 'csharp' | 'java' | 'python' | 'javascript' | 'playwright' | 'puppeteer' | 'cypress' | 'testcafe' | 'detox' | 'espresso' | 'xcuitest' | 'flutter' | 'robot' | 'go' | 'rspec' | 'phpunit' | 'rust' | 'kotlin',
   tagPrefix: string
 ): Promise<void> {
   switch (localType) {
@@ -605,6 +792,7 @@ export async function writebackId(
       break;
     case 'java':
     case 'espresso':
+    case 'kotlin':
       writebackJava(test, id, tagPrefix);
       break;
     case 'python':
@@ -622,7 +810,20 @@ export async function writebackId(
     case 'detox':
     case 'xcuitest':
     case 'flutter':
+    case 'go':
       writebackJavaScript(test, id, tagPrefix);
+      break;
+    case 'robot':
+      writebackRobot(test, id, tagPrefix);
+      break;
+    case 'rspec':
+      writebackRuby(test, id, tagPrefix);
+      break;
+    case 'phpunit':
+      writebackPhp(test, id, tagPrefix);
+      break;
+    case 'rust':
+      writebackRust(test, id, tagPrefix);
       break;
   }
 }

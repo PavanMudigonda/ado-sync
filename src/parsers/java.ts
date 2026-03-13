@@ -249,7 +249,7 @@ function parseSummary(
   summaryLines: string[],
   methodName: string,
   descriptionFallback: string
-): { title: string; steps: ParsedStep[] } {
+): { title: string; steps: ParsedStep[]; titleIsHeuristic: boolean } {
   let title = '';
   const steps: ParsedStep[] = [];
 
@@ -271,11 +271,12 @@ function parseSummary(
     if (!title) title = line;
   }
 
+  const titleIsHeuristic = !title;
   if (!title) {
     title = descriptionFallback || methodName.replace(/([A-Z])/g, ' $1').trim();
   }
 
-  return { title, steps };
+  return { title, steps, titleIsHeuristic };
 }
 
 // ─── Public parser ────────────────────────────────────────────────────────────
@@ -332,7 +333,7 @@ export function parseJavaFile(
     }
 
     const allTags = [...new Set([...pathTags, ...regularTagValues, ...testNgGroups])];
-    const { title, steps } = parseSummary(summaryLines, methodName, testNgDescription);
+    const { title, steps, titleIsHeuristic } = parseSummary(summaryLines, methodName, testNgDescription);
     const fqmn = [pkg, className, methodName].filter(Boolean).join('.');
 
     results.push({
@@ -344,6 +345,7 @@ export function parseJavaFile(
       line: testAnnotationLineIdx + 1, // 1-based; writeback targets this @Test line
       linkRefs: extractLinkRefs(allTags, linkConfigs),
       automatedTestName: fqmn || undefined,
+      titleIsHeuristic,
     });
 
     i = endLine;
