@@ -512,7 +512,9 @@ function applyFormatToSteps(
     })
     .map((s) => {
       const bgPrefix = s.isBackground ? 'Background: ' : '';
-      const rawAction = `${bgPrefix}${s.keyword} ${s.text}`.trim();
+      // Don't prefix with generic 'Step' keyword (fallback from code-based parsers)
+      const kwPrefix = s.keyword === 'Step' ? '' : `${s.keyword} `;
+      const rawAction = `${bgPrefix}${kwPrefix}${s.text}`.trim();
       let action = rawAction || emptyAction || '';
       let expected = s.expected ?? '';
 
@@ -570,7 +572,7 @@ function applyShowParameterListStep(
  * Apply prefixTitle format config to the test case title.
  */
 function formatTitle(title: string, test: ParsedTest, formatConfig: FormatConfig | undefined): string {
-  if (formatConfig?.prefixTitle === false) return title;
+  if (formatConfig?.prefixTitle !== true) return title;
   // Don't double-prefix if title already has the prefix
   if (/^Scenario(?:\s+Outline)?:\s+/i.test(title)) return title;
   const isOutline = !!test.outlineParameters?.headers.length;
