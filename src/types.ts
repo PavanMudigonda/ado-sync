@@ -291,7 +291,7 @@ export interface SyncConfig {
   /** Local spec sources */
   local: {
     /** 'gherkin' for .feature files, 'reqnroll' for ReqNRoll .feature files (SpecFlow successor), 'markdown' for .md, 'csharp' for MSTest/NUnit .cs, 'java' for JUnit/TestNG .java, 'python' for pytest .py, 'javascript' for Jest/Jasmine/WebdriverIO .js/.ts, 'playwright' for Playwright Test .spec.ts/.spec.js, 'puppeteer' for Puppeteer + Jest/Mocha .js/.ts, 'cypress' for Cypress .cy.js/.cy.ts, 'testcafe' for TestCafe .js/.ts, 'detox' for Detox (React Native) .js/.ts, 'espresso' for Android Espresso .java/.kt, 'xcuitest' for iOS XCUITest .swift, 'flutter' for Flutter/Dart _test.dart */
-    type: 'gherkin' | 'reqnroll' | 'markdown' | 'csv' | 'excel' | 'csharp' | 'java' | 'python' | 'javascript' | 'playwright' | 'puppeteer' | 'cypress' | 'testcafe' | 'detox' | 'espresso' | 'xcuitest' | 'flutter';
+    type: 'gherkin' | 'reqnroll' | 'markdown' | 'csv' | 'excel' | 'csharp' | 'java' | 'python' | 'javascript' | 'playwright' | 'puppeteer' | 'cypress' | 'testcafe' | 'detox' | 'espresso' | 'xcuitest' | 'flutter' | 'robot' | 'go' | 'rspec' | 'phpunit' | 'rust' | 'kotlin';
     /** Glob pattern(s) relative to config file location */
     include: string | string[];
     /** Glob pattern(s) to exclude */
@@ -462,6 +462,16 @@ export interface ParsedTest {
    * e.g. @attachment:screen.png → { prefix: 'attachment', filePath: 'screen.png' }
    */
   attachmentRefs?: Array<{ prefix: string; filePath: string }>;
+  /**
+   * When true, the title was derived from the method/function name via heuristic
+   * transformation (e.g. camelCase→words, snake_case→words). The AI summarizer
+   * may replace it with a better description.
+   * When false, the title came directly from the source (e.g. it('…'), test('…'),
+   * KDoc first line, etc.) and the AI must NOT override it, ensuring push
+   * idempotency across runs.
+   * Undefined means unknown (treated as replaceable for backwards compatibility).
+   */
+  titleIsHeuristic?: boolean;
 }
 
 // ─── Azure Test Case (normalised) ────────────────────────────────────────────
@@ -476,6 +486,8 @@ export interface AzureTestCase {
   changedDate?: string;
   areaPath?: string;
   iterationPath?: string;
+  /** The AutomatedTestName (FQMN) stored in Azure when markAutomated is true */
+  automatedTestName?: string;
 }
 
 export interface AzureStep {

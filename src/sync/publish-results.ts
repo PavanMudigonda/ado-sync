@@ -603,23 +603,438 @@ function parsePlaywrightJson(content: string, tagPrefix: string, treatInconclusi
   return results;
 }
 
+// ─── Robot Framework XML parser ───────────────────────────────────────────────
+//
+// Robot Framework output.xml structure:
+//
+//   <robot>
+//     <suite name="Suite Name">
+//       <suite name="Sub Suite">
+//         <test name="Test Name">
+//           <tags><tag>smoke</tag><tag>tc:12345</tag></tags>
+//           <kw name="Keyword">
+//             <msg level="FAIL">Error message</msg>
+//             <status status="FAIL" starttime="..." endtime="..."/>
+//           </kw>
+//           <status status="PASS" starttime="20250313 15:30:45.123" endtime="20250313 15:30:46.234"/>
+//         </test>
+//       </suite>
+//     </suite>
+//   </robot>
+
+function parseRobotTimestamp(ts: string): number {
+  // Format: "YYYYMMDD HH:MM:SS.mmm"
+  if (!ts) return 0;
+  const m = ts.match(/^(\d{4})(\d{2})(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\.(\d+)$/);
+  if (!m) return 0;
+  return new Date(
+    parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]),
+    parseInt(m[4]), parseInt(m[5]), parseInt(m[6]), parseInt(m[7].padEnd(3, '0').slice(0, 3))
+  ).getTime();
+}
+
+function parseRobotFramework(content: string, tagPrefix: string, treatInconclusiveAs?: string): ParsedResult[] {
+  const parser = new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: '@_',
+    isArray: (name) => ['suite', 'test', 'tag', 'kw', 'msg'].includes(name),
+  });
+  const doc = parser.parse(content);
+  const results: ParsedResult[] = [];
+
+  function extractFailMessage(kws: any[]): string | undefined {
+    for (const kw of kws ?? []) {
+      const msgs: any[] = kw.msg ?? [];
+      for (const msg of msgs) {
+        if ((msg['@_level'] ?? '').toUpperCase() === 'FAIL') {
+          return String(msg['#text'] ?? msg ?? '').trim() || undefined;
+        }
+      }
+      // Recurse into nested keywords
+      const nested = kw.kw ?? [];
+      const inner = extractFailMessage(Array.isArray(nested) ? nested : [nested]);
+      if (inner) return inner;
+    }
+    return undefined;
+  }
+
+  function walkSuites(suiteNode: any, suitePath: string[]): void {
+    // Nested suites
+    for (const child of suiteNode.suite ?? []) {
+      const childName: string = child['@_name'] ?? '';
+      walkSuites(child, [...suitePath, childName]);
+    }
+
+    // Tests in this suite
+    for (const test of suiteNode.test ?? []) {
+      const testName: string = test['@_name'] ?? '';
+      const statusNode = test.status ?? {};
+      const statusVal: string = statusNode['@_status'] ?? 'FAIL';
+      const startTime: string = statusNode['@_starttime'] ?? statusNode['@_start'] ?? '';
+      const endTime: string   = statusNode['@_endtime']   ?? statusNode['@_end']   ?? '';
+
+      const durationMs = startTime && endTime
+        ? Math.max(0, parseRobotTimestamp(endTime) - parseRobotTimestamp(startTime))
+        : 0;
+
+      let outcome = 'Failed';
+      if (statusVal.toUpperCase() === 'PASS') outcome = 'Passed';
+      else if (statusVal.toUpperCase() === 'SKIP') outcome = 'NotExecuted';
+      outcome = normaliseOutcome(outcome, treatInconclusiveAs);
+
+      // Extract TC ID from <tags><tag>tc:12345</tag></tags>
+      let testCaseId: number | undefined;
+      const tcRe = new RegExp(`^${tagPrefix}:(\\d+)$`, 'i');
+      for (const tag of test.tags?.tag ?? []) {
+        const tagStr = String(tag['#text'] ?? tag ?? '').trim();
+        const m = tagStr.match(tcRe);
+        if (m) { testCaseId = parseInt(m[1], 10); break; }
+      }
+
+      // Extract failure message from keywords
+      let errorMessage: string | undefined;
+      if (outcome === 'Failed') {
+        errorMessage = extractFailMessage(test.kw ?? []);
+      }
+
+      const fullName = [...suitePath, testName].join('.');
+
+      results.push({
+        testName: fullName,
+        outcome,
+        durationMs,
+        errorMessage,
+        testCaseId,
+      });
+    }
+  }
+
+  const robotNode = doc.robot ?? doc.Robot;
+  if (robotNode) {
+    for (const suite of robotNode.suite ?? []) {
+      walkSuites(suite, [suite['@_name'] ?? '']);
+    }
+  }
+
+  return results;
+}
+
+// ─── Go test JSON parser ──────────────────────────────────────────────────────
+//
+// go test -json produces line-delimited JSON (one object per line):
+//
+//   {"Time":"...","Action":"run","Package":"github.com/x/y","Test":"TestFoo"}
+//   {"Time":"...","Action":"output","Package":"...","Test":"TestFoo","Output":"=== RUN   TestFoo\n"}
+//   {"Time":"...","Action":"pass","Package":"...","Test":"TestFoo","Elapsed":0.101}
+//   {"Time":"...","Action":"fail","Package":"...","Test":"TestFoo","Elapsed":0.05}
+
+function parseGoTestJson(content: string, tagPrefix: string, treatInconclusiveAs?: string): ParsedResult[] {
+  interface GoTestEntry {
+    action: string;
+    elapsed: number;
+    outputs: string[];
+  }
+
+  const tests = new Map<string, GoTestEntry>();
+
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let obj: any;
+    try { obj = JSON.parse(trimmed); } catch { continue; }
+
+    const action: string  = obj.Action  ?? '';
+    const pkg: string     = obj.Package ?? '';
+    const testName: string = obj.Test   ?? '';
+    if (!testName) continue; // package-level events
+
+    const key = `${pkg}.${testName}`;
+
+    if (!tests.has(key)) {
+      tests.set(key, { action: '', elapsed: 0, outputs: [] });
+    }
+    const entry = tests.get(key)!;
+
+    if (action === 'output' && obj.Output) {
+      entry.outputs.push(String(obj.Output));
+    }
+    if (['pass', 'fail', 'skip'].includes(action)) {
+      entry.action  = action;
+      entry.elapsed = obj.Elapsed ?? 0;
+    }
+  }
+
+  const results: ParsedResult[] = [];
+  const idRe = new RegExp(`@${tagPrefix}:(\\d+)`);
+
+  for (const [key, entry] of tests) {
+    if (!entry.action) continue; // in-progress or benchmark
+
+    let outcome = 'Failed';
+    if (entry.action === 'pass') outcome = 'Passed';
+    else if (entry.action === 'skip') outcome = 'NotExecuted';
+    outcome = normaliseOutcome(outcome, treatInconclusiveAs);
+
+    // Collect meaningful output lines (strip === RUN / --- PASS / --- FAIL markers)
+    const outputLines = entry.outputs.filter((o) =>
+      !/^(?:=== RUN|=== PAUSE|=== CONT|--- (?:PASS|FAIL|SKIP):)/.test(o)
+    );
+    const outputText = outputLines.join('').trim();
+
+    // Extract TC ID from output if the test logged it
+    let testCaseId: number | undefined;
+    const idMatch = outputText.match(idRe);
+    if (idMatch) testCaseId = parseInt(idMatch[1], 10);
+
+    // Error message: first non-empty output line after panic / Error markers
+    let errorMessage: string | undefined;
+    if (outcome === 'Failed' && outputText) {
+      errorMessage = outputText.slice(0, 500);
+    }
+
+    // testName: "pkg.TestName" (replace / subtest separators with .)
+    const testName = key.replace(/\//g, '.');
+
+    results.push({
+      testName,
+      outcome,
+      durationMs: Math.round(entry.elapsed * 1000),
+      errorMessage: errorMessage || undefined,
+      testCaseId,
+    });
+  }
+
+  return results;
+}
+
+// ─── Mochawesome JSON parser ──────────────────────────────────────────────────
+//
+// Mochawesome format (produced by mocha + mochawesome reporter, also used by Cypress):
+//
+//   {
+//     "stats": { ... },
+//     "results": [
+//       {
+//         "suites": [ { "tests": [...], "suites": [...] } ],
+//         "tests": [...]
+//       }
+//     ]
+//   }
+
+function parseMochawesome(content: string, tagPrefix: string, treatInconclusiveAs?: string): ParsedResult[] {
+  const report = JSON.parse(content);
+  const results: ParsedResult[] = [];
+  const idRe = new RegExp(`@${tagPrefix}:(\\d+)`);
+
+  function collectTests(suiteOrResult: any): void {
+    // Direct tests array
+    for (const test of suiteOrResult.tests ?? []) {
+      const fullTitle: string  = test.fullTitle ?? test.title ?? '';
+      const state: string      = test.state ?? (test.pass ? 'passed' : test.fail ? 'failed' : 'pending');
+      const durationMs: number = test.duration ?? 0;
+
+      let outcome = 'Failed';
+      if (state === 'passed' || test.pass) outcome = 'Passed';
+      else if (state === 'pending' || test.pending || test.skipped) outcome = 'NotExecuted';
+      outcome = normaliseOutcome(outcome, treatInconclusiveAs);
+
+      // TC ID from fullTitle (@tc:12345) or context JSON
+      let testCaseId: number | undefined;
+      const titleMatch = fullTitle.match(idRe);
+      if (titleMatch) testCaseId = parseInt(titleMatch[1], 10);
+
+      // Also try context field (may contain JSON with tc property)
+      if (testCaseId === undefined && test.context) {
+        try {
+          const ctx = typeof test.context === 'string' ? JSON.parse(test.context) : test.context;
+          const ctxArr = Array.isArray(ctx) ? ctx : [ctx];
+          for (const c of ctxArr) {
+            if (c?.title === tagPrefix && c?.value) {
+              const id = parseInt(String(c.value), 10);
+              if (!isNaN(id)) { testCaseId = id; break; }
+            }
+          }
+        } catch { /* ignore */ }
+      }
+
+      const err = test.err ?? {};
+      const errorMessage: string | undefined = err.message || undefined;
+      const stackTrace: string | undefined   = err.estack  || err.stack || undefined;
+
+      results.push({
+        testName: fullTitle,
+        outcome,
+        durationMs,
+        errorMessage,
+        stackTrace,
+        testCaseId,
+      });
+    }
+
+    // Recurse into nested suites
+    for (const suite of suiteOrResult.suites ?? []) {
+      collectTests(suite);
+    }
+  }
+
+  for (const result of report.results ?? []) {
+    collectTests(result);
+  }
+
+  return results;
+}
+
+// ─── RSpec JSON parser ────────────────────────────────────────────────────────
+//
+// RSpec --format json output:
+//
+//   {
+//     "version": 3,
+//     "examples": [
+//       {
+//         "id": "./spec/example_spec.rb[1:1]",
+//         "description": "should pass",
+//         "full_description": "Example should pass",
+//         "status": "passed",
+//         "run_time": 0.001234,
+//         "exception": { "class": "...", "message": "...", "backtrace": [...] }
+//       }
+//     ],
+//     "summary": { "duration": 0.005, ... }
+//   }
+
+function parseRspecJson(content: string, tagPrefix: string, treatInconclusiveAs?: string): ParsedResult[] {
+  const report = JSON.parse(content);
+  const results: ParsedResult[] = [];
+  const idRe = new RegExp(`@${tagPrefix}:(\\d+)`);
+
+  for (const example of report.examples ?? []) {
+    const fullDescription: string = example.full_description ?? example.description ?? '';
+    const status: string          = example.status ?? 'failed';
+    const runTime: number         = example.run_time ?? 0;
+
+    let outcome = 'Failed';
+    if (status === 'passed') outcome = 'Passed';
+    else if (status === 'pending') outcome = 'NotExecuted';
+    outcome = normaliseOutcome(outcome, treatInconclusiveAs);
+
+    // TC ID from @tc:12345 in full_description
+    let testCaseId: number | undefined;
+    const idMatch = fullDescription.match(idRe);
+    if (idMatch) testCaseId = parseInt(idMatch[1], 10);
+
+    const exc = example.exception;
+    const errorMessage: string | undefined = exc?.message || undefined;
+    const stackTrace: string | undefined   = exc?.backtrace?.join('\n') || undefined;
+
+    results.push({
+      testName: fullDescription,
+      outcome,
+      durationMs: Math.round(runTime * 1000),
+      errorMessage,
+      stackTrace,
+      testCaseId,
+    });
+  }
+
+  return results;
+}
+
+// ─── Rust test JSON parser ────────────────────────────────────────────────────
+//
+// cargo test -- --format=json produces line-delimited JSON:
+//
+//   { "type": "suite", "event": "started", "test_count": 2 }
+//   { "type": "test", "event": "started", "name": "it_works" }
+//   { "type": "test", "name": "it_works", "event": "ok", "exec_time": { "secs": 0, "nanos": 123456789 } }
+//   { "type": "test", "name": "it_fails", "event": "failed", "exec_time": {...}, "stdout": "..." }
+
+function parseRustTestJson(content: string, tagPrefix: string, treatInconclusiveAs?: string): ParsedResult[] {
+  const results: ParsedResult[] = [];
+  const idRe = new RegExp(`@${tagPrefix}:(\\d+)`);
+
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let obj: any;
+    try { obj = JSON.parse(trimmed); } catch { continue; }
+
+    if (obj.type !== 'test') continue;
+    const event: string = obj.event ?? '';
+    if (!['ok', 'failed', 'ignored'].includes(event)) continue;
+
+    const name: string = obj.name ?? '';
+    const execTime = obj.exec_time ?? {};
+    const durationMs = Math.round((execTime.secs ?? 0) * 1000 + (execTime.nanos ?? 0) / 1e6);
+
+    let outcome = 'Failed';
+    if (event === 'ok') outcome = 'Passed';
+    else if (event === 'ignored') outcome = 'NotExecuted';
+    outcome = normaliseOutcome(outcome, treatInconclusiveAs);
+
+    const stdout: string = obj.stdout ?? '';
+
+    // Extract TC ID from stdout if test logged it
+    let testCaseId: number | undefined;
+    const idMatch = stdout.match(idRe);
+    if (idMatch) testCaseId = parseInt(idMatch[1], 10);
+
+    let errorMessage: string | undefined;
+    if (outcome === 'Failed' && stdout) {
+      errorMessage = stdout.trim().slice(0, 500) || undefined;
+    }
+
+    results.push({
+      testName: name,
+      outcome,
+      durationMs,
+      errorMessage: errorMessage || undefined,
+      testCaseId,
+    });
+  }
+
+  return results;
+}
+
 // ─── Auto-detect format ───────────────────────────────────────────────────────
 
 function detectFormat(filePath: string, content: string): string {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === '.trx') return 'trx';
+
+  // Detect line-delimited JSON formats first (before generic .json check)
+  if (ext === '.json' || ext === '.jsonl' || ext === '') {
+    const firstLine = content.trimStart().split('\n')[0].trim();
+    if (firstLine.startsWith('{')) {
+      try {
+        const first = JSON.parse(firstLine);
+        // Go test JSON: has Action and Package fields
+        if (typeof first.Action === 'string' && typeof first.Package === 'string') return 'goTest';
+        // Rust test JSON: has type:"suite" and event:"started"
+        if (first.type === 'suite' && typeof first.event === 'string') return 'rustTest';
+      } catch { /* fall through */ }
+    }
+  }
+
   if (ext === '.json') {
-    // Playwright JSON has a top-level "suites" array; Cucumber JSON is an array of features
     try {
       const parsed = JSON.parse(content);
+      // Playwright JSON has a top-level "suites" array (not an array itself)
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.suites)) return 'playwrightJson';
+      // Mochawesome JSON has a top-level "results" array with suites inside
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.results) &&
+          parsed.results.length > 0 && (Array.isArray(parsed.results[0].suites) || Array.isArray(parsed.results[0].tests))) return 'mochawesome';
+      // RSpec JSON has top-level "examples" array and "summary" object
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.examples) && parsed.summary) return 'rspecJson';
     } catch { /* fall through */ }
     return 'cucumberJson';
   }
+
   if (content.trimStart().startsWith('<')) {
     if (content.includes('<TestRun') || content.includes('<testRun')) return 'trx';
     if (content.includes('<test-run'))  return 'nunitXml';
     if (content.includes('<testsuites') || content.includes('<testsuite')) return 'junit';
+    if (content.includes('<robot ') || content.includes('<robot\n') || content.trimStart().startsWith('<robot')) return 'robotFramework';
   }
   return 'junit';
 }
@@ -759,6 +1174,21 @@ export async function publishTestResults(
         break;
       case 'playwrightJson':
         allResults.push(...parsePlaywrightJson(content, tagPrefix, treatInconclusiveAs, fileDir));
+        break;
+      case 'robotFramework':
+        allResults.push(...parseRobotFramework(content, tagPrefix, treatInconclusiveAs));
+        break;
+      case 'goTest':
+        allResults.push(...parseGoTestJson(content, tagPrefix, treatInconclusiveAs));
+        break;
+      case 'mochawesome':
+        allResults.push(...parseMochawesome(content, tagPrefix, treatInconclusiveAs));
+        break;
+      case 'rspecJson':
+        allResults.push(...parseRspecJson(content, tagPrefix, treatInconclusiveAs));
+        break;
+      case 'rustTest':
+        allResults.push(...parseRustTestJson(content, tagPrefix, treatInconclusiveAs));
         break;
       default:
         throw new Error(`Unsupported test result format: ${format}`);
