@@ -48,7 +48,7 @@ function collect(value: string, previous: string[]): string[] {
  * CLI flags always take precedence. Returns undefined when provider is 'none'.
  */
 function buildAiOpts(
-  opts: { aiProvider?: string; aiModel?: string; aiUrl?: string; aiKey?: string },
+  opts: { aiProvider?: string; aiModel?: string; aiUrl?: string; aiKey?: string; aiContext?: string },
   config?: SyncConfig,
   configDir?: string
 ): AiSummaryOpts | undefined {
@@ -81,12 +81,27 @@ function buildAiOpts(
     }
   }
 
+  // Resolve and read the context file (CLI flag takes precedence over config)
+  let contextContent: string | undefined;
+  const contextFilePath = opts.aiContext ?? cfgAi?.contextFile;
+  if (contextFilePath) {
+    const absContextPath = path.isAbsolute(contextFilePath)
+      ? contextFilePath
+      : path.resolve(configDir ?? process.cwd(), contextFilePath);
+    try {
+      contextContent = fs.readFileSync(absContextPath, 'utf8');
+    } catch (err: any) {
+      process.stderr.write(`  [ai-summary] Warning: could not read contextFile "${absContextPath}": ${err.message}\n`);
+    }
+  }
+
   return {
     provider: provider as AiSummaryOpts['provider'],
     model,
     baseUrl:  opts.aiUrl   ?? cfgAi?.baseUrl,
     apiKey:   opts.aiKey   ?? cfgAi?.apiKey,
     heuristicFallback: true,
+    contextContent,
   };
 }
 
@@ -123,6 +138,7 @@ program
   .option('--ai-model <model>', 'local: path to GGUF file; ollama: model tag; openai/anthropic: model name')
   .option('--ai-url <url>', 'Base URL for ollama or OpenAI-compatible endpoint')
   .option('--ai-key <key>', 'API key for openai or anthropic')
+  .option('--ai-context <file>', 'Path to a markdown file with domain context/instructions injected into the AI prompt')
   .action(async (opts) => {
     const globalOpts = program.opts();
     try {
@@ -197,6 +213,7 @@ program
   .option('--ai-model <model>', 'local: path to GGUF file; ollama: model tag; openai/anthropic: model name')
   .option('--ai-url <url>', 'Base URL for ollama or OpenAI-compatible endpoint')
   .option('--ai-key <key>', 'API key for openai or anthropic')
+  .option('--ai-context <file>', 'Path to a markdown file with domain context/instructions injected into the AI prompt')
   .action(async (opts) => {
     const globalOpts = program.opts();
     try {
