@@ -690,7 +690,6 @@ export function writebackPhp(test: ParsedTest, id: number, tagPrefix: string): v
 
   // Find end of docblock (*/), scanning backward
   let docEnd = -1;
-  let docStart = -1;
   for (let i = methodLineIdx - 1; i >= 0 && i >= methodLineIdx - 5; i--) {
     const trimmed = lines[i].trim();
     if (trimmed === '') continue;
@@ -709,7 +708,7 @@ export function writebackPhp(test: ParsedTest, id: number, tagPrefix: string): v
         fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
         return;
       }
-      if (trimmed.startsWith('/**') || trimmed === '/*') { docStart = i; break; }
+      if (trimmed.startsWith('/**') || trimmed === '/*') { break; }
     }
 
     // No existing @tc — insert before closing */
