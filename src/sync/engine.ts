@@ -26,10 +26,16 @@ import { applyRemoteToCsv, parseCsvFile } from '../parsers/csv';
 import { parseDartFile } from '../parsers/dart';
 import { parseExcelFile } from '../parsers/excel';
 import { parseGherkinFile } from '../parsers/gherkin';
+import { parseGoFile } from '../parsers/go';
 import { parseJavaFile } from '../parsers/java';
 import { parseJavaScriptFile } from '../parsers/javascript';
+import { parseKotlinFile } from '../parsers/kotlin';
 import { parseMarkdownFile } from '../parsers/markdown';
+import { parsePhpFile } from '../parsers/php';
 import { parsePythonFile } from '../parsers/python';
+import { parseRobotFile } from '../parsers/robot';
+import { parseRubyFile } from '../parsers/ruby';
+import { parseRustFile } from '../parsers/rust';
 import { parseSwiftFile } from '../parsers/swift';
 import { parseTestCafeFile } from '../parsers/testcafe';
 import { AzureTestCase, ParsedStep, ParsedTest, SuiteRoute, SyncConfig, SyncResult, TestPlanEntry } from '../types';
@@ -130,6 +136,24 @@ async function parseLocalFiles(
           break;
         case 'flutter':
           tests = parseDartFile(fp, tagPrefix, linkConfigs);
+          break;
+        case 'robot':
+          tests = parseRobotFile(fp, tagPrefix, linkConfigs);
+          break;
+        case 'go':
+          tests = parseGoFile(fp, tagPrefix, linkConfigs);
+          break;
+        case 'rspec':
+          tests = parseRubyFile(fp, tagPrefix, linkConfigs);
+          break;
+        case 'phpunit':
+          tests = parsePhpFile(fp, tagPrefix, linkConfigs);
+          break;
+        case 'rust':
+          tests = parseRustFile(fp, tagPrefix, linkConfigs);
+          break;
+        case 'kotlin':
+          tests = parseKotlinFile(fp, tagPrefix, linkConfigs);
           break;
         default:
           tests = parseMarkdownFile(fp, tagPrefix, linkConfigs, attachmentsConfig);
@@ -266,7 +290,7 @@ export async function push(
             const result = await summarizeTest(test, entryConfig.local.type, opts.aiSummary);
             aiDone++;
             opts.onAiProgress?.(aiDone, allTargets.length, test.title);
-            if (needsSteps) { test.title = result.title; test.steps = result.steps; }
+            if (needsSteps) { if (test.titleIsHeuristic !== false) test.title = result.title; test.steps = result.steps; }
             if (needsDescription && result.description) test.description = result.description;
           }
         }
@@ -315,7 +339,12 @@ async function pushSingle(
         aiDone++;
         opts.onAiProgress?.(aiDone, aiTargets.length, test.title);
         if (needsSteps) {
-          test.title = result.title;
+          // Only replace the title when it was heuristically generated (e.g. from a
+          // method name transformation). If titleIsHeuristic is false the title came
+          // directly from the source file (it('…'), test('…'), etc.) and must not be
+          // overridden — that would produce a different title on every push and break
+          // the Azure ID match on subsequent runs.
+          if (test.titleIsHeuristic !== false) test.title = result.title;
           test.steps = result.steps;
         }
         if (needsDescription && result.description) {
@@ -341,6 +370,35 @@ async function pushSingle(
 
   // Load local cache for conflict detection and skip optimisation
   const cache = loadCache(configDir);
+
+  // ── automatedTestName fallback matching ───────────────────────────────────
+  // When markAutomated is true and a local test has no @tc:ID annotation, try
+  // to find its existing TC in Azure by AutomatedTestName. This recovers from
+  // situations where writeback files were not committed (e.g. first push was a
+  // dry-run, or the developer didn't stage the file changes). Without this,
+  // every unlinked test would be created as a new TC on each push, causing the
+  // plan to grow unboundedly while old TCs accumulate as ado-sync:removed.
+  const markAutomated = config.sync?.markAutomated ?? false;
+  const recoveredIds = new Set<string>(); // "filePath:line" keys
+  let preloadedRemoteTcs: Awaited<ReturnType<typeof getTestCasesInSuite>> | undefined;
+  const unlinkedWithAtName = tests.filter(t => !t.azureId && t.automatedTestName);
+  if (markAutomated && unlinkedWithAtName.length > 0) {
+    try {
+      preloadedRemoteTcs = await getTestCasesInSuite(client, config);
+      const byAtName = new Map(
+        preloadedRemoteTcs
+          .filter(tc => tc.automatedTestName)
+          .map(tc => [tc.automatedTestName!, tc])
+      );
+      for (const test of unlinkedWithAtName) {
+        const match = byAtName.get(test.automatedTestName!);
+        if (match) {
+          test.azureId = match.id;
+          recoveredIds.add(`${test.filePath}:${test.line}`);
+        }
+      }
+    } catch { /* best-effort: if pre-load fails, continue without matching */ }
+  }
 
   let done = 0;
   const reportProgress = (result: SyncResult) => {
@@ -485,6 +543,19 @@ async function pushSingle(
     }
   }
 
+  // Write back recovered IDs (matched by automatedTestName above).
+  // These tests had their azureId set in the pre-pass but were not in pendingWritebacks
+  // (no new TC was created). Queue them so the source annotation is restored.
+  if (!opts.dryRun && !disableLocal && recoveredIds.size > 0) {
+    const alreadyQueued = new Set(pendingWritebacks.map((wb) => `${wb.test.filePath}:${wb.test.line}`));
+    for (const test of tests) {
+      const key = `${test.filePath}:${test.line}`;
+      if (test.azureId && recoveredIds.has(key) && !alreadyQueued.has(key)) {
+        pendingWritebacks.push({ test, newId: test.azureId });
+      }
+    }
+  }
+
   // Apply ID writebacks in descending line order per file so earlier insertions
   // don't shift line numbers for subsequent writebacks in the same file.
   if (!opts.dryRun && pendingWritebacks.length) {
@@ -505,7 +576,9 @@ async function pushSingle(
   // Removed TC detection: find suite TCs not referenced by any local test
   if (!opts.dryRun || true /* show removed in dry-run too */) {
     try {
-      const remoteTcs = await getTestCasesInSuite(client, config);
+      // Reuse the pre-loaded remote TCs if we already fetched them for automatedTestName
+      // matching, otherwise fetch now. This avoids a redundant round-trip.
+      const remoteTcs = preloadedRemoteTcs ?? await getTestCasesInSuite(client, config);
       const localIds = new Set([
         ...(tests.map((t) => t.azureId).filter(Boolean) as number[]),
         ...createdIds,
@@ -696,7 +769,7 @@ function applyRemoteToLocal(
   newTitle: string,
   newSteps: ParsedStep[],
   newDescription: string | undefined,
-  localType: 'gherkin' | 'reqnroll' | 'markdown' | 'csv' | 'excel' | 'csharp' | 'java' | 'python' | 'javascript' | 'playwright' | 'puppeteer' | 'cypress' | 'testcafe' | 'detox' | 'espresso' | 'xcuitest' | 'flutter',
+  localType: 'gherkin' | 'reqnroll' | 'markdown' | 'csv' | 'excel' | 'csharp' | 'java' | 'python' | 'javascript' | 'playwright' | 'puppeteer' | 'cypress' | 'testcafe' | 'detox' | 'espresso' | 'xcuitest' | 'flutter' | 'robot' | 'go' | 'rspec' | 'phpunit' | 'rust' | 'kotlin',
   tagPrefix: string
 ): void {
   if (localType === 'gherkin' || localType === 'reqnroll') {

@@ -64,7 +64,8 @@ type LocalType =
   | 'gherkin' | 'reqnroll' | 'markdown' | 'csv' | 'excel'
   | 'csharp' | 'java' | 'python' | 'javascript' | 'playwright'
   | 'puppeteer' | 'cypress' | 'testcafe'
-  | 'detox' | 'espresso' | 'xcuitest' | 'flutter';
+  | 'detox' | 'espresso' | 'xcuitest' | 'flutter'
+  | 'robot' | 'go' | 'rspec' | 'phpunit' | 'rust' | 'kotlin';
 
 // ─── Function body extraction ─────────────────────────────────────────────────
 

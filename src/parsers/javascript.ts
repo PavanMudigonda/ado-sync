@@ -385,6 +385,7 @@ export function parseJavaScriptFile(
       line: itLineIdx + 1, // 1-based; writeback targets this it()/test() line
       linkRefs: extractLinkRefs(allTags, linkConfigs),
       automatedTestName,
+      titleIsHeuristic: false,
     });
   }
 
