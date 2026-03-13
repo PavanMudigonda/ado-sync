@@ -144,6 +144,11 @@ function validateConfig(cfg: SyncConfig, filePath: string): void {
   if (!cfg.testPlan?.id && !cfg.testPlans?.length) {
     err('"testPlan.id" or "testPlans" array is required');
   }
+  if (cfg.testPlan?.id && cfg.testPlans?.length) {
+    process.stderr.write(
+      `  Warning (${filePath}): both "testPlan" and "testPlans" are set. "testPlans" takes precedence; "testPlan" will be ignored.\n`
+    );
+  }
   const validLocalTypes = ['gherkin', 'reqnroll', 'markdown', 'csv', 'excel', 'csharp', 'java', 'javascript', 'python', 'playwright', 'puppeteer', 'cypress', 'testcafe', 'detox', 'espresso', 'xcuitest', 'flutter'];
   if (!cfg.local?.type) err(`"local.type" is required (${validLocalTypes.join(' | ')})`);
   if (!validLocalTypes.includes(cfg.local.type))
