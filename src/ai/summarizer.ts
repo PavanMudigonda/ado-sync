@@ -53,6 +53,11 @@ export interface AiSummaryOpts {
   apiKey?: string;
   /** Fall back to heuristic if the LLM call fails. Default: true. */
   heuristicFallback?: boolean;
+  /**
+   * Pre-loaded content of the context file (resolved and read by the caller).
+   * When present, it is injected into the LLM prompt as domain context.
+   */
+  contextContent?: string;
 }
 
 type LocalType =
@@ -641,7 +646,7 @@ Rules:
 - Description: 1-2 sentences explaining what the test verifies and any important preconditions. Do not repeat the title verbatim.
 - Steps: numbered list. Actions → "N. Do X". Assertions → "N. Check: Y"
 - Output ONLY the title, description, and numbered steps — no preamble or explanation.
-
+{CONTEXT}
 Expected output format:
 Title: <title>
 Description: <1-2 sentence description>
@@ -652,8 +657,13 @@ N. Check: <expected result>
 Test function:
 {CODE}`;
 
-function buildPrompt(code: string): string {
-  return PROMPT_TEMPLATE.replace('{CODE}', code);
+function buildPrompt(code: string, contextContent?: string): string {
+  const contextSection = contextContent?.trim()
+    ? `\nDomain context (apply when writing the title, description, and steps):\n${contextContent.trim()}\n`
+    : '';
+  return PROMPT_TEMPLATE
+    .replace('{CONTEXT}', contextSection)
+    .replace('{CODE}', code);
 }
 
 function parseAiResponse(
@@ -732,13 +742,14 @@ async function getLlamaSession(modelPath: string): Promise<LlamaSession> {
 async function localLlamaSummary(
   code: string,
   fallbackTitle: string,
-  modelPath: string
+  modelPath: string,
+  contextContent?: string
 ): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
   const { LlamaChatSession, model } = await getLlamaSession(modelPath);
   const context = await model.createContext();
   try {
     const session = new LlamaChatSession({ contextSequence: context.getSequence() });
-    const response: string = await session.prompt(buildPrompt(code));
+    const response: string = await session.prompt(buildPrompt(code, contextContent));
     return parseAiResponse(response, fallbackTitle);
   } finally {
     // Best-effort cleanup for implementations that expose dispose().
@@ -752,12 +763,13 @@ async function ollamaSummary(
   code: string,
   fallbackTitle: string,
   model: string,
-  baseUrl: string
+  baseUrl: string,
+  contextContent?: string
 ): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
   const res = await fetch(`${baseUrl}/api/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, prompt: buildPrompt(code), stream: false }),
+    body: JSON.stringify({ model, prompt: buildPrompt(code, contextContent), stream: false }),
     signal: AbortSignal.timeout(60_000),
   });
   if (!res.ok) throw new Error(`Ollama ${res.status}: ${await res.text()}`);
@@ -804,7 +816,8 @@ async function openaiSummary(
   fallbackTitle: string,
   model: string,
   apiKey: string,
-  baseUrl: string
+  baseUrl: string,
+  contextContent?: string
 ): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
   const res = await fetchWithRetry(
     `${baseUrl}/chat/completions`,
@@ -813,7 +826,7 @@ async function openaiSummary(
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model,
-        messages: [{ role: 'user', content: buildPrompt(code) }],
+        messages: [{ role: 'user', content: buildPrompt(code, contextContent) }],
         temperature: 0,
       }),
       signal: AbortSignal.timeout(60_000),
@@ -830,7 +843,8 @@ async function anthropicSummary(
   fallbackTitle: string,
   model: string,
   apiKey: string,
-  baseUrl: string
+  baseUrl: string,
+  contextContent?: string
 ): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
   const url = `${baseUrl.replace(/\/$/, '')}/messages`;
   const res = await fetchWithRetry(
@@ -845,7 +859,7 @@ async function anthropicSummary(
       body: JSON.stringify({
         model,
         max_tokens: 512,
-        messages: [{ role: 'user', content: buildPrompt(code) }],
+        messages: [{ role: 'user', content: buildPrompt(code, contextContent) }],
       }),
       signal: AbortSignal.timeout(60_000),
     },
@@ -1008,29 +1022,34 @@ export async function summarizeTest(
 
   const heuristicFallback = opts.heuristicFallback ?? true;
 
+  const ctx = opts.contextContent;
+
   try {
     switch (opts.provider) {
       case 'local':
-        return await localLlamaSummary(body, fallbackTitle, opts.model!);
+        return await localLlamaSummary(body, fallbackTitle, opts.model!, ctx);
       case 'ollama':
         return await ollamaSummary(
           body, fallbackTitle,
           opts.model ?? 'qwen2.5-coder:7b',
-          opts.baseUrl ?? 'http://localhost:11434'
+          opts.baseUrl ?? 'http://localhost:11434',
+          ctx
         );
       case 'openai':
         return await openaiSummary(
           body, fallbackTitle,
           opts.model ?? 'gpt-4o-mini',
           resolveEnvVar(opts.apiKey ?? ''),
-          opts.baseUrl ?? 'https://api.openai.com/v1'
+          opts.baseUrl ?? 'https://api.openai.com/v1',
+          ctx
         );
       case 'anthropic':
         return await anthropicSummary(
           body, fallbackTitle,
           opts.model ?? 'claude-haiku-4-5-20251001', // upgrade to claude-sonnet-4-6 for better quality
           resolveEnvVar(opts.apiKey ?? ''),
-          opts.baseUrl ?? 'https://api.anthropic.com/v1'
+          opts.baseUrl ?? 'https://api.anthropic.com/v1',
+          ctx
         );
     }
   } catch (err: any) {
