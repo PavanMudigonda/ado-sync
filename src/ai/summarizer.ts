@@ -766,12 +766,16 @@ async function ollamaSummary(
   baseUrl: string,
   contextContent?: string
 ): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
-  const res = await fetch(`${baseUrl}/api/generate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, prompt: buildPrompt(code, contextContent), stream: false }),
-    signal: AbortSignal.timeout(60_000),
-  });
+  const res = await fetchWithRetry(
+    `${baseUrl}/api/generate`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, prompt: buildPrompt(code, contextContent), stream: false }),
+      signal: AbortSignal.timeout(60_000),
+    },
+    'ollama'
+  );
   if (!res.ok) throw new Error(`Ollama ${res.status}: ${await res.text()}`);
   const data = await res.json() as { response?: string };
   return parseAiResponse(data.response ?? '', fallbackTitle);
@@ -858,7 +862,7 @@ async function anthropicSummary(
       },
       body: JSON.stringify({
         model,
-        max_tokens: 512,
+        max_tokens: 2048,
         messages: [{ role: 'user', content: buildPrompt(code, contextContent) }],
       }),
       signal: AbortSignal.timeout(60_000),
@@ -968,7 +972,7 @@ export async function analyzeFailure(
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-api-key': resolveEnvVar(opts.apiKey ?? ''), 'anthropic-version': '2023-06-01' },
-            body: JSON.stringify({ model: opts.model ?? 'claude-haiku-4-5-20251001', max_tokens: 256, messages: [{ role: 'user', content: prompt }] }),
+            body: JSON.stringify({ model: opts.model ?? 'claude-haiku-4-5-20251001', max_tokens: 1024, messages: [{ role: 'user', content: prompt }] }),
             signal: AbortSignal.timeout(30_000),
           },
           'anthropic'
