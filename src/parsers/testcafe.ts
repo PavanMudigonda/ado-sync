@@ -366,6 +366,7 @@ export function parseTestCafeFile(
       line: testLineIdx + 1, // 1-based; writeback starts from here
       linkRefs: extractLinkRefs(allTags, linkConfigs),
       automatedTestName,
+      titleIsHeuristic: false,
     });
   }
 
