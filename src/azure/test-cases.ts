@@ -1223,6 +1223,7 @@ export async function getTestCasesInSuite(
     'System.ChangedDate',
     'System.AreaPath',
     'System.IterationPath',
+    'Microsoft.VSTS.TCM.AutomatedTestName',
   ];
 
   const ids = suiteTestCases.map((tc: any) => tc.workItem?.id).filter(Boolean) as number[];
@@ -1241,6 +1242,7 @@ export async function getTestCasesInSuite(
       changedDate: f['System.ChangedDate'],
       areaPath: f['System.AreaPath'],
       iterationPath: f['System.IterationPath'],
+      automatedTestName: f['Microsoft.VSTS.TCM.AutomatedTestName'] || undefined,
     };
   });
 }

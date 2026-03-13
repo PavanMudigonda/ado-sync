@@ -235,7 +235,7 @@ const META_RE  = /^(?:test\s+case|user\s+story)[\s:]/i;
 function parseSummary(
   docLines: string[],
   methodName: string
-): { title: string; steps: ParsedStep[] } {
+): { title: string; steps: ParsedStep[]; titleIsHeuristic: boolean } {
   let title = '';
   const steps: ParsedStep[] = [];
 
@@ -257,12 +257,13 @@ function parseSummary(
     if (!title) title = line;
   }
 
+  const titleIsHeuristic = !title;
   if (!title) {
     // Convert snake_case to readable words:  test_user_login → user login
     title = methodName.replace(/^test_/, '').replace(/_/g, ' ');
   }
 
-  return { title, steps };
+  return { title, steps, titleIsHeuristic };
 }
 
 // ─── Public parser ────────────────────────────────────────────────────────────
@@ -292,7 +293,7 @@ export function parsePythonFile(
     const { marks, azureId } = extractDecoratorsAbove(lines, defLineIdx, tagPrefix);
 
     const allTags = [...new Set([...pathTags, ...marks])];
-    const { title, steps } = parseSummary(docLines, methodName);
+    const { title, steps, titleIsHeuristic } = parseSummary(docLines, methodName);
     const fqmn = [modulePath, className, methodName].filter(Boolean).join('.');
 
     results.push({
@@ -304,6 +305,7 @@ export function parsePythonFile(
       line: defLineIdx + 1, // 1-based; writeback targets this def line
       linkRefs: extractLinkRefs(allTags, linkConfigs),
       automatedTestName: fqmn || undefined,
+      titleIsHeuristic,
     });
   }
 

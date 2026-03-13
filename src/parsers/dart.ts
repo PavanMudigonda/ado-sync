@@ -256,6 +256,7 @@ export function parseDartFile(
       line: testLineIdx + 1,
       linkRefs: extractLinkRefs(allTags, linkConfigs),
       automatedTestName,
+      titleIsHeuristic: false,
     });
   }
 

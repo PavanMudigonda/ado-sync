@@ -113,7 +113,7 @@ const CHECK_RE       = /^[Cc]heck:\s+(.+)$/;
 function parseSummary(
   summaryLines: string[],
   methodName: string
-): { title: string; steps: ParsedStep[] } {
+): { title: string; steps: ParsedStep[]; titleIsHeuristic: boolean } {
   let title = '';
   const steps: ParsedStep[] = [];
 
@@ -136,11 +136,12 @@ function parseSummary(
     if (!title) title = line;
   }
 
+  const titleIsHeuristic = !title;
   if (!title) {
     title = methodName.replace(/([A-Z])/g, ' $1').trim();
   }
 
-  return { title, steps };
+  return { title, steps, titleIsHeuristic };
 }
 
 // ─── Attribute scanning ───────────────────────────────────────────────────────
@@ -257,7 +258,7 @@ export function parseCsharpFile(
       continue;
     }
 
-    const { title, steps } = parseSummary(summaryLines, methodName);
+    const { title, steps, titleIsHeuristic } = parseSummary(summaryLines, methodName);
 
     const tcIdStr = properties.get(tagPrefix);
     const azureId = tcIdStr ? parseInt(tcIdStr, 10) : undefined;
@@ -274,6 +275,7 @@ export function parseCsharpFile(
       line: testMethodLineIdx + 1, // 1-based; writeback uses this
       linkRefs: extractLinkRefs(tags, linkConfigs),
       automatedTestName: fqmn || undefined,
+      titleIsHeuristic,
     });
 
     i = endLine;
