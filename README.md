@@ -174,6 +174,7 @@ ado-sync push --ai-provider local --ai-model ~/.cache/models/qwen2.5-coder-1.5b-
 ado-sync push --ai-provider ollama --ai-model qwen2.5-coder:7b
 ado-sync push --ai-provider openai  --ai-key $OPENAI_API_KEY
 ado-sync push --ai-provider none                # disable AI summary entirely
+ado-sync push --ai-context ./docs/ai-context.md  # inject domain context into AI prompt
 ```
 
 | Scenario state | Action |
@@ -314,6 +315,45 @@ ado-sync push \
 ```
 
 Get a token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) (requires **Inference** permission). Recommended models: `Qwen/Qwen2.5-Coder-7B-Instruct`, `meta-llama/Llama-3.1-8B-Instruct`, `mistralai/Mistral-7B-Instruct-v0.3`.
+
+#### Option G — Inject domain context into the AI prompt
+
+Provide a markdown file with domain-specific instructions (glossary, naming conventions, step style guidelines). Its content is injected into every AI prompt before the test code:
+
+```bash
+ado-sync push --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY \
+  --ai-context ./docs/ai-context.md
+```
+
+Or set it once in config (relative path resolved from the config file directory):
+
+```json
+{
+  "sync": {
+    "ai": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "apiKey": "$ANTHROPIC_API_KEY",
+      "contextFile": "./docs/ai-context.md"
+    }
+  }
+}
+```
+
+Example `ai-context.md`:
+
+```markdown
+## Glossary
+- "Checkout" means the 3-step payment flow (cart → shipping → payment)
+- "PDP" means Product Detail Page
+
+## Step style
+- Start every action step with a verb: Click, Enter, Select, Navigate
+- Use the customer-facing label for buttons, not the CSS selector
+- Preconditions go first; verification steps ("Check: ...") go last
+```
+
+Context files work with all LLM providers (`local`, `ollama`, `openai`, `anthropic`). The `heuristic` provider ignores the file (no prompt involved).
 
 #### Disable AI entirely
 

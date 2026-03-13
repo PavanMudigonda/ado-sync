@@ -485,6 +485,74 @@ The AI receives the test name, error message, and stack trace (if available) and
 | `--ai-model <m>` | For `local`: path to `.gguf` file. For `ollama`/`openai`/`anthropic`: model name/tag. |
 | `--ai-url <url>` | Base URL for `ollama` or an OpenAI-compatible endpoint. |
 | `--ai-key <key>` | API key for `openai` or `anthropic`. Supports `$ENV_VAR` references. |
+| `--ai-context <file>` | Path to a markdown file with domain context/instructions injected into the AI prompt. |
+
+---
+
+### Domain context file (`sync.ai.contextFile`)
+
+You can provide a markdown file that gives the AI additional context about your application or team conventions. The file's content is injected into the prompt before the test code, so the AI can use it when writing titles, descriptions, and steps.
+
+#### Config
+
+```json
+{
+  "sync": {
+    "ai": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "apiKey": "$ANTHROPIC_API_KEY",
+      "contextFile": "./docs/ai-context.md"
+    }
+  }
+}
+```
+
+```yaml
+sync:
+  ai:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    apiKey: $ANTHROPIC_API_KEY
+    contextFile: ./docs/ai-context.md
+```
+
+The path is resolved relative to the config file directory. Absolute paths are also accepted.
+
+#### CLI override
+
+```bash
+ado-sync push --ai-context ./docs/ai-context.md
+```
+
+The CLI flag takes precedence over `contextFile` in config.
+
+#### What to put in the context file
+
+The file is plain markdown — write whatever helps the AI produce better output for your domain. Common patterns:
+
+```markdown
+## Glossary
+- "Checkout" means the 3-step payment flow (cart → shipping → payment)
+- "PDP" means Product Detail Page
+- "MFA" means multi-factor authentication via the Authenticator app
+
+## Step writing style
+- Start every action step with a verb: Click, Enter, Select, Navigate, Verify
+- Use customer-facing button/field labels, not CSS selectors or test IDs
+- Precondition steps ("Given the user is logged in") come before action steps
+- End with at least one "Check:" verification step
+
+## Out of scope
+- Do not mention internal service names (e.g. auth-svc, cart-ms)
+- Do not reference environment-specific URLs
+```
+
+#### Notes
+
+- Context is injected for all LLM providers: `local`, `ollama`, `openai`, `anthropic`.
+- The `heuristic` provider does not use a prompt and ignores this setting.
+- If the file cannot be read, a warning is printed and the push continues without it.
 
 ---
 
