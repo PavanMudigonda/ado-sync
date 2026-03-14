@@ -299,11 +299,13 @@ export function writebackPlaywright(test: ParsedTest, id: number, tagPrefix: str
   const titlePat = `(?:'[^']*'|"[^"]*"|\`[^\`]*\`)`;
   const fnPat    = `(?:it|test|xit|xtest|specify)(?:\\.(?:only|skip|concurrent|fixme|fail))?`;
 
-  // Phase 3 — no options object, async on the same line:
+  // Phase 3 — no options object, async or sync callback on the same line:
   //   test('title', async ({ page }) => {
+  //   test('title', () => {
   //   → test('title', { annotation: { … } }, async ({ page }) => {
+  //   → test('title', { annotation: { … } }, () => {
   const noOptsRe = new RegExp(
-    `^(\\s*${fnPat}\\s*\\(\\s*${titlePat}\\s*,\\s*)(async[\\s(])`
+    `^(\\s*${fnPat}\\s*\\(\\s*${titlePat}\\s*,\\s*)(async[\\s(]|\\()`
   );
   const noOptsMatch = itLine.match(noOptsRe);
   if (noOptsMatch) {
