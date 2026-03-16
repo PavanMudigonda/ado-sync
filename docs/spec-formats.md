@@ -23,6 +23,7 @@
 | `espresso` | ✓ | — | ✓ | — | — | ✓ |
 | `xcuitest` | ✓ | — | ✓ | — | — | ✓ |
 | `flutter` | ✓ | — | ✓ | — | — | ✓ |
+| `robot` | ✓ | — | — | — | — | ✓ |
 
 **Column notes:**
 - **Pull** — `ado-sync pull` can create/update local files from Azure Test Cases.
@@ -1113,6 +1114,103 @@ Recommended `ado-sync.json`:
 
 ---
 
+## Robot Framework `.robot`
+
+Set `local.type: "robot"`. Supports **Robot Framework** test suites. Each test case in the `*** Test Cases ***` or `*** Tasks ***` section becomes one Azure Test Case.
+
+### Source mapping
+
+| Robot Framework source | Azure TC field |
+|------------------------|---------------|
+| Test case name (non-indented line) | TC **Title** |
+| `[Documentation]` row | TC **Description** |
+| Numbered lines `N. text` in `[Documentation]` | TC **Steps** (action) |
+| Numbered lines `N. Check: text` in `[Documentation]` | TC **Steps** (expected result, when `useExpectedResult: true`) |
+| `[Tags]` values (excluding `tc:N`) | TC **Tags** |
+| `[Tags]    tc:N` | TC ID (**preferred**; written back after first push) |
+| `# @tc:N` comment immediately above the test name | TC ID (comment fallback) |
+| Test case name | `AutomatedTestName` (for result linking) |
+
+### Example
+
+```robot
+*** Settings ***
+Library    SeleniumLibrary
+
+*** Test Cases ***
+# @tc:1041
+Add Item And Complete Checkout
+    [Documentation]    Add item and complete checkout
+    ...    1. Sign in as standard_user
+    ...    2. Add Sauce Labs Backpack to cart
+    ...    3. Proceed through checkout
+    ...    4. Check: Order confirmation page is shown
+    [Tags]    tc:1041    smoke
+    Open Browser    ${URL}    chrome
+    Input Text      id:user-name    standard_user
+    Input Password  id:password     secret_sauce
+    Click Button    id:login-button
+
+User Login Fails With Invalid Credentials
+    [Documentation]    Login fails with invalid credentials
+    ...    1. Navigate to the login page
+    ...    2. Enter an invalid username and password
+    ...    3. Click Login
+    ...    4. Check: Error message is displayed
+    [Tags]    regression
+    Open Browser    ${URL}    chrome
+    Input Text      id:user-name    bad_user
+    Input Password  id:password     wrong
+    Click Button    id:login-button
+```
+
+On the first `push`, ado-sync inserts `tc:N` into the `[Tags]` row. If no `[Tags]` row exists, one is created immediately after the test name line.
+
+### ID writeback
+
+| Location | Format |
+|----------|--------|
+| `[Tags]` row (preferred) | `tc:12345` value added/updated in the existing `[Tags]` row |
+| No `[Tags]` row | `    [Tags]    tc:12345` inserted after the test name line |
+
+The `# @tc:N` comment form above the test name is also recognised on read but is not used for writeback — `[Tags]` is always the authoritative location after a push.
+
+### Path-based auto-tagging
+
+Directory segments starting with `@` are automatically applied as tags on all test cases inside:
+
+```
+tests/
+  @smoke/
+    login.robot       ← all test cases get tag 'smoke'
+  @regression/
+    checkout.robot    ← all test cases get tag 'regression'
+```
+
+### Recommended config
+
+```json
+{
+  "local": {
+    "type": "robot",
+    "include": ["tests/**/*.robot"],
+    "exclude": ["tests/resources/**", "tests/keywords/**"]
+  },
+  "sync": {
+    "markAutomated": true
+  }
+}
+```
+
+### Notes
+
+- **`pull` is not supported** for Robot Framework files. Only `push` and `publish-test-results` apply.
+- **`*** Tasks ***` sections** are treated the same as `*** Test Cases ***`.
+- **Keyword lines** — all indented non-settings rows are treated as TC steps if no numbered steps are found in `[Documentation]`.
+- **`[Setup]` / `[Teardown]`** — these settings rows are skipped; only keyword steps and `[Documentation]` / `[Tags]` are used.
+
+---
+
 ## CSV `.csv`
 
 Set `local.type: "csv"` to parse Azure DevOps / SpecSync tabular CSV exports.
@@ -1158,6 +1256,7 @@ After a first push, ado-sync writes the Azure TC ID back into the local file.
 | Python pytest | `@pytest.mark.tc(12345)` decorator above `def test_*` |
 | JavaScript/TS | `// @tc:12345` comment on the line above `it()`/`test()` |
 | Playwright | `// @tc:12345` comment on the line above `test()` |
+| Robot Framework | `tc:12345` value in the `[Tags]` row of the test case body |
 | CSV | Numeric ID in column A of the matching title row |
 | Excel | Numeric ID in cell A of the matching title row |
 

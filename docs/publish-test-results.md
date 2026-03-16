@@ -49,6 +49,7 @@ ado-sync publish-test-results \
 | JUnit XML | `.xml` | Yes (`<testsuites>` / `<testsuite>` root) | Optional — via `<property name="tc" value="ID"/>` | `<system-out>`, `<system-err>`, `[[ATTACHMENT\|path]]` (Playwright) |
 | Cucumber JSON | `.json` | Yes (JSON array, Cucumber format) | Yes — via `@tc:ID` tag on scenario | `step.embeddings[]` (base64 screenshots/video) |
 | Playwright JSON | `.json` | Yes (JSON object with `suites` key) | Yes — via `test.annotations[{ type: 'tc', description: 'ID' }]` (preferred) or `@tc:ID` in test title | `test.results[].attachments[]` (screenshots, videos, traces) |
+| Robot Framework XML | `output.xml` | Yes (`<robot>` root element) | Yes — via `<tags><tag>tc:ID</tag></tags>` | — |
 
 > **NUnit via TRX**: when NUnit tests are run through the VSTest adapter (`--logger trx`), `[Property]` values are **not** included in the TRX output. Use `--logger "nunit3;LogFileName=results.xml"` to get the native NUnit XML format, which does include property values.
 
@@ -411,6 +412,35 @@ TC linking uses `AutomatedTestName` matching — set `sync.markAutomated: true` 
 
 ---
 
+### Robot Framework
+
+Robot Framework writes test results to `output.xml` by default. ado-sync auto-detects this format from the `<robot>` root element.
+
+```bash
+# Run Robot Framework tests (generates output.xml)
+robot --outputdir results tests/
+
+# Publish results — TC IDs from [Tags] tc:N values
+ado-sync publish-test-results --testResult results/output.xml
+```
+
+TC IDs are extracted directly from the `<tags>` element in `output.xml` — the same `tc:N` tag written back by `ado-sync push`. No `--testResultFormat` flag is needed; the format is auto-detected.
+
+```bash
+# Custom output file location
+robot --outputdir results --output my-results.xml tests/
+ado-sync publish-test-results --testResult results/my-results.xml
+```
+
+Recommended config:
+```json
+{ "sync": { "markAutomated": true } }
+```
+
+> **TC linking for Robot**: `output.xml` includes `tc:N` tags in `<tags>` elements. ado-sync uses these for direct TC linking. If a test has no `tc:N` tag, it falls back to `AutomatedTestName` matching using the suite.test name path (e.g. `SuiteName.Test Case Name`).
+
+---
+
 ### Flutter
 
 Flutter can produce JUnit XML via the `flutter_test_junit` package or by piping `--reporter junit`:
@@ -452,6 +482,7 @@ TC linking uses `AutomatedTestName` matching — set `sync.markAutomated: true` 
 | XCUITest | JUnit XML | ❌ AutomatedTestName matching only | none (use `--attachmentsFolder`) | |
 | Espresso | JUnit XML | ❌ AutomatedTestName matching only | `<system-out>`, `<system-err>` | |
 | Flutter | JUnit XML | ❌ AutomatedTestName matching only | `<system-out>`, `<system-err>` | |
+| Robot Framework | Robot XML (`output.xml`) | ✅ `tc:N` in `<tags>` | — | |
 
 ---
 
