@@ -441,7 +441,53 @@ When pushing code-based test types (`java`, `csharp`, `python`, `javascript`, `p
 | Has doc comment steps but no description | Description only (existing steps kept) |
 | Has both steps and a description | Nothing — left unchanged |
 
-Local source files are **never modified** by the AI summary feature.
+Local source files are **never modified** by the AI summary feature — unless `sync.ai.writebackDocComment` is `true` (see [JSDoc writeback](#jsdoc-writeback-syncaiwritebackdoccomment) below).
+
+### JSDoc writeback (`sync.ai.writebackDocComment`)
+
+When `writebackDocComment: true` is set, ado-sync writes AI-generated steps back into the JS/TS source file as a JSDoc block above each `test()` call immediately after the first push. On subsequent pushes the parser reads the JSDoc back, so AI is not re-invoked and the steps remain stable even if the test body is edited.
+
+**Why this matters:** Without writeback, AI re-reads the test body on every push and may produce slightly different phrasing each time — changing Azure Test Case steps unnecessarily. With writeback the steps are frozen in the source file on first push and never change unless you edit the JSDoc manually.
+
+```json
+{
+  "sync": {
+    "ai": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "apiKey": "$ANTHROPIC_API_KEY",
+      "writebackDocComment": true
+    }
+  }
+}
+```
+
+After the first `ado-sync push` the source file will contain:
+
+```typescript
+/**
+ * User can log in with valid credentials
+ * Description: Verifies the login form accepts a correct email/password pair
+ * 1. Navigate to the login page
+ * 2. Enter a valid email address
+ * 3. Enter the matching password
+ * 4. Click the Sign In button
+ * 5. Check: The dashboard is displayed
+ */
+test('should log in with valid credentials', async ({ page }) => { ... });
+```
+
+**Rules:**
+- Only applies to `javascript`, `playwright`, `puppeteer`, `cypress`, `detox`, and `xcuitest` framework types.
+- Has no effect when `sync.disableLocalChanges: true`.
+- If a JSDoc block already exists above a `test()` call it is replaced, not duplicated.
+- Steps prefixed `Check:` map to Azure's **Expected Result** column when `sync.format.useExpectedResult: true`.
+- You can populate JSDoc comments manually before the first push — the parser will read them and skip AI entirely.
+
+**Recommended workflow for pre-populating existing specs:**
+1. Write the JSDoc manually above each `test()` call (or use an LLM in your editor to batch-generate them).
+2. Enable `writebackDocComment: true` in config.
+3. Run `ado-sync push` — existing JSDoc is read, AI is skipped, steps are pushed to Azure.
 
 ### AI failure analysis
 
