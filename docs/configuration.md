@@ -192,7 +192,7 @@ Use `testPlans` instead of `testPlan` to sync one repo against multiple Test Pla
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `type` | *(required)* | `"gherkin"` · `"markdown"` · `"csv"` · `"excel"` · `"csharp"` · `"java"` · `"python"` · `"javascript"` · `"playwright"` |
+| `type` | *(required)* | `"gherkin"` · `"markdown"` · `"csv"` · `"excel"` · `"csharp"` · `"java"` · `"python"` · `"javascript"` · `"playwright"` · `"robot"` |
 | `include` | *(required)* | Glob pattern(s) relative to the config file. String or array. |
 | `exclude` | *(none)* | Glob pattern(s) to exclude. String or array. |
 | `condition` | *(none)* | Tag expression filter applied before `--tags`. Only scenarios matching this expression are included in sync. e.g. `"@done and not (@ignored or @planned)"` |
