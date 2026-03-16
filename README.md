@@ -25,6 +25,7 @@ Supports a wide range of test file formats and frameworks:
 | `espresso` | Android Espresso (JUnit 4 / Kotlin) | `.java` / `.kt` | [espresso-android.yaml](docs/examples/espresso-android.yaml) |
 | `xcuitest` | iOS / macOS XCUITest | `.swift` | [xcuitest-ios.yaml](docs/examples/xcuitest-ios.yaml) |
 | `flutter` | Flutter widget & integration tests | `_test.dart` | [flutter-dart.yaml](docs/examples/flutter-dart.yaml) |
+| `robot` | Robot Framework | `.robot` | [robot-framework.yaml](docs/examples/robot-framework.yaml) |
 | Appium | Use `javascript` / `java` / `python` / `csharp` | depends on language binding | |
 | `csv` | Azure DevOps tabular export | `.csv` | |
 | `excel` | Azure DevOps tabular export | `.xlsx` | |
@@ -44,6 +45,7 @@ Local files                    ado-sync              Azure DevOps
 .java files      ── push ──►  (push-only)      ──►  + Associated Automation
 .py files        ── push ──►  (push-only)      ──►  + Associated Automation
 .js / .ts files  ── push ──►  (push-only)      ──►  + Associated Automation
+.robot files     ── push ──►  (push-only)      ──►  + Associated Automation
 .csv files       ── push ──►  (push-only)
 .xlsx files      ── push ──►  (push-only)
                                write ID back
@@ -73,6 +75,7 @@ On the **first push**, a new Test Case is created in Azure DevOps and its ID is 
 | Espresso (Java/Kotlin) | `// @tc:12345` comment above `@Test` |
 | XCUITest (Swift) | `// @tc:12345` comment above `func test*()` |
 | Flutter (Dart) | `// @tc:12345` comment above `testWidgets()`/`test()` |
+| Robot Framework | `tc:12345` value in `[Tags]` row of the test case body |
 | CSV | Numeric ID in column A |
 | Excel | Numeric ID in cell A |
 
@@ -769,6 +772,43 @@ Recommended `ado-sync.json` for Flutter:
 }
 ```
 
+### Robot Framework: create TCs and publish results
+
+```bash
+# 1. Create TCs and write IDs back into .robot files
+ado-sync push --dry-run   # preview
+ado-sync push             # inserts/updates tc:ID in [Tags] of each test case
+
+# 2. Run Robot Framework tests (generates output.xml)
+robot --outputdir results tests/
+
+# 3. Publish results
+ado-sync publish-test-results --testResult results/output.xml
+```
+
+Recommended `ado-sync.json` for Robot Framework:
+
+```json
+{
+  "orgUrl": "https://dev.azure.com/my-org",
+  "project": "MyProject",
+  "auth": { "type": "pat", "token": "$AZURE_DEVOPS_TOKEN" },
+  "testPlan": { "id": 1234 },
+  "local": {
+    "type": "robot",
+    "include": ["tests/**/*.robot"],
+    "exclude": ["tests/resources/**"]
+  },
+  "sync": {
+    "markAutomated": true
+  }
+}
+```
+
+TC IDs are read directly from the `tc:N` tag in `<tags>` in `output.xml` — no extra config needed.
+
+---
+
 ### CI pipeline
 
 ```yaml
@@ -869,6 +909,15 @@ def test_user_can_log_in():
 ```
 
 **C# / Java / Espresso:** Add `// @story:555` in the comment block immediately above the `[TestMethod]` / `@Test` line.
+
+**Robot Framework (`.robot`):**
+```robot
+*** Test Cases ***
+My Login Test
+    [Tags]    tc:12345    story:555    bug:789
+    Open Browser    ${URL}
+    Login As    user    pass
+```
 
 **Swift (XCUITest):**
 ```swift
