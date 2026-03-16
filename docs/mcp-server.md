@@ -156,7 +156,10 @@ Expected response includes config validity, Azure connection status, and test pl
 | `diff` | Show field-level diff (richer than status) |
 | `generate_specs` | Generate local spec files from ADO User Stories |
 | `get_work_items` | Fetch ADO User Stories / work items |
-| `publish_test_results` | Publish TRX / JUnit / Playwright JSON results |
+| `publish_test_results` | Publish TRX / JUnit / Playwright JSON / CTRF results; optionally file issues for failures |
+| `create_issue` | File a single GitHub Issue or ADO Bug for a test failure (for healer agents) |
+| `get_story_context` | Planner-agent feed: AC items, suggested tags, actors, linked TC IDs |
+| `generate_manifest` | Write `.ai-workflow-manifest-{id}.json` for the full Planner→CI cycle |
 
 ---
 
@@ -196,9 +199,49 @@ All tools accept these optional base parameters:
 ```json
 {
   "testResult": "results/playwright.json",
-  "attachmentsFolder": "test-results/"
+  "attachmentsFolder": "test-results/",
+  "createIssuesOnFailure": true,
+  "issueProvider": "github",
+  "githubRepo": "myorg/myrepo",
+  "githubToken": "$GITHUB_TOKEN",
+  "bugThreshold": 20,
+  "maxIssues": 50
 }
 ```
+
+### `create_issue`
+
+```json
+{
+  "title": "[FAILED] Login with valid credentials",
+  "body": "Error: Expected 200 but got 401\n\nStack: ...",
+  "provider": "github",
+  "githubRepo": "myorg/myrepo",
+  "githubToken": "$GITHUB_TOKEN",
+  "testCaseId": 1234
+}
+```
+
+### `get_story_context`
+
+```json
+{ "storyId": 1234 }
+```
+
+Returns: AC items as a bullet list, inferred tags (`@smoke`, `@auth`, …), extracted actors, and IDs of any Test Cases already linked via TestedBy relation.
+
+### `generate_manifest`
+
+```json
+{
+  "storyIds": [1234, 5678],
+  "outputFolder": "e2e/bdd",
+  "format": "gherkin",
+  "dryRun": false
+}
+```
+
+Writes `.ai-workflow-manifest-1234.json` in `outputFolder`. The manifest contains the ordered 8-step workflow, AC items, required documents checklist, and validation steps.
 
 ---
 
@@ -215,8 +258,9 @@ Agent: "Set up ado-sync for this repo"
 Agent: "Generate spec files for User Story 1234"
 → calls generate_specs({ storyIds: [1234], format: "gherkin" })
 
-Agent: "Publish the latest test results"
-→ calls publish_test_results({ testResult: "results/playwright.json" })
+Agent: "Publish the latest test results and file issues for failures"
+→ calls publish_test_results({ testResult: "results/playwright.json", createIssuesOnFailure: true, githubRepo: "myorg/myrepo", githubToken: "$GITHUB_TOKEN" })
+→ returns issue URLs for any failures → healer agent opens fix PRs
 ```
 
 ---

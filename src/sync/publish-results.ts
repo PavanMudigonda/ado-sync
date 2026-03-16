@@ -28,7 +28,8 @@ import { glob } from 'glob';
 import * as path from 'path';
 
 import { AzureClient } from '../azure/client';
-import { SyncConfig } from '../types';
+import { createIssuesFromResults, CreateIssuesResult } from '../issues/create-issues';
+import { CreateIssuesConfig, SyncConfig } from '../types';
 
 // ─── Result file parsing ──────────────────────────────────────────────────────
 
@@ -1228,6 +1229,8 @@ export interface PublishResult {
   passed: number;
   failed: number;
   other: number;
+  /** Summary of issues filed for failures. Present only when createIssuesOnFailure is configured. */
+  issuesSummary?: CreateIssuesResult;
 }
 
 export async function publishTestResults(
@@ -1241,6 +1244,10 @@ export async function publishTestResults(
     buildId?: number;
     /** Extra folder to scan for screenshots/videos/logs to attach to test results. */
     attachmentsFolder?: string;
+    /** When true, file GitHub Issues or ADO Bugs for failures (uses config + CLI overrides). */
+    createIssuesOnFailure?: boolean;
+    /** CLI overrides for issue-creation config. */
+    issueOverrides?: Partial<CreateIssuesConfig>;
   } = {}
 ): Promise<PublishResult> {
   const pubConfig = config.publishTestResults;
@@ -1322,7 +1329,19 @@ export async function publishTestResults(
   const other  = allResults.length - passed - failed;
 
   if (opts.dryRun) {
-    return { runId: 0, runUrl: '', totalResults: allResults.length, passed, failed, other };
+    // Still run issue creation logic in dry-run so the caller gets a preview
+    const issueConfig: CreateIssuesConfig | undefined =
+      opts.createIssuesOnFailure || pubConfig?.createIssuesOnFailure
+        ? { ...(pubConfig?.createIssuesOnFailure ?? {}), ...(opts.issueOverrides ?? {}) }
+        : undefined;
+    const issuesSummary = issueConfig && failed > 0
+      ? await createIssuesFromResults(
+          allResults, config, issueConfig,
+          { totalResults: allResults.length },
+          /* dryRun */ true,
+        )
+      : undefined;
+    return { runId: 0, runUrl: '', totalResults: allResults.length, passed, failed, other, issuesSummary };
   }
 
   const client = await AzureClient.create(config);
@@ -1429,5 +1448,23 @@ export async function publishTestResults(
   await testApi.updateTestRun({ state: 'Completed' } as any, config.project, runId);
 
   const runUrl = `${config.orgUrl}/${config.project}/_testManagement/runs?runId=${runId}`;
-  return { runId, runUrl, totalResults: allResults.length, passed, failed, other };
+
+  // ── Create issues for failures ────────────────────────────────────────────
+  let issuesSummary: CreateIssuesResult | undefined;
+  const issueConfig: CreateIssuesConfig | undefined =
+    opts.createIssuesOnFailure || pubConfig?.createIssuesOnFailure
+      ? { ...(pubConfig?.createIssuesOnFailure ?? {}), ...(opts.issueOverrides ?? {}) }
+      : undefined;
+
+  if (issueConfig && failed > 0) {
+    issuesSummary = await createIssuesFromResults(
+      allResults,
+      config,
+      issueConfig,
+      { runId, runUrl, buildId: opts.buildId, totalResults: allResults.length },
+      opts.dryRun,
+    );
+  }
+
+  return { runId, runUrl, totalResults: allResults.length, passed, failed, other, issuesSummary };
 }

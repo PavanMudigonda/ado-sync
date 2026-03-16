@@ -36,6 +36,12 @@ ado-sync publish-test-results \
 | `--runName <name>` | Name for the Test Run in Azure DevOps. Defaults to `ado-sync <ISO timestamp>`. |
 | `--buildId <id>` | Build ID to associate with the Test Run. |
 | `--dry-run` | Parse results and print summary without creating a run in Azure. |
+| `--create-issues-on-failure` | File GitHub Issues or ADO Bugs for each failed test after publishing. |
+| `--issue-provider <github\|ado>` | Issue provider. Default: `github`. |
+| `--github-repo <owner/repo>` | GitHub repository to file issues in. |
+| `--github-token <token>` | GitHub token. Supports `$ENV_VAR` references. |
+| `--bug-threshold <percent>` | If more than this % of tests fail, one environment-failure issue is filed instead of per-test issues. Default: `20`. |
+| `--max-issues <n>` | Hard cap on issues filed per run. Default: `50`. |
 | `--config-override` | Override config values (repeatable, same as other commands). |
 
 ---
@@ -702,6 +708,99 @@ Results can also be configured in the config file under `publishTestResults`:
 | `testRunSettings.runType` | `"Automated"` *(default)* · `"Manual"`. |
 | `testResultSettings.comment` | Comment applied to every test result. |
 | `publishAttachmentsForPassingTests` | `"none"` *(default)* · `"files"` · `"all"`. |
+
+---
+
+## Creating issues on failure
+
+`--create-issues-on-failure` automatically files a GitHub Issue or ADO Bug for each failed test
+after the run is published. Multiple guards prevent flooding your tracker when the environment is
+the problem rather than individual tests.
+
+### Guard logic (applied in order)
+
+```
+failures > threshold% of total?
+  └─ YES → 1 environment-failure issue, stop
+  └─ NO
+       └─ cluster by error signature
+            └─ cluster size > 1?
+                 └─ YES → 1 issue per cluster (lists affected test names)
+                 └─ NO  → 1 issue per TC (up to maxIssues cap)
+                               └─ cap hit? → 1 overflow summary issue
+```
+
+| Guard | Default | Description |
+|---|---|---|
+| Failure-rate threshold | 20% | Above this, one env-failure issue is filed instead of per-test |
+| Error clustering | enabled | Tests with the same error message are grouped into one issue |
+| Hard cap | 50 | No more than this many issues per run; one overflow summary when exceeded |
+| Dedup | enabled | Skip if an open issue already exists for the same TC (GitHub: by `tc:ID` label; ADO: by title) |
+
+### GitHub Issues (recommended)
+
+```bash
+ado-sync publish-test-results \
+  --testResult results/ctrf.json \
+  --create-issues-on-failure \
+  --github-repo myorg/myrepo \
+  --github-token $GITHUB_TOKEN
+```
+
+Each issue is labelled `test-failure` and `tc:{ID}` (when a TC ID is available). The issue body
+contains the error message, stack trace, ADO TC link, and run URL — everything a healer agent
+needs to propose a fix PR.
+
+### ADO Bugs
+
+```bash
+ado-sync publish-test-results \
+  --testResult results/junit.xml \
+  --create-issues-on-failure \
+  --issue-provider ado
+```
+
+ADO Bugs are created as Bug work items in the same project. The `Repro Steps` field is populated
+with the error details. When a TC ID is known, a `TestedBy` relation is added linking the Bug to
+the Test Case.
+
+### Config-based setup
+
+```json
+{
+  "publishTestResults": {
+    "createIssuesOnFailure": {
+      "provider": "github",
+      "repo": "myorg/myrepo",
+      "token": "$GITHUB_TOKEN",
+      "labels": ["test-failure", "automated"],
+      "threshold": 20,
+      "maxIssues": 50,
+      "clusterByError": true,
+      "dedupByTestCase": true
+    }
+  }
+}
+```
+
+CLI flags override the config values when both are present.
+
+### MCP tool: `create_issue`
+
+The `create_issue` MCP tool lets healer agents file a single issue directly:
+
+```
+create_issue({
+  title:       "[FAILED] Login with valid credentials",
+  body:        "Error: Expected 200 but got 401\n\nStack: ...",
+  provider:    "github",
+  githubRepo:  "myorg/myrepo",
+  githubToken: "$GITHUB_TOKEN",
+  testCaseId:  1234
+})
+```
+
+Returns the issue URL immediately, which the agent can embed in its fix PR.
 
 ---
 
