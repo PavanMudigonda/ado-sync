@@ -39,7 +39,7 @@ import { parseRustFile } from '../parsers/rust';
 import { parseSwiftFile } from '../parsers/swift';
 import { parseTestCafeFile } from '../parsers/testcafe';
 import { AzureTestCase, ParsedStep, ParsedTest, SuiteRoute, SyncConfig, SyncResult, TestPlanEntry } from '../types';
-import { CacheEntry, hashSteps, hashString, loadCache, saveCache, SyncCache } from './cache';
+import { hashSteps, hashString, loadCache, saveCache, SyncCache } from './cache';
 import { writebackDocComment, writebackId } from './writeback';
 
 // ─── Tag filtering ────────────────────────────────────────────────────────────
