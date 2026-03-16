@@ -980,8 +980,15 @@ export async function createTestCase(
   const relationPatches = await applyLinkRelations(client, 0, test, config, true);
   patchDoc.push(...relationPatches);
 
-  const wi = await wit.createWorkItem({}, patchDoc, config.project, 'Test Case');
-  if (!wi?.id) throw new Error(`Failed to create test case for: ${test.title}`);
+  let wi: any;
+  try {
+    wi = await wit.createWorkItem({}, patchDoc, config.project, 'Test Case');
+  } catch (err: any) {
+    const status: string = err?.statusCode ? ` (HTTP ${err.statusCode})` : '';
+    const detail: string = err?.message ?? String(err);
+    throw new Error(`Failed to create test case for: ${test.title}${status} — ${detail}`);
+  }
+  if (!wi?.id) throw new Error(`Failed to create test case for: ${test.title} — Azure returned no work item ID. Check that the project name, plan ID, and PAT permissions (Test Management: Write) are correct.`);
 
   const resolvedSuiteId = suiteIdOverride ?? config.testPlan.suiteId;
   if (resolvedSuiteId) {
@@ -1071,7 +1078,13 @@ export async function updateTestCase(
   const relationPatches = await applyLinkRelations(client, id, test, config, false);
   patchDoc.push(...relationPatches);
 
-  await wit.updateWorkItem({}, patchDoc, id);
+  try {
+    await wit.updateWorkItem({}, patchDoc, id);
+  } catch (err: any) {
+    const status: string = err?.statusCode ? ` (HTTP ${err.statusCode})` : '';
+    const detail: string = err?.message ?? String(err);
+    throw new Error(`Failed to update test case #${id} for: ${test.title}${status} — ${detail}`);
+  }
 
   // Sync attachments
   if (configDir) {
