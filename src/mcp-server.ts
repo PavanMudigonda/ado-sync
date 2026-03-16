@@ -40,18 +40,18 @@ const originalEmit = process.emit;
 };
 
 import 'dotenv/config';
-import * as path from 'path';
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import * as path from 'path';
 import { z } from 'zod';
 
 import { AzureClient } from './azure/client';
 import { getTestCase, getTestCasesInSuite } from './azure/test-cases';
 import { getWorkItemsByAreaPath, getWorkItemsByIds, getWorkItemsByQuery } from './azure/work-items';
 import { applyOverrides, loadConfig, resolveConfigPath } from './config';
-import { generateSpecs } from './sync/generate';
 import { pull, push, status } from './sync/engine';
+import { generateSpecs } from './sync/generate';
 import { publishTestResults } from './sync/publish-results';
 
 // ─── Config resolution ────────────────────────────────────────────────────────
