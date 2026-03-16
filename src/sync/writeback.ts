@@ -17,7 +17,7 @@ import * as fs from 'fs';
 import { writebackCsv } from '../parsers/csv';
 import { writebackExcel } from '../parsers/excel';
 import { detectJavaFramework } from '../parsers/java';
-import { ParsedTest } from '../types';
+import { ParsedStep, ParsedTest } from '../types';
 
 // ─── Gherkin writeback ────────────────────────────────────────────────────────
 
@@ -827,4 +827,96 @@ export async function writebackId(
       writebackRust(test, id, tagPrefix);
       break;
   }
+}
+
+// ─── JSDoc doc-comment writeback ──────────────────────────────────────────────
+
+/**
+ * Write (or update) a JSDoc comment immediately above the test() / it() line
+ * in a JavaScript/TypeScript file with the AI-generated title, description,
+ * and steps.
+ *
+ * Format written:
+ *   /**
+ *    * <title>
+ *    * Description: <description>    ← only when description is non-empty
+ *    * 1. <action step>
+ *    * 2. Check: <expected result>
+ *    * /
+ *
+ * On the next push the JavaScript parser reads this JSDoc block back, so
+ * test.steps.length > 0 and test.description is populated — AI is not
+ * re-invoked and the steps remain stable.
+ *
+ * Strategy:
+ *  1. Find test.line (1-based) — the it()/test() call.
+ *  2. Walk backward to find an existing /** … *‌/ block (skipping blank lines
+ *     and // single-line comments), and remove it entirely.
+ *  3. Build the new JSDoc lines.
+ *  4. Insert the JSDoc immediately above the test() line, matching indentation.
+ */
+export function writebackDocComment(
+  test: ParsedTest,
+  title: string,
+  description: string | undefined,
+  steps: ParsedStep[]
+): void {
+  const raw   = fs.readFileSync(test.filePath, 'utf8');
+  const lines = raw.split('\n');
+
+  const itLineIdx = test.line - 1; // 0-based
+
+  // ── Step 1: detect and remove any existing JSDoc block above the test ───────
+
+  let insertAt = itLineIdx; // default: insert right before the test line
+
+  // Walk backward past blank lines and // comments to find a closing */
+  let i = itLineIdx - 1;
+  while (i >= 0) {
+    const t = lines[i].trim();
+    if (t === '' || t.startsWith('//')) { i--; continue; }
+    break;
+  }
+
+  if (i >= 0 && lines[i].trim().endsWith('*/')) {
+    // Found a block comment ending — locate its opening /**
+    const closeIdx = i;
+    let openIdx    = i;
+    while (openIdx >= 0 && !lines[openIdx].trim().startsWith('/**')) openIdx--;
+
+    if (openIdx >= 0) {
+      // Remove the old JSDoc block (inclusive)
+      lines.splice(openIdx, closeIdx - openIdx + 1);
+      insertAt = openIdx; // insert the new block at the same position
+    }
+  }
+
+  // ── Step 2: build new JSDoc lines ─────────────────────────────────────────
+
+  const indentMatch = (lines[insertAt] ?? '').match(/^(\s*)/);
+  const indent      = indentMatch ? indentMatch[1] : '';
+
+  const docLines: string[] = [];
+  docLines.push(`${indent}/**`);
+  docLines.push(`${indent} * ${title}`);
+  if (description) {
+    docLines.push(`${indent} * Description: ${description}`);
+  }
+
+  let stepNum = 1;
+  for (const step of steps) {
+    if (step.keyword === 'Then') {
+      docLines.push(`${indent} * ${stepNum}. Check: ${step.text}`);
+    } else {
+      docLines.push(`${indent} * ${stepNum}. ${step.text}`);
+    }
+    stepNum++;
+  }
+
+  docLines.push(`${indent} */`);
+
+  // ── Step 3: splice the new block in ───────────────────────────────────────
+
+  lines.splice(insertAt, 0, ...docLines);
+  fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
 }

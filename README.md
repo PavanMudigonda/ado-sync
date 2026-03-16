@@ -358,13 +358,49 @@ Example `ai-context.md`:
 
 Context files work with all LLM providers (`local`, `ollama`, `openai`, `anthropic`). The `heuristic` provider ignores the file (no prompt involved).
 
+#### Option H — Freeze steps in source files (stable across runs)
+
+By default, AI-generated steps exist only in Azure DevOps. Enable `writebackDocComment` to also write the generated steps as a JSDoc comment directly above each `test()` call in the source file:
+
+```json
+{
+  "sync": {
+    "ai": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "apiKey": "$ANTHROPIC_API_KEY",
+      "writebackDocComment": true
+    }
+  }
+}
+```
+
+On the **first push**, AI generates the steps and writes them to the source file:
+
+```typescript
+/**
+ * User can log in with valid credentials
+ * Description: Verifies the login form accepts a correct email/password pair
+ * 1. Navigate to the login page
+ * 2. Enter a valid email address
+ * 3. Enter the matching password
+ * 4. Click the Sign In button
+ * 5. Check: The dashboard is displayed
+ */
+test('should log in with valid credentials', async ({ page }) => { ... });
+```
+
+On **every subsequent push**, the parser reads the JSDoc back — AI is not re-invoked. Steps remain stable even if the test body changes.
+
+> Only applies to JS/TS frameworks (`javascript`, `playwright`, `puppeteer`, `cypress`, `detox`). Has no effect when `sync.disableLocalChanges` is `true`.
+
 #### Disable AI entirely
 
 ```bash
 ado-sync push --ai-provider none
 ```
 
-> Tests with existing doc comments (JSDoc / Javadoc / C# XML doc / Python docstring) that already have both steps and a description are **never overwritten**. Local source files are **never modified** by AI summary.
+> Tests with existing doc comments (JSDoc / Javadoc / C# XML doc / Python docstring) that already contain steps are **never overwritten**. When `writebackDocComment` is `true`, local JS/TS source files are updated on the first push to freeze the generated steps; subsequent pushes leave the files unchanged.
 
 ### `publish-test-results`
 
