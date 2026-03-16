@@ -9,54 +9,94 @@ Using the MCP server instead of spawning the CLI gives agents:
 
 ---
 
-## Start the server
+## Installation
 
+No separate install needed. `ado-sync-mcp` ships inside the `ado-sync` npm package.
+
+**Option A — Global install (recommended, fastest startup)**
 ```bash
-# stdio transport (standard for IDE integrations)
-ado-sync-mcp
+npm install -g ado-sync
 ```
 
-The server reads your `ado-sync.json` (or the path in `ADO_SYNC_CONFIG` env var) automatically.
+**Option B — npx (no install, always latest)**
 
-```bash
-# Point at a specific config
-ADO_SYNC_CONFIG=/path/to/ado-sync.json ado-sync-mcp
-```
+Use `npx --yes --package=ado-sync ado-sync-mcp` as the command in all configs below.
+npx downloads and runs the package automatically on first use.
 
 ---
 
-## Register in Claude Code
+## Claude Code — one-liner registration
 
-Add to `~/.claude/claude_desktop_config.json` (or the path shown in Claude Code → Settings → MCP):
+```bash
+# With global install
+claude mcp add ado-sync \
+  --env AZURE_DEVOPS_TOKEN="$AZURE_DEVOPS_TOKEN" \
+  --env ADO_SYNC_CONFIG="$(pwd)/ado-sync.json" \
+  -- ado-sync-mcp
 
+# With npx (no global install required)
+claude mcp add ado-sync \
+  --env AZURE_DEVOPS_TOKEN="$AZURE_DEVOPS_TOKEN" \
+  --env ADO_SYNC_CONFIG="$(pwd)/ado-sync.json" \
+  -- npx --yes --package=ado-sync ado-sync-mcp
+```
+
+Verify it registered: run `/mcp` in Claude Code — `ado-sync` should appear in the list.
+
+**Manual config** — `~/.claude/claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
     "ado-sync": {
-      "command": "ado-sync-mcp",
+      "command": "npx",
+      "args": ["--yes", "--package=ado-sync", "ado-sync-mcp"],
       "env": {
-        "AZURE_DEVOPS_TOKEN": "<your-token>",
-        "ADO_SYNC_CONFIG": "/path/to/ado-sync.json"
+        "AZURE_DEVOPS_TOKEN": "<your-pat>",
+        "ADO_SYNC_CONFIG": "/absolute/path/to/ado-sync.json"
       }
     }
   }
 }
 ```
 
-Restart Claude Code. The tools appear automatically under the `ado-sync` server namespace.
+---
+
+## Claude Desktop
+
+Config file location:
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "ado-sync": {
+      "command": "npx",
+      "args": ["--yes", "--package=ado-sync", "ado-sync-mcp"],
+      "env": {
+        "AZURE_DEVOPS_TOKEN": "<your-pat>",
+        "ADO_SYNC_CONFIG": "/absolute/path/to/ado-sync.json"
+      }
+    }
+  }
+}
+```
+
+Restart Claude Desktop after saving.
 
 ---
 
-## Register in VS Code (GitHub Copilot)
+## VS Code (GitHub Copilot agent mode)
 
-Add to `.vscode/mcp.json` in your workspace (or user settings):
+Create `.vscode/mcp.json` in your workspace root:
 
 ```json
 {
   "servers": {
     "ado-sync": {
       "type": "stdio",
-      "command": "ado-sync-mcp",
+      "command": "npx",
+      "args": ["--yes", "--package=ado-sync", "ado-sync-mcp"],
       "env": {
         "AZURE_DEVOPS_TOKEN": "${env:AZURE_DEVOPS_TOKEN}",
         "ADO_SYNC_CONFIG": "${workspaceFolder}/ado-sync.json"
@@ -66,25 +106,40 @@ Add to `.vscode/mcp.json` in your workspace (or user settings):
 }
 ```
 
+`${env:AZURE_DEVOPS_TOKEN}` reads the variable from your shell environment — no hardcoded secrets.
+
 ---
 
-## Register in Cursor
+## Cursor
 
-Add to `~/.cursor/mcp.json`:
+`~/.cursor/mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "ado-sync": {
-      "command": "ado-sync-mcp",
+      "command": "npx",
+      "args": ["--yes", "--package=ado-sync", "ado-sync-mcp"],
       "env": {
-        "AZURE_DEVOPS_TOKEN": "<your-token>",
-        "ADO_SYNC_CONFIG": "/path/to/ado-sync.json"
+        "AZURE_DEVOPS_TOKEN": "<your-pat>",
+        "ADO_SYNC_CONFIG": "/absolute/path/to/ado-sync.json"
       }
     }
   }
 }
 ```
+
+---
+
+## Verify it works
+
+After registration, ask your AI assistant:
+
+```
+"Call ado-sync validate_config and tell me what it returns"
+```
+
+Expected response includes config validity, Azure connection status, and test plan confirmation.
 
 ---
 
@@ -111,7 +166,7 @@ All tools accept these optional base parameters:
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `configPath` | string | Path to `ado-sync.json` (overrides `ADO_SYNC_CONFIG`) |
+| `configPath` | string | Absolute path to `ado-sync.json` (overrides `ADO_SYNC_CONFIG`) |
 | `configOverrides` | string[] | Runtime overrides in `key=value` format (same as `--config-override`) |
 
 ### `push_specs`
@@ -152,9 +207,10 @@ All tools accept these optional base parameters:
 Once registered, an AI agent can orchestrate the full test lifecycle without any human CLI invocation:
 
 ```
-Agent: "Push my Playwright specs to Azure DevOps"
-→ calls push_specs({ dryRun: true })        # preview
-→ calls push_specs({})                       # apply
+Agent: "Set up ado-sync for this repo"
+→ calls validate_config to check connectivity
+→ calls push_specs({ dryRun: true }) to preview
+→ calls push_specs({}) to create Test Cases
 
 Agent: "Generate spec files for User Story 1234"
 → calls generate_specs({ storyIds: [1234], format: "gherkin" })
@@ -169,5 +225,7 @@ Agent: "Publish the latest test results"
 
 | Variable | Description |
 |----------|-------------|
-| `ADO_SYNC_CONFIG` | Path to config file (default: `ado-sync.json` in cwd) |
+| `ADO_SYNC_CONFIG` | Absolute path to config file (default: `ado-sync.json` in cwd) |
 | `AZURE_DEVOPS_TOKEN` | PAT or access token (referenced by `auth.token` in config) |
+
+> **Important:** `ADO_SYNC_CONFIG` must be an **absolute path**. The MCP server process does not inherit the shell's working directory the same way as a CLI call.
