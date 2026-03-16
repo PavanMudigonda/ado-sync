@@ -40,7 +40,7 @@ import { parseSwiftFile } from '../parsers/swift';
 import { parseTestCafeFile } from '../parsers/testcafe';
 import { AzureTestCase, ParsedStep, ParsedTest, SuiteRoute, SyncConfig, SyncResult, TestPlanEntry } from '../types';
 import { CacheEntry, hashSteps, hashString, loadCache, saveCache, SyncCache } from './cache';
-import { writebackId } from './writeback';
+import { writebackDocComment, writebackId } from './writeback';
 
 // ─── Tag filtering ────────────────────────────────────────────────────────────
 
@@ -349,6 +349,19 @@ async function pushSingle(
         }
         if (needsDescription && result.description) {
           test.description = result.description;
+        }
+
+        // JSDoc doc-comment writeback: persist the AI-generated steps to the source
+        // file so they are read back on the next push (preventing re-invocation).
+        // Only applies to JS/TS frameworks that use the JavaScript parser.
+        const jsTypes = new Set(['javascript', 'playwright', 'puppeteer', 'cypress', 'detox', 'xcuitest', 'flutter']);
+        if (
+          config.sync?.ai?.writebackDocComment &&
+          !(config.sync?.disableLocalChanges) &&
+          jsTypes.has(config.local.type) &&
+          test.steps.length > 0
+        ) {
+          writebackDocComment(test, test.title, test.description, test.steps);
         }
       }
     }
