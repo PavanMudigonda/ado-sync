@@ -68,14 +68,11 @@ export interface AiWorkflowManifest {
   };
 }
 
-/** Resolved manifest format family — maps many local.type values to one of these. */
-export type ManifestFormat = 'gherkin' | 'markdown' | 'playwright' | 'javascript';
-
 export interface GenerateManifestOpts {
   storyIds:     number[];
   outputFolder?: string;
-  /** Explicit format. When omitted, auto-detected from config.local.type. */
-  format?:      ManifestFormat | 'reqnroll' | 'cypress' | 'jest' | 'detox' | 'testcafe';
+  /** Spec format to reference in the manifest. Default: gherkin when local.type is gherkin/reqnroll, otherwise markdown. */
+  format?:      'gherkin' | 'markdown';
   force?:       boolean;
   dryRun?:      boolean;
 }
@@ -239,6 +236,21 @@ function buildManifest(
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function resolveManifestFormat(
+  explicit: 'gherkin' | 'markdown' | undefined,
+  localType: string | undefined,
+): 'gherkin' | 'markdown' {
+  if (explicit) return explicit;
+  if (localType === 'gherkin' || localType === 'reqnroll') return 'gherkin';
+  return 'markdown';
+}
+
+function specExtension(format: 'gherkin' | 'markdown', localType: string | undefined): string {
+  if (format === 'gherkin') return '.feature';
+  if (localType === 'markdown') return '.md';
+  return '.md';
+}
 
 function toKebabCase(str: string): string {
   return str
