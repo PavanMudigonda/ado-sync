@@ -133,9 +133,10 @@ A `.env` file in the working directory is loaded automatically.
 
 ## MCP server
 
-`ado-sync-mcp` starts an MCP stdio server exposing 10 tools:
+`ado-sync-mcp` starts an MCP stdio server exposing 13 tools:
 `validate_config`, `get_test_cases`, `get_test_case`, `push_specs`, `pull_specs`,
-`status`, `diff`, `generate_specs`, `get_work_items`, `publish_test_results`
+`status`, `diff`, `generate_specs`, `get_work_items`, `publish_test_results`,
+`create_issue`, `get_story_context`, `generate_manifest`
 
 Register in Claude Code (`~/.claude/claude_desktop_config.json`):
 ```json
