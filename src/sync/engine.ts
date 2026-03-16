@@ -356,6 +356,32 @@ async function pushSingle(
   }
 
   const client = await AzureClient.create(config);
+
+  // Preflight: validate project + plan ID before processing any tests.
+  // A bad plan ID or missing PAT permission causes every test to fail — catch it early.
+  if (!opts.dryRun) {
+    try {
+      const planApi = await client.getTestPlanApi();
+      const plan = await planApi.getTestPlanById(config.project, config.testPlan.id);
+      if (!plan?.id) {
+        throw new Error(
+          `Test Plan ${config.testPlan.id} not found in project "${config.project}". ` +
+          `Verify testPlan.id and the project name in your config.`
+        );
+      }
+    } catch (err: any) {
+      const status: string = err?.statusCode ? ` (HTTP ${err.statusCode})` : '';
+      const base: string = err?.message ?? String(err);
+      // Don't double-wrap if we threw the descriptive message above
+      if (base.includes('not found in project')) throw err;
+      throw new Error(
+        `Preflight failed — could not reach project "${config.project}" / plan ${config.testPlan.id}${status}.\n` +
+        `  Detail: ${base}\n` +
+        `  Check: correct project name, testPlan.id, and that your PAT has "Test Management: Read & Write" permission.`
+      );
+    }
+  }
+
   const tagPrefix = config.sync?.tagPrefix ?? 'tc';
   const titleField = config.sync?.titleField ?? 'System.Title';
   const conflictAction = config.sync?.conflictAction ?? 'overwrite';
