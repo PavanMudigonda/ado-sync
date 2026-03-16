@@ -1,0 +1,163 @@
+# ado-sync
+
+Bidirectional sync CLI between local test specs and Azure DevOps Test Cases.
+npm package: `ado-sync` | bin: `ado-sync` and `ado-sync-mcp`
+
+## What it does
+
+- `push` — reads local test files, creates new Azure DevOps Test Cases (and writes IDs back into the files), or updates existing ones when content changes
+- `pull` — reads Test Cases from Azure DevOps and updates matching local files
+- `status` — dry-run diff: shows what would change without touching anything
+- `diff` — field-level diff showing exactly which fields (title, steps, description) differ
+- `publish-test-results` — publishes TRX / JUnit XML / NUnit XML / Cucumber JSON / Playwright JSON results to an Azure DevOps Test Run
+- `generate` — creates local spec files (.feature or .md) from Azure DevOps User Stories
+- `validate` — checks config validity and Azure connectivity
+- `init` — interactive wizard that generates ado-sync.json
+
+## Install
+
+```
+npm install -g ado-sync
+```
+
+## Minimum config (ado-sync.json)
+
+```json
+{
+  "orgUrl": "https://dev.azure.com/YOUR-ORG",
+  "project": "YOUR-PROJECT",
+  "auth": { "type": "pat", "token": "$AZURE_DEVOPS_TOKEN" },
+  "testPlan": { "id": 12345 },
+  "local": { "type": "TYPE", "include": "GLOB" }
+}
+```
+
+Required fields: `orgUrl`, `project`, `auth`, `testPlan.id`, `local.type`, `local.include`
+
+## Framework → local.type mapping
+
+| Files present in repo | Use local.type | include glob |
+|---|---|---|
+| `*.feature` (Cucumber/Gherkin) | `gherkin` | `specs/**/*.feature` |
+| `*.feature` (SpecFlow / C#) | `gherkin` | `Features/**/*.feature` |
+| `*.md` prose specs | `markdown` | `specs/**/*.md` |
+| `*.cs` (MSTest / NUnit) | `csharp` | `**/Tests/**/*.cs` |
+| `*.java` (JUnit 4/5 / TestNG) | `java` | `**/src/test/**/*.java` |
+| `*.py` (pytest) | `python` | `tests/**/*.py` |
+| `*.spec.ts` / `*.spec.js` (Playwright) | `playwright` | `tests/**/*.spec.ts` |
+| `*.cy.ts` / `*.cy.js` (Cypress) | `cypress` | `cypress/e2e/**/*.cy.ts` |
+| `*.test.ts` / `*.test.js` (Jest) | `javascript` | `src/**/*.test.ts` |
+| `*.js` / `*.ts` (Jasmine / WebdriverIO) | `javascript` | `test/**/*.spec.js` |
+| `*.js` / `*.ts` (Detox) | `detox` | `e2e/**/*.test.ts` |
+| `*.java` / `*.kt` (Espresso) | `espresso` | `app/src/androidTest/**/*.java` |
+| `*.swift` (XCUITest) | `xcuitest` | `UITests/**/*.swift` |
+| `*_test.dart` (Flutter) | `flutter` | `test/**/*_test.dart` |
+| `*.robot` (Robot Framework) | `robot` | `tests/**/*.robot` |
+| `*.csv` (ADO tabular export) | `csv` | `testcases/**/*.csv` |
+| `*.xlsx` (ADO tabular export) | `excel` | `testcases/**/*.xlsx` |
+
+## ID writeback format per framework
+
+After the first push, ado-sync writes the Azure Test Case ID back into each local file:
+
+| local.type | ID written as |
+|---|---|
+| gherkin / markdown | `@tc:12345` tag above Scenario or ### heading |
+| csharp (MSTest) | `[TestProperty("tc", "12345")]` above `[TestMethod]` |
+| csharp (NUnit) | `[Property("tc", "12345")]` above `[Test]` |
+| java (JUnit 4 / TestNG) | `// @tc:12345` comment above `@Test` |
+| java (JUnit 5) | `@Tag("tc:12345")` above `@Test` |
+| python | `@pytest.mark.tc(12345)` above `def test_*` |
+| javascript / detox | `// @tc:12345` comment above `it()` or `test()` |
+| playwright | `annotation: { type: 'tc', description: '12345' }` in test options |
+| cypress | `// @tc:12345` comment above `it()` |
+| espresso / xcuitest / flutter | `// @tc:12345` comment above test method |
+| robot | `tc:12345` in `[Tags]` row |
+| csv | numeric ID in column A |
+| excel | numeric ID in cell A1 |
+
+## Auth options
+
+```json
+{ "auth": { "type": "pat",             "token": "$AZURE_DEVOPS_TOKEN" } }
+{ "auth": { "type": "accessToken",     "token": "$SYSTEM_ACCESSTOKEN" } }
+{ "auth": { "type": "managedIdentity"  } }
+```
+
+PAT required scopes: **Test Management (Read & Write)**, Work Items (Read)
+
+## Key CLI flags
+
+```
+ado-sync push --dry-run                        preview only
+ado-sync push --tags "@smoke and not @wip"     filter by tag
+ado-sync push --config-override testPlan.id=99 override config at runtime
+ado-sync push --ai-provider heuristic          AI test step generation (no model needed)
+ado-sync push --ai-provider openai --ai-key $OPENAI_API_KEY
+ado-sync push --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
+ado-sync status --output json                  machine-readable output
+```
+
+## Suite routing
+
+Automatically route Test Cases into named suites by tag:
+
+```json
+"testPlan": {
+  "id": 1234,
+  "suiteRouting": [
+    { "tags": "@smoke", "suite": "Smoke" },
+    { "tags": "@regression", "suite": "Regression" },
+    { "suite": "General" }
+  ]
+}
+```
+
+## Conflict handling
+
+```json
+"sync": { "conflictAction": "overwrite" }   // local wins (default)
+"sync": { "conflictAction": "skip" }        // keep Azure version
+"sync": { "conflictAction": "fail" }        // abort push, list conflicts
+```
+
+## Environment variables
+
+| Variable | Purpose |
+|---|---|
+| `AZURE_DEVOPS_TOKEN` | PAT or access token |
+| `ADO_SYNC_CONFIG` | Path to config file (used by MCP server) |
+| `DEBUG=1` | Show full stack traces on errors |
+
+A `.env` file in the working directory is loaded automatically.
+
+## MCP server
+
+`ado-sync-mcp` starts an MCP stdio server exposing 10 tools:
+`validate_config`, `get_test_cases`, `get_test_case`, `push_specs`, `pull_specs`,
+`status`, `diff`, `generate_specs`, `get_work_items`, `publish_test_results`
+
+Register in Claude Code (`~/.claude/claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "ado-sync": {
+      "command": "ado-sync-mcp",
+      "env": { "AZURE_DEVOPS_TOKEN": "<token>", "ADO_SYNC_CONFIG": "/path/to/ado-sync.json" }
+    }
+  }
+}
+```
+
+## Documentation index
+
+- docs/cli.md               — full CLI reference (all commands, flags, options)
+- docs/configuration.md     — complete config schema reference
+- docs/workflows.md         — framework-specific end-to-end examples
+- docs/spec-formats.md      — spec file format details per framework
+- docs/work-item-links.md   — linking Test Cases to User Stories / Bugs
+- docs/publish-test-results.md — TRX / JUnit / Playwright result publishing
+- docs/advanced.md          — suite routing, fieldUpdates, attachments, CI mode
+- docs/mcp-server.md        — MCP server setup and tool reference
+- docs/troubleshooting.md   — common errors and fixes
+- docs/agent-setup.md       — step-by-step guide for AI agents doing autonomous setup

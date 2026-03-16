@@ -154,6 +154,56 @@ function validateConfig(cfg: SyncConfig, filePath: string): void {
   if (!validLocalTypes.includes(cfg.local.type))
     err(`"local.type" must be one of: ${validLocalTypes.join(', ')} (got "${cfg.local.type}")`);
   if (!cfg.local?.include) err('"local.include" is required');
+
+  // testPlans[] entries must each have an id
+  if (cfg.testPlans) {
+    cfg.testPlans.forEach((p, i) => {
+      if (!p.id) err(`testPlans[${i}] must have an "id" field`);
+      if (p.suiteRouting) {
+        p.suiteRouting.forEach((r, j) => {
+          if (r.suite === undefined) err(`testPlans[${i}].suiteRouting[${j}] must have a "suite" field`);
+        });
+      }
+      if (p.suiteConditions) {
+        p.suiteConditions.forEach((c, j) => {
+          if (!c.suite) err(`testPlans[${i}].suiteConditions[${j}] must have a "suite" field`);
+        });
+      }
+    });
+  }
+
+  // suiteRouting entries must have a suite field
+  if (cfg.testPlan?.suiteRouting) {
+    cfg.testPlan.suiteRouting.forEach((r, i) => {
+      if (r.suite === undefined) err(`testPlan.suiteRouting[${i}] must have a "suite" field`);
+    });
+  }
+
+  // sync.suiteConditions entries must have a suite field
+  if (cfg.sync?.suiteConditions) {
+    cfg.sync.suiteConditions.forEach((c, i) => {
+      if (!c.suite) err(`sync.suiteConditions[${i}] must have a "suite" field`);
+    });
+  }
+
+  // sync.links entries must have a prefix field
+  if (cfg.sync?.links) {
+    cfg.sync.links.forEach((l, i) => {
+      if (!l.prefix) err(`sync.links[${i}] must have a "prefix" field`);
+    });
+  }
+
+  // conflictAction valid values
+  const validConflict = ['overwrite', 'skip', 'fail'];
+  if (cfg.sync?.conflictAction && !validConflict.includes(cfg.sync.conflictAction)) {
+    err(`sync.conflictAction must be one of: ${validConflict.join(', ')} (got "${cfg.sync.conflictAction}")`);
+  }
+
+  // outputLevel valid values
+  const validOutputLevels = ['normal', 'verbose', 'quiet'];
+  if (cfg.toolSettings?.outputLevel && !validOutputLevels.includes(cfg.toolSettings.outputLevel)) {
+    err(`toolSettings.outputLevel must be one of: ${validOutputLevels.join(', ')} (got "${cfg.toolSettings.outputLevel}")`);
+  }
 }
 
 /**
