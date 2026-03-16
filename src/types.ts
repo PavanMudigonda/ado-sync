@@ -509,10 +509,20 @@ export interface AzureStep {
 
 export type SyncAction = 'created' | 'updated' | 'skipped' | 'conflict' | 'pulled' | 'removed' | 'error';
 
+export interface DiffDetail {
+  field: string;
+  remote: string;
+  local: string;
+}
+
 export interface SyncResult {
   action: SyncAction;
   filePath: string;
   title: string;
   azureId?: number;
   detail?: string;
+  /** Fields that changed (used by `diff` command and conflict reporting). */
+  changedFields?: string[];
+  /** Per-field diff details for richer `diff` output. */
+  diffDetail?: DiffDetail[];
 }

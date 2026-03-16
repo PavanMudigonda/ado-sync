@@ -1,0 +1,24 @@
+{
+    "orgUrl": "https://dev.azure.com/tr-ihn-sandbox",
+    "project": "Azure-DevOps-Training",
+    "auth": {
+        "type": "pat",
+        "token": "$AZURE_DEVOPS_TOKEN"
+    },
+    "testPlan": {
+        "id": 42099,
+        "suiteMapping": "byFolder"
+    },
+    "local": {
+        "type": "markdown",
+        "include": [
+            "saffron-components.md"
+        ]
+    },
+    "sync": {
+        "tagPrefix": "tc",
+        "format": {
+            "useExpectedResult": true
+        }
+    }
+}

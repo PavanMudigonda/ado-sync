@@ -21,12 +21,18 @@ export interface CacheEntry {
   title: string;
   stepsHash: string;
   descriptionHash: string;
+  /** SHA-256 hash of the remote description at last sync. Used to detect Azure-side changes. */
+  remoteDescriptionHash?: string;
   /** ISO changedDate from Azure at time of last sync */
   changedDate: string;
   filePath: string;
 }
 
-export type SyncCache = Record<number, CacheEntry>;
+export interface SyncCache {
+  [tcId: number]: CacheEntry;
+  /** Persisted suite name→id map. Key format: "{planId}:{suiteName}" */
+  _suites?: Record<string, number>;
+}
 
 export function loadCache(configDir: string): SyncCache {
   const cachePath = path.join(configDir, CACHE_FILENAME);
