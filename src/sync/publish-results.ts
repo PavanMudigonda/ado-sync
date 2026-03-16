@@ -1245,8 +1245,14 @@ export async function publishTestResults(
     return result;
   });
 
-  // addTestResultsToTestRun returns the created results with their ADO IDs
-  const addedResults = await testApi.addTestResultsToTestRun(testCaseResults, config.project, runId);
+  // addTestResultsToTestRun has a hard limit of 1000 results per call — batch accordingly
+  const BATCH_SIZE = 1000;
+  const addedResults: any[] = [];
+  for (let i = 0; i < testCaseResults.length; i += BATCH_SIZE) {
+    const batch = testCaseResults.slice(i, i + BATCH_SIZE);
+    const batchAdded = await testApi.addTestResultsToTestRun(batch, config.project, runId);
+    if (batchAdded) addedResults.push(...batchAdded);
+  }
 
   // ── Upload attachments ────────────────────────────────────────────────────
   const publishAttachmentsForPassing = pubConfig?.publishAttachmentsForPassingTests ?? 'none';
