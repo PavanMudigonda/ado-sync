@@ -404,6 +404,16 @@ export interface SyncConfig {
        * Default: false.
        */
       analyzeFailures?: boolean;
+      /**
+       * When true, write AI-generated title, description, and steps back to the source
+       * file as a JSDoc comment (/** ... *‌/) immediately above each test() call.
+       * On the next push the parser reads the JSDoc so AI is not re-invoked, keeping
+       * steps stable across runs.
+       * Only applies to JavaScript/TypeScript frameworks (playwright, jest, cypress, etc.).
+       * Ignored when sync.disableLocalChanges is true.
+       * Default: false.
+       */
+      writebackDocComment?: boolean;
     };
   };
 }

@@ -303,15 +303,17 @@ function extractPlaywrightNativeMetadata(
 
 // ─── JSDoc → title + steps ────────────────────────────────────────────────────
 
-const NUMBERED_STEP_RE = /^\d+\.\s+(.+)$/;
-const CHECK_RE         = /^[Cc]heck:\s+(.+)$/;
-const META_RE          = /^(?:test\s+case|user\s+story)[\s:]/i;
+const NUMBERED_STEP_RE  = /^\d+\.\s+(.+)$/;
+const CHECK_RE           = /^[Cc]heck:\s+(.+)$/;
+const META_RE            = /^(?:test\s+case|user\s+story)[\s:]/i;
+const DESCRIPTION_RE     = /^[Dd]escription:\s+(.+)$/;
 
 function parseSummary(
   jsdocLines: string[],
   fallbackTitle: string
-): { title: string; steps: ParsedStep[] } {
+): { title: string; description?: string; steps: ParsedStep[] } {
   let title = '';
+  let description: string | undefined;
   const steps: ParsedStep[] = [];
 
   for (const line of jsdocLines) {
@@ -319,7 +321,7 @@ function parseSummary(
 
     const numMatch = NUMBERED_STEP_RE.exec(line);
     if (numMatch) {
-      const content   = numMatch[1].trim();
+      const content    = numMatch[1].trim();
       const checkMatch = CHECK_RE.exec(content);
       if (checkMatch) {
         steps.push({ keyword: 'Then', text: checkMatch[1].trim() });
@@ -329,10 +331,16 @@ function parseSummary(
       continue;
     }
 
+    const descMatch = DESCRIPTION_RE.exec(line);
+    if (descMatch) {
+      description = descMatch[1].trim();
+      continue;
+    }
+
     if (!title) title = line;
   }
 
-  return { title: title || fallbackTitle, steps };
+  return { title: title || fallbackTitle, description, steps };
 }
 
 // ─── Public parser ────────────────────────────────────────────────────────────
@@ -371,7 +379,7 @@ export function parseJavaScriptFile(
     // Native Playwright annotation takes priority over comment-style ID
     const azureId = nId ?? cId;
     const allTags = [...new Set([...pathTags, ...cTags, ...nTags])];
-    const { title, steps } = parseSummary(jsdocLines, callTitle);
+    const { title, description, steps } = parseSummary(jsdocLines, callTitle);
 
     // automatedTestName mirrors Jest's built-in test-result path format
     const automatedTestName = [fileBaseName, ...describes, callTitle].join(' > ');
@@ -379,6 +387,7 @@ export function parseJavaScriptFile(
     results.push({
       filePath,
       title,
+      description,
       steps,
       tags: allTags,
       azureId: azureId !== undefined && !isNaN(azureId) ? azureId : undefined,
