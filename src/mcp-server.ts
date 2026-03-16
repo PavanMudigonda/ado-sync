@@ -18,6 +18,9 @@
  *   generate_specs         — generate local spec files from ADO User Stories
  *   get_work_items         — fetch ADO User Stories by ID, WIQL query, or area path
  *   publish_test_results   — publish test results to Azure DevOps
+ *   create_issue           — file a GitHub Issue or ADO Bug for a test failure
+ *   get_story_context      — planner-agent feed: AC items, suggested tags, linked TCs
+ *   generate_manifest      — write .ai-workflow-manifest-{id}.json for a story
  *
  * Usage (register in .claude/settings.json or .vscode/mcp.json):
  *
@@ -48,10 +51,12 @@ import { z } from 'zod';
 
 import { AzureClient } from './azure/client';
 import { getTestCase, getTestCasesInSuite } from './azure/test-cases';
-import { getWorkItemsByAreaPath, getWorkItemsByIds, getWorkItemsByQuery } from './azure/work-items';
+import { getStoryContext, getWorkItemsByAreaPath, getWorkItemsByIds, getWorkItemsByQuery } from './azure/work-items';
 import { applyOverrides, loadConfig, resolveConfigPath } from './config';
+import { createIssuesFromResults } from './issues/create-issues';
 import { pull, push, status } from './sync/engine';
 import { generateSpecs } from './sync/generate';
+import { generateManifests } from './sync/manifest';
 import { publishTestResults } from './sync/publish-results';
 
 // ─── Config resolution ────────────────────────────────────────────────────────
@@ -348,15 +353,23 @@ server.tool(
   'Links results to existing test cases by ID or automated test name.',
   {
     resultFiles: z.array(z.string()).optional().describe('Paths to result files'),
-    resultFormat: z.string().optional().describe('Format: trx, junit, nunitXml, cucumberJson, playwrightJson'),
+    resultFormat: z.string().optional().describe('Format: trx, junit, nunitXml, cucumberJson, playwrightJson, ctrfJson'),
     runName: z.string().optional().describe('Name for the test run in Azure DevOps'),
     buildId: z.number().optional().describe('Build ID to associate with the run'),
     attachmentsFolder: z.string().optional().describe('Folder with screenshots/videos to attach'),
     dryRun: z.boolean().optional().default(false).describe('Parse results without publishing'),
+    createIssuesOnFailure: z.boolean().optional().describe('File GitHub Issues or ADO Bugs for failed tests'),
+    issueProvider: z.enum(['github', 'ado']).optional().describe('Issue provider: github (default) or ado'),
+    githubRepo: z.string().optional().describe('GitHub repository "owner/repo" to file issues in'),
+    githubToken: z.string().optional().describe('GitHub token or $ENV_VAR reference'),
+    bugThreshold: z.number().optional().describe('Failure % threshold for env-failure mode (default: 20)'),
+    maxIssues: z.number().optional().describe('Hard cap on issues per run (default: 50)'),
     configPath: z.string().optional().describe('Path to ado-sync config file'),
     configOverrides: z.array(z.string()).optional().describe('Config overrides'),
   },
-  async ({ resultFiles, resultFormat, runName, buildId, attachmentsFolder, dryRun, configPath, configOverrides }) => {
+  async ({ resultFiles, resultFormat, runName, buildId, attachmentsFolder, dryRun,
+           createIssuesOnFailure, issueProvider, githubRepo, githubToken, bugThreshold, maxIssues,
+           configPath, configOverrides }) => {
     const { config, configDir } = resolveConfig(configPath, configOverrides);
     const result = await publishTestResults(config, configDir, {
       dryRun,
@@ -365,6 +378,14 @@ server.tool(
       runName,
       buildId,
       attachmentsFolder,
+      createIssuesOnFailure,
+      issueOverrides: {
+        ...(issueProvider && { provider:  issueProvider }),
+        ...(githubRepo    && { repo:      githubRepo }),
+        ...(githubToken   && { token:     githubToken }),
+        ...(bugThreshold  && { threshold: bugThreshold }),
+        ...(maxIssues     && { maxIssues }),
+      },
     });
 
     const lines: string[] = [
@@ -378,6 +399,158 @@ server.tool(
       lines.push(`  Run ID: ${result.runId}`);
       lines.push(`  URL:    ${result.runUrl}`);
     }
+    if (result.issuesSummary) {
+      const s = result.issuesSummary;
+      lines.push(`  Issues mode: ${s.mode}  |  Filed: ${s.issued.filter((i) => i.action === 'created').length}  |  Suppressed: ${s.suppressed}`);
+      for (const issue of s.issued) {
+        lines.push(`    ${issue.action === 'created' ? '+' : '='} ${issue.title}${issue.url ? ' → ' + issue.url : ''}`);
+      }
+    }
+    return { content: [{ type: 'text', text: lines.join('\n') }] };
+  }
+);
+
+// ─── Tool: create_issue ───────────────────────────────────────────────────────
+
+server.tool(
+  'create_issue',
+  'File a GitHub Issue or ADO Bug for a test failure. ' +
+  'Intended for use by healer agents after publish_test_results — provides the issue URL to chain into a fix PR workflow.',
+  {
+    title:         z.string().describe('Issue title (e.g. "[FAILED] Login with valid credentials")'),
+    body:          z.string().describe('Issue body in Markdown — include error message, stack trace, and ADO TC link'),
+    provider:      z.enum(['github', 'ado']).optional().default('github').describe('Issue provider'),
+    githubRepo:    z.string().optional().describe('GitHub repository "owner/repo"'),
+    githubToken:   z.string().optional().describe('GitHub token or $ENV_VAR reference'),
+    labels:        z.array(z.string()).optional().describe('Labels to apply (GitHub only)'),
+    assignees:     z.array(z.string()).optional().describe('GitHub assignees (logins)'),
+    testCaseId:    z.number().optional().describe('ADO Test Case ID to link the bug to (ADO provider)'),
+    areaPath:      z.string().optional().describe('ADO area path for the Bug work item'),
+    configPath:    z.string().optional().describe('Path to ado-sync config file'),
+    configOverrides: z.array(z.string()).optional().describe('Config overrides'),
+  },
+  async ({ title, body, provider, githubRepo, githubToken, labels, assignees, testCaseId, areaPath, configPath, configOverrides }) => {
+    const { config } = resolveConfig(configPath, configOverrides);
+
+    // Build a minimal CreateIssuesConfig and reuse createIssuesFromResults with a
+    // synthetic single-failure result list so all guard/dedup logic is bypassed (threshold=0).
+    const issueConfig = {
+      provider:      provider ?? 'github' as const,
+      repo:          githubRepo,
+      token:         githubToken,
+      labels:        labels ?? ['test-failure'],
+      assignees,
+      areaPath,
+      threshold:     0,  // bypass threshold guard for explicit single-issue creation
+      maxIssues:     1,
+      clusterByError: false,
+      dedupByTestCase: false,
+    };
+
+    const syntheticResult = {
+      testName:     title,
+      outcome:      'Failed',
+      durationMs:   0,
+      errorMessage: body,
+      testCaseId,
+    };
+
+    const summary = await createIssuesFromResults(
+      [syntheticResult],
+      config,
+      issueConfig,
+      { totalResults: 1 },
+    );
+
+    const created = summary.issued.find((i) => i.action === 'created');
+    if (created?.url) {
+      return { content: [{ type: 'text', text: `Issue created: ${created.url}` }] };
+    }
+    const skipped = summary.issued.find((i) => i.action === 'skipped');
+    return { content: [{ type: 'text', text: `Issue skipped: ${skipped?.reason ?? 'unknown reason'}` }] };
+  }
+);
+
+// ─── Tool: get_story_context ──────────────────────────────────────────────────
+
+server.tool(
+  'get_story_context',
+  'Return a planner-agent-optimised view of an ADO User Story: ' +
+  'AC items as a bullet list, inferred test tags (@smoke, @auth…), extracted actors, ' +
+  'and IDs of any Test Cases already linked via TestedBy relation. ' +
+  'Use this before generate_specs to give the spec writer full context.',
+  {
+    storyId:         z.number().describe('ADO work item ID of the User Story'),
+    configPath:      z.string().optional().describe('Path to ado-sync config file'),
+    configOverrides: z.array(z.string()).optional().describe('Config overrides'),
+  },
+  async ({ storyId, configPath, configOverrides }) => {
+    const { config } = resolveConfig(configPath, configOverrides);
+    const client = await AzureClient.create(config);
+    const ctx = await getStoryContext(client, config.project, storyId, config.orgUrl);
+
+    const lines: string[] = [
+      `Story #${ctx.storyId}: ${ctx.title}`,
+      `State: ${ctx.state ?? 'unknown'}`,
+      `URL:   ${ctx.url}`,
+      '',
+    ];
+
+    if (ctx.acItems.length) {
+      lines.push('Acceptance Criteria:');
+      ctx.acItems.forEach((item, i) => lines.push(`  ${i + 1}. ${item}`));
+      lines.push('');
+    }
+
+    lines.push(`Suggested tags:  ${ctx.suggestedTags.join('  ') || '(none)'}`);
+    lines.push(`Actors:          ${ctx.suggestedActors.join(', ') || '(none detected)'}`);
+    lines.push(`Linked TCs:      ${ctx.relatedTestCases.length ? ctx.relatedTestCases.map((id) => `#${id}`).join(', ') : 'none yet'}`);
+
+    return {
+      content: [{ type: 'text', text: lines.join('\n') }],
+      // Also return structured JSON so agents can parse it without text parsing
+      _structured: ctx,
+    };
+  }
+);
+
+// ─── Tool: generate_manifest ──────────────────────────────────────────────────
+
+server.tool(
+  'generate_manifest',
+  'Write a .ai-workflow-manifest-{id}.json file for one or more ADO User Stories. ' +
+  'The manifest contains the ordered workflow steps, AC items, suggested tags, ' +
+  'required documents checklist, and validation steps — giving any AI agent the ' +
+  'structured context needed to drive the full Planner → Generator → Push → CI → Publish cycle.',
+  {
+    storyIds:        z.array(z.number()).describe('ADO work item IDs to generate manifests for'),
+    outputFolder:    z.string().optional().describe('Where to write manifest files (default: config dir)'),
+    format:          z.enum(['gherkin', 'markdown']).optional().describe('Spec format to reference in the manifest'),
+    force:           z.boolean().optional().default(false).describe('Overwrite existing manifest files'),
+    dryRun:          z.boolean().optional().default(false).describe('Return manifest JSON without writing files'),
+    configPath:      z.string().optional().describe('Path to ado-sync config file'),
+    configOverrides: z.array(z.string()).optional().describe('Config overrides'),
+  },
+  async ({ storyIds, outputFolder, format, force, dryRun, configPath, configOverrides }) => {
+    const { config, configDir } = resolveConfig(configPath, configOverrides);
+    const results = await generateManifests(config, configDir, {
+      storyIds,
+      outputFolder,
+      format,
+      force: force ?? false,
+      dryRun: dryRun ?? false,
+    });
+
+    const lines: string[] = [`${dryRun ? '[dry-run] ' : ''}Manifests processed:`];
+    for (const r of results) {
+      lines.push(`  ${r.action === 'created' ? '+' : '='} [#${r.storyId}] ${r.filePath} — ${r.title}`);
+      if (r.manifest) {
+        lines.push(`      AC items: ${r.manifest.context.acceptanceCriteria.length}`);
+        lines.push(`      Tags:     ${r.manifest.context.suggestedTags.join(' ') || '(none)'}`);
+        lines.push(`      Linked TCs: ${r.manifest.context.relatedTestCases.length ? r.manifest.context.relatedTestCases.join(', ') : 'none'}`);
+      }
+    }
+
     return { content: [{ type: 'text', text: lines.join('\n') }] };
   }
 );
