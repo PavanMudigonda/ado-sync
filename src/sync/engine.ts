@@ -400,15 +400,17 @@ async function pushSingle(
   const conflictAction = config.sync?.conflictAction ?? 'overwrite';
   const disableLocal = config.sync?.disableLocalChanges ?? false;
   const byFolder = config.testPlan.suiteMapping === 'byFolder' || config.testPlan.suiteMapping === 'byFile';
-  const suiteCache = new Map<string, number>();
+
+  // Load local cache for conflict detection and skip optimisation
+  const cache = loadCache(configDir);
+
+  // G: seed in-memory suite cache from persisted _suites to avoid redundant API calls
+  const suiteCache = new Map<string, number>(Object.entries(cache._suites ?? {}));
   const conditionSuiteCache = new Map<string, number>();
   const results: SyncResult[] = [];
   const conflicts: SyncResult[] = [];
   const createdIds = new Set<number>();
   const pendingWritebacks: Array<{ test: ParsedTest; newId: number }> = [];
-
-  // Load local cache for conflict detection and skip optimisation
-  const cache = loadCache(configDir);
 
   // ── automatedTestName fallback matching ───────────────────────────────────
   // When markAutomated is true and a local test has no @tc:ID annotation, try
@@ -495,7 +497,19 @@ async function pushSingle(
         const cachedDescHash = cached?.descriptionHash ?? '';
         const descriptionChanged = localDescHash !== cachedDescHash;
 
-        if (!titleChanged && !stepsChanged && !tagsChanged && !descriptionChanged) {
+        // E: also detect when the remote description changed since we last synced
+        const remoteDescHash = hashString(remote.description);
+        const cachedRemoteDescHash = cached?.remoteDescriptionHash ?? '';
+        const remoteDescriptionChanged = cachedRemoteDescHash !== '' && remoteDescHash !== cachedRemoteDescHash;
+
+        // Collect which fields changed for richer reporting (D)
+        const changedFields: string[] = [];
+        if (titleChanged) changedFields.push('title');
+        if (stepsChanged) changedFields.push('steps');
+        if (tagsChanged) changedFields.push('tags');
+        if (descriptionChanged || remoteDescriptionChanged) changedFields.push('description');
+
+        if (changedFields.length === 0) {
           // Update cache entry even on skip (changedDate may differ due to other fields)
           updateCacheEntry(cache, test, remote);
           reportProgress({ action: 'skipped', filePath: test.filePath, title: test.title, azureId: test.azureId });
@@ -504,12 +518,14 @@ async function pushSingle(
 
         // Conflict detection: remote was changed since last push AND local also differs
         if (cached && remote.changedDate && remote.changedDate !== cached.changedDate) {
+          const relFile = path.relative(configDir, test.filePath);
           const conflict: SyncResult = {
             action: 'conflict',
             filePath: test.filePath,
             title: test.title,
             azureId: test.azureId,
-            detail: 'Both local and remote have changed since last sync',
+            changedFields,
+            detail: `${relFile}:${test.line} — changed fields: ${changedFields.join(', ')}`,
           };
           if (conflictAction === 'skip') {
             reportProgress(conflict);
@@ -567,8 +583,11 @@ async function pushSingle(
   }
 
   if (conflicts.length) {
-    const titles = conflicts.map((c) => `  #${c.azureId} — ${c.title}`).join('\n');
-    throw new Error(`Conflicts detected (conflictAction=fail):\n${titles}`);
+    const lines = conflicts.map((c) => {
+      const fields = c.changedFields?.length ? `\n          Changed fields: ${c.changedFields.join(', ')}` : '';
+      return `  [#${c.azureId}] ${c.detail ?? c.title}${fields}`;
+    }).join('\n\n');
+    throw new Error(`Conflicts detected — push aborted (conflictAction=fail):\n\n${lines}`);
   }
 
   // Playwright migration: convert existing comment-style IDs to native annotations.
@@ -640,6 +659,10 @@ async function pushSingle(
   }
 
   if (!opts.dryRun) {
+    // G: persist suite name→id map so the next push avoids redundant API traversals
+    if (suiteCache.size > 0) {
+      cache._suites = Object.fromEntries(suiteCache.entries());
+    }
     saveCache(configDir, cache);
   }
 
@@ -796,9 +819,11 @@ function updateCacheEntry(cache: SyncCache, test: ParsedTest, remote: { id: numb
     // Store the LOCAL description hash so we compare against what we pushed,
     // not Azure's potentially-reformatted version of the HTML.
     descriptionHash: hashString(test.description),
+    // E: also store the remote description hash to detect Azure-side description changes.
+    remoteDescriptionHash: hashString(remote.description),
     changedDate: remote.changedDate,
     filePath: test.filePath,
-  } as CacheEntry;
+  };
 }
 
 // ─── Apply remote changes to local file ───────────────────────────────────────
@@ -982,53 +1007,88 @@ function createLocalFileFromRemote(
   write = true
 ): string {
   const localType = config.local.type;
-  const safeTitle = tc.title.replace(/[<>:"/\\|?*]/g, '_').replace(/\s+/g, '_');
-  const ext = (localType === 'gherkin' || localType === 'reqnroll') ? '.feature' : '.md';
+  const isGherkin = localType === 'gherkin' || localType === 'reqnroll';
+  const ext = isGherkin ? '.feature' : '.md';
+
+  // I: consistent kebab-case filename with TC ID prefix
+  const slug = tc.title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '') || `tc-${tc.id}`;
+  const filename = `${tc.id}-${slug}${ext}`;
+
   const baseDir = path.resolve(configDir, config.sync?.pull?.targetFolder ?? '.');
   if (write) fs.mkdirSync(baseDir, { recursive: true });
-  const filePath = path.join(baseDir, `${safeTitle}${ext}`);
+  const filePath = path.join(baseDir, filename);
 
   if (write) {
-    if (localType === 'gherkin' || localType === 'reqnroll') {
-      const lines: string[] = [];
-      lines.push(`@${tagPrefix}:${tc.id}`);
-      for (const tag of tc.tags) {
-        if (!tag.startsWith(`${tagPrefix}:`)) lines.push(`@${tag}`);
-      }
-      lines.push(`Feature: ${tc.title}`);
-      lines.push('');
-      lines.push(`  Scenario: ${tc.title}`);
-      for (const step of tc.steps) {
-        lines.push(`    ${step.action}`);
-      }
-      lines.push('');
-      fs.writeFileSync(filePath, lines.join('\n'), 'utf8');
-    } else {
-      const lines: string[] = [];
-      lines.push(`### ${tc.title}`);
-      lines.push(`@${tagPrefix}:${tc.id}`);
-      for (const tag of tc.tags) {
-        if (!tag.startsWith(`${tagPrefix}:`)) lines.push(`@${tag}`);
-      }
-      if (tc.description) {
-        lines.push('');
-        lines.push(stripHtml(tc.description));
-      }
-      lines.push('');
-      lines.push('Steps:');
-      tc.steps.forEach((step, idx) => {
-        lines.push(`${idx + 1}. ${step.action}`);
-      });
-      if (tc.steps.some((s) => s.expected)) {
-        lines.push('');
-        lines.push('Expected results:');
-        const lastExpected = [...tc.steps].reverse().find((s) => s.expected)?.expected;
-        if (lastExpected) lines.push(`- ${lastExpected}`);
-      }
-      lines.push('');
-      fs.writeFileSync(filePath, lines.join('\n'), 'utf8');
-    }
+    const content = isGherkin
+      ? buildPullGherkinContent(tc, tagPrefix)
+      : buildPullMarkdownContent(tc, tagPrefix);
+    fs.writeFileSync(filePath, content, 'utf8');
   }
 
   return filePath;
+}
+
+function buildPullGherkinContent(tc: AzureTestCase, tagPrefix: string): string {
+  const lines: string[] = [];
+  // Tags above Feature: (non-ID tags)
+  for (const tag of tc.tags) {
+    if (!tag.startsWith(`${tagPrefix}:`)) lines.push(`@${tag}`);
+  }
+  lines.push(`Feature: ${tc.title}`);
+  if (tc.description) {
+    lines.push('');
+    for (const line of stripHtml(tc.description).split('\n')) {
+      lines.push(`  ${line}`);
+    }
+  }
+  lines.push('');
+  // Scenario with TC ID tag
+  lines.push(`  @${tagPrefix}:${tc.id}`);
+  lines.push(`  Scenario: ${tc.title}`);
+  const keywords = ['Given', 'When', 'Then', 'And', 'But'];
+  for (const step of tc.steps) {
+    const action = step.action.trim();
+    const hasKeyword = keywords.some((k) => action.toLowerCase().startsWith(k.toLowerCase() + ' '));
+    const stepLine = hasKeyword ? `    ${action}` : `    * ${action}`;
+    lines.push(stepLine);
+    if (step.expected) {
+      lines.push(`    # Expected: ${step.expected}`);
+    }
+  }
+  lines.push('');
+  return lines.join('\n');
+}
+
+function buildPullMarkdownContent(tc: AzureTestCase, tagPrefix: string): string {
+  const lines: string[] = [];
+  lines.push(`# ${tc.title}`);
+  lines.push('');
+  // Metadata
+  const metaTags = tc.tags.filter((t) => !t.startsWith(`${tagPrefix}:`));
+  if (metaTags.length) {
+    lines.push(`**Tags:** ${metaTags.map((t) => `\`${t}\``).join(', ')}`);
+    lines.push('');
+  }
+  if (tc.description) {
+    lines.push(stripHtml(tc.description));
+    lines.push('');
+  }
+  // Scenario heading with TC ID
+  lines.push(`### ${tc.title} @${tagPrefix}:${tc.id}`);
+  lines.push('');
+  if (tc.steps.length) {
+    for (const step of tc.steps) {
+      lines.push(`- ${step.action}`);
+      if (step.expected) {
+        lines.push(`  - _Expected:_ ${step.expected}`);
+      }
+    }
+    lines.push('');
+  }
+  return lines.join('\n');
 }

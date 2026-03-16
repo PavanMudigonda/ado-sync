@@ -17,9 +17,13 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
+import * as readline from 'readline';
+
 import pkg from '../package.json';
 import { AiSummaryOpts } from './ai/summarizer';
+import { AzureClient } from './azure/client';
 import { applyOverrides, CONFIG_TEMPLATE_JSON, CONFIG_TEMPLATE_YAML, loadConfig, resolveConfigPath } from './config';
+import { generateSpecs } from './sync/generate';
 import { pull, push, status } from './sync/engine';
 import { publishTestResults } from './sync/publish-results';
 import { SyncConfig, SyncResult } from './types';
@@ -33,8 +37,27 @@ program
   .description('Bidirectional sync between local test specs and Azure DevOps Test Cases')
   .version(pkg.version);
 
-// Global option: --config / -c
+// Global options
 program.option('-c, --config <path>', 'Path to config file (default: ado-sync.json)');
+program.option('--output <format>', 'Output format: text (default) or json');
+
+// ─── Error formatting (L) ─────────────────────────────────────────────────────
+
+function formatError(err: any): string {
+  const status: number = err?.statusCode ?? err?.status ?? 0;
+  if (status === 401) return 'Authentication failed. Check your token (auth.token) and permissions.';
+  if (status === 403) return 'Access denied. Your token lacks the required Azure DevOps scopes.';
+  if (status === 404) return `Resource not found. Check your orgUrl, project, or test plan ID.\n  ${err.message}`;
+  if (status === 429) return 'Azure DevOps rate limit hit. Reduce concurrent operations or retry later.';
+  if (status === 503) return 'Azure DevOps is temporarily unavailable (503). Retry later.';
+  return err?.message ?? String(err);
+}
+
+function handleError(err: any): never {
+  console.error(chalk.red(formatError(err)));
+  if (process.env.DEBUG) console.error(chalk.dim(err?.stack ?? ''));
+  process.exit(1);
+}
 
 /** Collect repeatable option values into an array. */
 function collect(value: string, previous: string[]): string[] {
@@ -110,7 +133,8 @@ function buildAiOpts(
 program
   .command('init [output]')
   .description('Generate a starter config file (default: ado-sync.json). Pass ado-sync.yml for YAML.')
-  .action((output: string | undefined) => {
+  .option('--no-interactive', 'Skip the wizard and dump a template file directly')
+  .action(async (output: string | undefined, opts) => {
     const outFile = output ?? 'ado-sync.json';
     const outPath = path.resolve(outFile);
     if (fs.existsSync(outPath)) {
@@ -119,12 +143,68 @@ program
     }
     const ext = path.extname(outFile).toLowerCase();
     const isYaml = ext === '.yml' || ext === '.yaml';
-    fs.writeFileSync(outPath, isYaml ? CONFIG_TEMPLATE_YAML : CONFIG_TEMPLATE_JSON, 'utf8');
+
+    // K: interactive wizard when stdin is a TTY and --no-interactive is not set
+    if (opts.interactive && process.stdin.isTTY) {
+      const answers = await runInitWizard(isYaml);
+      fs.writeFileSync(outPath, answers, 'utf8');
+    } else {
+      fs.writeFileSync(outPath, isYaml ? CONFIG_TEMPLATE_YAML : CONFIG_TEMPLATE_JSON, 'utf8');
+    }
+
     console.log(chalk.green(`Created ${outPath}`));
-    console.log(chalk.dim('Edit the file with your Azure DevOps details, then run:'));
-    console.log(chalk.dim('  ado-sync push   (to create test cases from local specs)'));
-    console.log(chalk.dim('  ado-sync pull   (to pull updates from Azure DevOps)'));
+    console.log(chalk.dim('Next steps:'));
+    console.log(chalk.dim('  ado-sync push   — create test cases from local specs'));
+    console.log(chalk.dim('  ado-sync pull   — pull updates from Azure DevOps'));
+    console.log(chalk.dim('  ado-sync validate — check config and connectivity'));
   });
+
+// ─── Interactive init wizard (K) ──────────────────────────────────────────────
+
+async function runInitWizard(isYaml: boolean): Promise<string> {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const ask = (q: string): Promise<string> =>
+    new Promise((resolve) => rl.question(q, (a) => resolve(a.trim())));
+
+  console.log(chalk.bold('\nado-sync init — interactive setup wizard'));
+  console.log(chalk.dim('Press Enter to accept the default shown in [brackets].\n'));
+
+  const orgUrl = (await ask('Azure DevOps org URL [https://dev.azure.com/myorg]: ')) ||
+    'https://dev.azure.com/myorg';
+  const project = (await ask('Project name [MyProject]: ')) || 'MyProject';
+  const authType = (await ask('Auth type (pat / accessToken / managedIdentity) [pat]: ')) || 'pat';
+  const tokenEnv = authType === 'managedIdentity'
+    ? ''
+    : (await ask('Token env var name [AZURE_DEVOPS_TOKEN]: ')) || 'AZURE_DEVOPS_TOKEN';
+  const planId = parseInt((await ask('Test plan ID [42]: ')) || '42', 10) || 42;
+  const localType = (await ask(
+    'Local spec type (gherkin / markdown / playwright / csharp / java / python / ...) [gherkin]: '
+  )) || 'gherkin';
+  const defaultGlob = localType === 'gherkin' || localType === 'reqnroll'
+    ? '**/*.feature'
+    : localType === 'markdown'
+    ? '**/*.md'
+    : '**/*.spec.ts';
+  const includeGlob = (await ask(`Include glob pattern [${defaultGlob}]: `)) || defaultGlob;
+
+  rl.close();
+
+  const cfg: Record<string, any> = {
+    orgUrl,
+    project,
+    auth: authType === 'managedIdentity'
+      ? { type: 'managedIdentity', applicationIdURI: 'api://your-app-id' }
+      : { type: authType, token: `$${tokenEnv}` },
+    testPlan: { id: planId },
+    local: { type: localType, include: includeGlob },
+  };
+
+  if (isYaml) {
+    const yaml = await import('js-yaml');
+    return yaml.dump(cfg, { indent: 2 });
+  }
+  return JSON.stringify(cfg, null, 2) + '\n';
+}
 
 // ─── push ─────────────────────────────────────────────────────────────────────
 
@@ -158,14 +238,14 @@ program
 
       const aiSummary = buildAiOpts(opts, config, configDir);
       const isTTY = process.stdout.isTTY ?? false;
-      const onProgress = createProgressCallback(isTTY);
-      const onAiProgress = createAiProgressCallback(isTTY);
+      const outputFormat = program.opts().output;
+      const onProgress = outputFormat === 'json' ? undefined : createProgressCallback(isTTY);
+      const onAiProgress = outputFormat === 'json' ? undefined : createAiProgressCallback(isTTY);
       const results = await push(config, configDir, { dryRun: opts.dryRun, tags: opts.tags, onProgress, onAiProgress, aiSummary });
-      if (isTTY) clearProgressLine();
-      printResults(results, config.toolSettings?.outputLevel);
+      if (isTTY && outputFormat !== 'json') clearProgressLine();
+      printResults(results, config.toolSettings?.outputLevel, outputFormat);
     } catch (err: any) {
-      console.error(chalk.red(err.message));
-      process.exit(1);
+      handleError(err);
     }
   });
 
@@ -192,13 +272,13 @@ program
       console.log('');
 
       const isTTY = process.stdout.isTTY ?? false;
-      const onProgress = createProgressCallback(isTTY);
+      const outputFormat = program.opts().output;
+      const onProgress = outputFormat === 'json' ? undefined : createProgressCallback(isTTY);
       const results = await pull(config, configDir, { dryRun: opts.dryRun, tags: opts.tags, onProgress });
-      if (isTTY) clearProgressLine();
-      printResults(results, config.toolSettings?.outputLevel);
+      if (isTTY && outputFormat !== 'json') clearProgressLine();
+      printResults(results, config.toolSettings?.outputLevel, outputFormat);
     } catch (err: any) {
-      console.error(chalk.red(err.message));
-      process.exit(1);
+      handleError(err);
     }
   });
 
@@ -229,14 +309,14 @@ program
 
       const aiSummary = buildAiOpts(opts, config, configDir);
       const isTTY = process.stdout.isTTY ?? false;
-      const onProgress = createProgressCallback(isTTY);
-      const onAiProgress = createAiProgressCallback(isTTY);
+      const outputFormat = program.opts().output;
+      const onProgress = outputFormat === 'json' ? undefined : createProgressCallback(isTTY);
+      const onAiProgress = outputFormat === 'json' ? undefined : createAiProgressCallback(isTTY);
       const results = await status(config, configDir, { tags: opts.tags, onProgress, onAiProgress, aiSummary });
-      if (isTTY) clearProgressLine();
-      printResults(results, config.toolSettings?.outputLevel);
+      if (isTTY && outputFormat !== 'json') clearProgressLine();
+      printResults(results, config.toolSettings?.outputLevel, outputFormat);
     } catch (err: any) {
-      console.error(chalk.red(err.message));
-      process.exit(1);
+      handleError(err);
     }
   });
 
@@ -281,8 +361,7 @@ program
         console.log(chalk.dim(`URL: ${result.runUrl}`));
       }
     } catch (err: any) {
-      console.error(chalk.red(err.message));
-      process.exit(1);
+      handleError(err);
     }
   });
 
@@ -355,7 +434,12 @@ function createAiProgressCallback(
 
 // ─── Output helpers ───────────────────────────────────────────────────────────
 
-function printResults(results: SyncResult[], outputLevel?: string): void {
+function printResults(results: SyncResult[], outputLevel?: string, outputFormat?: string): void {
+  // J: machine-readable JSON output
+  if (outputFormat === 'json') {
+    process.stdout.write(JSON.stringify(results, null, 2) + '\n');
+    return;
+  }
   const counts = { created: 0, updated: 0, pulled: 0, skipped: 0, conflict: 0, removed: 0, error: 0 };
   const quiet = outputLevel === 'quiet';
 

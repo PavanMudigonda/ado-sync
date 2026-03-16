@@ -3,7 +3,8 @@
   "version": "0.1.44",
   "description": "Bidirectional sync between local test specs (Cucumber/Markdown) and Azure DevOps Test Cases",
   "bin": {
-    "ado-sync": "./dist/cli.js"
+    "ado-sync": "./dist/cli.js",
+    "ado-sync-mcp": "./dist/mcp-server.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -35,6 +36,7 @@
     "@cucumber/gherkin": "^39.0.0",
     "@cucumber/messages": "^32.2.0",
     "@cucumber/tag-expressions": "^9.1.0",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "azure-devops-node-api": "^15.1.2",
     "chalk": "^5.6.2",
     "commander": "^14.0.3",

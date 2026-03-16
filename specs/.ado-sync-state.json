@@ -1,0 +1,254 @@
+{
+  "39791": {
+    "title": "Scenario: should have role of listitem",
+    "stepsHash": "f5e2149b980400a8ca9be461c3522af73a1ab40f4490f2bf6a37713cceb0488c",
+    "descriptionHash": "ce612f221ac055a75f890e6abdf4408d7b6b97f78dbf7c670f1f0ad9904a09ec",
+    "changedDate": "2026-03-16T20:27:40.723Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "39792": {
+    "title": "Scenario: should set aria-labelledby to the provided value",
+    "stepsHash": "dd58ccf498eddcef4ea7d06f3d63481360d9b85b9c51918dafe8178785794c55",
+    "descriptionHash": "6702288dd49e131c5f4144a94fdec98358e8ef36b302f74054f6f7dd7e8d2921",
+    "changedDate": "2026-03-16T20:27:35.727Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "40424": {
+    "title": "Scenario: should pass placeholder assertion",
+    "stepsHash": "6b776e110ed34761f96fe81956886debed3f754be79cd0ac43cc2f7db641a8df",
+    "descriptionHash": "c7fa08f66e82ff544705a145d27b5626fb2bac66e1b2c8077193a7e8adcdb223",
+    "changedDate": "2026-03-16T20:27:18.46Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "40726": {
+    "title": "Scenario: should include a role of listitem by default",
+    "stepsHash": "053f92b99f99603669d090aab82af954a72b4345a5713cc789d4ad5f178df778",
+    "descriptionHash": "0b2786d5d4c1ef830a34a2da2b0db6132163ca8dfe78fd9dcb64310a30e63d4e",
+    "changedDate": "2026-03-16T20:27:48.46Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "40766": {
+    "title": "Scenario: should pass placeholder assertion",
+    "stepsHash": "6b776e110ed34761f96fe81956886debed3f754be79cd0ac43cc2f7db641a8df",
+    "descriptionHash": "c7fa08f66e82ff544705a145d27b5626fb2bac66e1b2c8077193a7e8adcdb223",
+    "changedDate": "2026-03-16T20:27:14.32Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "41082": {
+    "title": "Scenario: should set ID property correctly",
+    "stepsHash": "1be0092aa7c4bfb7cc9e3a8af63b025a69d772a41d78c6e46eaed0fcdf5ece91",
+    "descriptionHash": "591ded1916b77c6c408a4a20c0e2985eb012ce9394d416bff66bd8517ef35639",
+    "changedDate": "2026-03-16T20:27:11.067Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "41424": {
+    "title": "Scenario: should have role of list",
+    "stepsHash": "54f93618bc24d077b8d616b67e6f0b7d24f4a9576f93fcac26945322b6bc6445",
+    "descriptionHash": "fe21809be61f0d604015dd3cb752f8ef35f3addeaf68f002e2a681db71382ad7",
+    "changedDate": "2026-03-16T20:27:33.35Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42101": {
+    "title": "Scenario: should render slotted content inside the element",
+    "stepsHash": "efbe4730f311ea270fa4371ce2f08a05b21be05187bc741c9019bc976271b75c",
+    "descriptionHash": "dd56ccf2160f5fc1bd7c15ed40b2134d341dbd15b4b46f2f1c7295277e586c4e",
+    "changedDate": "2026-03-16T20:27:12.907Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42102": {
+    "title": "Scenario: should render with the default processingContent value",
+    "stepsHash": "07db6a758eabf67072fc49aa525ff05d88498eae240640a5ecb21cb940ca2aed",
+    "descriptionHash": "012c3494043f20c0720404155531ccd6202193ecce66d13cba09c32003a55979",
+    "changedDate": "2026-03-16T20:27:16.117Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42103": {
+    "title": "Scenario: should reflect a custom processingContent value when the property is set",
+    "stepsHash": "0ac0c3914b5120712cb1540862e8f01a244b11c0c1d16838fc3572da28cc3403",
+    "descriptionHash": "ac91f2ba15d21ebc27fe72de8ae0cfcef6a57a81d3df3a4df48c838e6855c4dc",
+    "changedDate": "2026-03-16T20:27:17.19Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42104": {
+    "title": "Scenario: should reflect the accept attribute on the component",
+    "stepsHash": "0fb6ce01e5530825f5a3a8c1ef8c75304a343a5cf798a394a3a769fb8c9eaa9e",
+    "descriptionHash": "33215490c218929df802a4148c0b363605a0e1a8ee70ee9fddacaf69d25c7998",
+    "changedDate": "2026-03-16T20:27:19.94Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42105": {
+    "title": "Scenario: should set the multiple attribute when provided",
+    "stepsHash": "65b8b14da944b49453e345bde8af6c7af1b270d7b7772efcd1fe61d984cfe10f",
+    "descriptionHash": "90a8055851e3dff0c6beadd1616388237a6273bd0deea2be95e806a4cacfaa94",
+    "changedDate": "2026-03-16T20:27:21.28Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42106": {
+    "title": "Scenario: should not have the multiple attribute by default",
+    "stepsHash": "3984a7d40f77d439a22d6f99b7b3177862810aad22b4c754bc9359cd39f2a4ab",
+    "descriptionHash": "4b1d63137d7a90e24c9294d7332e24a7ea6e76d8ae561279c3860063a36b4529",
+    "changedDate": "2026-03-16T20:27:22.243Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42107": {
+    "title": "Scenario: should emit files-selected with accepted files when a valid file is picked",
+    "stepsHash": "9a6770b9f6182b8b5ff8b94e561c7b4fd29cf86f22e9a9fad0360128910e4cf0",
+    "descriptionHash": "3e2e1aab60d49b9c76827aa0f11932c581c0f45e153183f71bdc7c4e44cc78b2",
+    "changedDate": "2026-03-16T20:27:23.107Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42108": {
+    "title": "Scenario: should emit invalid-selection with reason type when the file type does not match accept",
+    "stepsHash": "e50dcb426cd456fda6798d531dcc4cf9b978e1ce12f85b6a52ff91bc37ea30ce",
+    "descriptionHash": "e7982eff6ac854a9c13af2b3a84de155d956f7f935e9d07765cddccc64c30375",
+    "changedDate": "2026-03-16T20:27:24.25Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42109": {
+    "title": "Scenario: should emit invalid-selection with reason size when a file exceeds max-file-size",
+    "stepsHash": "8418ceeb3baf917628e0f2d2271c9395cef2ab34d42346cc86ebd2f9dbc40f5d",
+    "descriptionHash": "6ff362984b7971bb8adf6a7ea117d1e62c9e2ecf778348de401218276e52ae46",
+    "changedDate": "2026-03-16T20:27:25.19Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42110": {
+    "title": "Scenario: should emit invalid-selection with reason too-many when file count exceeds max-files",
+    "stepsHash": "6d7d929bb8f85d911f7d86f17758d6218c69777dcaf8face2812b4e736f56bbc",
+    "descriptionHash": "6b00b2cea7ab312066955fd67b9285df87b26ef2a81bca576d4c663bb6e20d22",
+    "changedDate": "2026-03-16T20:27:26.233Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42111": {
+    "title": "Scenario: should reject all files when current-files-count already equals max-files",
+    "stepsHash": "cab5d7d7e671c7df702f2cbd1e1c8ae19672690dc7ff43fbb680893eb009119f",
+    "descriptionHash": "9372af2046c1fb823af475ab199bf3e3cf5c5b26406dd2091b24149dd111a148",
+    "changedDate": "2026-03-16T20:27:27.367Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42112": {
+    "title": "Scenario: should add the dragover class when a drag enters the dropzone",
+    "stepsHash": "88ffeb13e1d7384bd0dc029ed0306e25c7fd844ac2ad16c63adf96c86d5d7da5",
+    "descriptionHash": "1e128c00e2b44df5fd50d433043af2c1068ddfe1f16873439ad8af3c6b674989",
+    "changedDate": "2026-03-16T20:27:28.457Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42113": {
+    "title": "Scenario: should remove the dragover class when a drag leaves the dropzone",
+    "stepsHash": "39e8f4160c133ec2bcaffa2841af94e778d26963a00fc36f687d8a627aeabd2e",
+    "descriptionHash": "9f3413fa26b459b8c025de9d63cb07b3bd32008a6afff84d17ff62f6220759a1",
+    "changedDate": "2026-03-16T20:27:29.283Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42114": {
+    "title": "Scenario: should remove the dragover class on drop",
+    "stepsHash": "33bcd320a58b19d24639fae8fb86e110d30b8df5b315bcbcde619180eceb92fe",
+    "descriptionHash": "72b1e473e5b20c733f634d22b947562b646af39200af608469f0a6ef2055f6bf",
+    "changedDate": "2026-03-16T20:27:30.247Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42115": {
+    "title": "Scenario: should emit files-selected when valid files are dropped onto the dropzone",
+    "stepsHash": "578436de4577cc8e1058e42b9382643c12c900d4d7934a0c3193b174e28c2474",
+    "descriptionHash": "30b5fba03bf85b4947b3cc0551b360dd3d62d6b1aa5b6edf589ff27d1d06287e",
+    "changedDate": "2026-03-16T20:27:31.223Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42116": {
+    "title": "Scenario: should prevent default browser behaviour on dragover and drop events",
+    "stepsHash": "6a0fcf587fe55263d4a828eb09ade9c5ec96ec4835a25743efcb899cf7118a4b",
+    "descriptionHash": "da1b176b02529600d44459677e1c0a86d1319dcd588c1975b9db79ca23ac9b94",
+    "changedDate": "2026-03-16T20:27:32.407Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42117": {
+    "title": "Scenario: should render the time element when the time attribute is present",
+    "stepsHash": "f65455a3c591332347b487d80ba169d6c5402a104824b8ebcf6ea7668a4f9cfd",
+    "descriptionHash": "8fc804ba587f8305d86656d5d7e92d4e49f42c4d7debc8c698f20fb3488c9a1f",
+    "changedDate": "2026-03-16T20:27:34.38Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42118": {
+    "title": "Scenario: should set the header-id attribute to the provided value",
+    "stepsHash": "6125f1206c41ca17b22070e49e6b05fada16424bce210252bca52202d2464226",
+    "descriptionHash": "c013e6bd6a5ffa0379481bae264202e9f641c5a62d2caab92c8a7f5ac274cc17",
+    "changedDate": "2026-03-16T20:27:36.697Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42119": {
+    "title": "Scenario: should default header-id to headerId when not provided",
+    "stepsHash": "5be70c2f14a14414ef19a80af7079db017cbffd0340b10b34abc6f4eaf5b07df",
+    "descriptionHash": "46e016276880101a5582856c1d898ea7b30e61e434cbe44a7601e4ec9113c765",
+    "changedDate": "2026-03-16T20:27:37.54Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42120": {
+    "title": "Scenario: should set the time-id attribute to the provided value",
+    "stepsHash": "a88971a9f899581230135027bd976b9bbce187b68ab8b274b9a23379364e6c8f",
+    "descriptionHash": "28d4c038b2ca56e65a1a6a732163f5cb7c7e480ef8aff584bd877d0c3b4efc98",
+    "changedDate": "2026-03-16T20:27:38.707Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42121": {
+    "title": "Scenario: should default time-id to timeId when not provided",
+    "stepsHash": "c5ff427b7b6d307eb91c4dd333f6ee729603aa0765f34401cb6f3570d187111f",
+    "descriptionHash": "3ef8dd11cd7cc9302f82f3444a8331187e38f2e71867fc4fd88c6b6bb1436a5a",
+    "changedDate": "2026-03-16T20:27:39.733Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42122": {
+    "title": "Scenario: should render slotted note content",
+    "stepsHash": "cfe0deb38795864c9ac30dfed353b6e40423e73f164c899292ad8357643165f5",
+    "descriptionHash": "e819557c29d2f6d7f17a49a91eefe0d3c56f7650e0046169113f7b52d87d42ef",
+    "changedDate": "2026-03-16T20:27:41.66Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42123": {
+    "title": "Scenario: should set global-aria-label to the provided value",
+    "stepsHash": "0037ea9fb8ce4992aa53406ae335d2cca5ca28c592760531690da8f1a7545518",
+    "descriptionHash": "1f6d483ce91db3a3599b5b1e668543ac8a3007acee891ddd4dae42e14f9a3484",
+    "changedDate": "2026-03-16T20:27:42.587Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42124": {
+    "title": "Scenario: should default global-aria-label to Global when not provided",
+    "stepsHash": "846f56a24848de22f76b6abed030f707f36e7a4c7b64aba228e4da8fb6e92031",
+    "descriptionHash": "8159997440a1db842f20ca85224ab4bb8bc53a9ef3e802c7b8f753d438a15540",
+    "changedDate": "2026-03-16T20:27:43.37Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42125": {
+    "title": "Scenario: should set tasks-aria-label to the provided value",
+    "stepsHash": "16fe2d869427b0663993bf48716cfeec29da80cc7fa5759ff980f52ece2a143f",
+    "descriptionHash": "d56dfef157bf0364081f6ba791fcc1695cb7dd15f629aaf0a31651f6ef4e3237",
+    "changedDate": "2026-03-16T20:27:44.213Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42126": {
+    "title": "Scenario: should default tasks-aria-label to Product when not provided",
+    "stepsHash": "4156b1d384cb437b00baf09bdf3e7f83f52ae2d4020f8727cfbcbefe81da0588",
+    "descriptionHash": "ed86a06c68e3d7dd4d046fa4e8503e92c182e7e1ee19199f61cc781aeb3c5024",
+    "changedDate": "2026-03-16T20:27:45.047Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42127": {
+    "title": "Scenario: should reflect is-menu-open when set to true",
+    "stepsHash": "07ae11eb362dd11c0d240fd99678cfa97d9a6f8a52cb3c282bfdc833d280eac3",
+    "descriptionHash": "83837d584f5a9ec647f53203b0fa9b1443643c7454e015833d1940ed9d40aa33",
+    "changedDate": "2026-03-16T20:27:46.647Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42128": {
+    "title": "Scenario: should toggle is-menu-open when the menu button is clicked",
+    "stepsHash": "efa039acee0a1573ab9012b3eb9cac5b3804a97ca2663f013a12fcfa5ec727e1",
+    "descriptionHash": "a02a87b93d8eedf305bdf21af516af055fe8a9f603d2a5b51e06dc6a6c192e1a",
+    "changedDate": "2026-03-16T20:27:47.52Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  },
+  "42129": {
+    "title": "Scenario: should render slotted content",
+    "stepsHash": "8b7c3ed5f859f336cc054b909f914b9888c060eb8ad91f91a658319210882aed",
+    "descriptionHash": "7fbf9b7fc289da76eab338bb8bb8704ff0fba81929cb68f889a0278e76fc57a7",
+    "changedDate": "2026-03-16T20:27:49.393Z",
+    "filePath": "/Users/nagapavankumar.mudigonda/Documents/code/azure-test-sync/specs/saffron-components.md"
+  }
+}
