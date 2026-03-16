@@ -39,6 +39,44 @@ import {
 } from '../types';
 import { AzureClient } from './client';
 
+// ─── Retry wrapper (F) ────────────────────────────────────────────────────────
+
+/**
+ * Retry an async operation on transient Azure DevOps errors (429, 503).
+ * Uses exponential backoff with ±10% jitter. Respects Retry-After header.
+ */
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  retries = 3,
+  baseDelayMs = 1000
+): Promise<T> {
+  let lastErr: any;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      lastErr = err;
+      const status: number = err.statusCode ?? err.status ?? 0;
+      const isTransient = status === 429 || status === 503;
+      if (!isTransient || attempt === retries) throw err;
+
+      // Respect Retry-After header if present (value is in seconds)
+      const retryAfterHeader: string | undefined =
+        err.response?.headers?.['retry-after'] ?? err.headers?.['retry-after'];
+      let delayMs: number;
+      if (retryAfterHeader) {
+        delayMs = parseFloat(retryAfterHeader) * 1000;
+      } else {
+        // Exponential backoff with ±10% jitter
+        const base = baseDelayMs * Math.pow(2, attempt);
+        delayMs = base * (0.9 + Math.random() * 0.2);
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  throw lastErr;
+}
+
 // ─── XML helpers ─────────────────────────────────────────────────────────────
 
 function escapeHtml(str: string): string {
@@ -889,7 +927,7 @@ export async function getTestCase(
 
   let wi: any;
   try {
-    wi = await wit.getWorkItem(id, fields);
+    wi = await withRetry(() => wit.getWorkItem(id, fields));
   } catch {
     return null;
   }
@@ -982,7 +1020,7 @@ export async function createTestCase(
 
   let wi: any;
   try {
-    wi = await wit.createWorkItem({}, patchDoc, config.project, 'Test Case');
+    wi = await withRetry(() => wit.createWorkItem({}, patchDoc, config.project, 'Test Case'));
   } catch (err: any) {
     const status: string = err?.statusCode ? ` (HTTP ${err.statusCode})` : '';
     const detail: string = err?.message ?? String(err);
@@ -1031,7 +1069,7 @@ export async function updateTestCase(
   const processedLocalTags = processTagsForPush(test.tags, syncCfg.tagPrefix ?? 'tc', config.customizations);
 
   // Fetch existing Azure tags and merge
-  const wi = await wit.getWorkItem(id, ['System.Tags']);
+  const wi = await withRetry(() => wit.getWorkItem(id, ['System.Tags']));
   const existingAzureTags = tagsFromString((wi?.fields?.['System.Tags'] as string | undefined) ?? '');
 
   // Filter ignored tags from removal — they should be preserved in Azure
@@ -1079,7 +1117,7 @@ export async function updateTestCase(
   patchDoc.push(...relationPatches);
 
   try {
-    await wit.updateWorkItem({}, patchDoc, id);
+    await withRetry(() => wit.updateWorkItem({}, patchDoc, id));
   } catch (err: any) {
     const status: string = err?.statusCode ? ` (HTTP ${err.statusCode})` : '';
     const detail: string = err?.message ?? String(err);
@@ -1220,10 +1258,8 @@ export async function getTestCasesInSuite(
   }
   if (!resolvedSuiteId) return [];
 
-  const suiteTestCases = await api.getTestCaseList(
-    config.project,
-    config.testPlan.id,
-    resolvedSuiteId
+  const suiteTestCases = await withRetry(() =>
+    api.getTestCaseList(config.project, config.testPlan.id, resolvedSuiteId!)
   );
 
   if (!suiteTestCases?.length) return [];
@@ -1242,7 +1278,7 @@ export async function getTestCasesInSuite(
   const ids = suiteTestCases.map((tc: any) => tc.workItem?.id).filter(Boolean) as number[];
   if (!ids.length) return [];
 
-  const workItems = await wit.getWorkItems(ids, fields);
+  const workItems = await withRetry(() => wit.getWorkItems(ids, fields));
 
   return (workItems ?? []).map((wi: any): AzureTestCase => {
     const f = wi.fields ?? {};

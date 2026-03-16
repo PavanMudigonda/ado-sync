@@ -16,3 +16,6 @@ yarn-error.log
 .framework-tests
 .saffron_design_system/
 .saffron_design_system
+.saffron_design_system
+.playwright-atrium
+.saffron_design_system/
