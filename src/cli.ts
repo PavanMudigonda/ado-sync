@@ -16,15 +16,14 @@ import { Command } from 'commander';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-
 import * as readline from 'readline';
 
 import pkg from '../package.json';
 import { AiSummaryOpts } from './ai/summarizer';
 import { AzureClient } from './azure/client';
 import { applyOverrides, CONFIG_TEMPLATE_JSON, CONFIG_TEMPLATE_YAML, loadConfig, resolveConfigPath } from './config';
-import { generateSpecs } from './sync/generate';
 import { pull, push, status } from './sync/engine';
+import { generateSpecs } from './sync/generate';
 import { publishTestResults } from './sync/publish-results';
 import { SyncConfig, SyncResult } from './types';
 
@@ -492,6 +491,186 @@ function printResults(results: SyncResult[], outputLevel?: string, outputFormat?
 
   console.log(summary || chalk.dim('Nothing to sync.'));
 }
+
+// ─── validate ────────────────────────────────────────────────────────────────
+
+program
+  .command('validate')
+  .description('Check config validity and Azure DevOps connectivity')
+  .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
+  .action(async (opts) => {
+    const globalOpts = program.opts();
+    const configPath = resolveConfigPath(globalOpts.config);
+    console.log(chalk.bold('ado-sync validate'));
+    console.log(chalk.dim(`Config: ${configPath}`));
+    console.log('');
+
+    // 1. Load config
+    let config: SyncConfig;
+    try {
+      config = loadConfig(configPath);
+      if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
+      console.log(chalk.green('  ✓ Config is valid'));
+    } catch (err: any) {
+      console.log(chalk.red(`  ✗ Config error: ${err.message}`));
+      process.exit(1);
+    }
+
+    // 2. Connect to Azure
+    let client: AzureClient;
+    try {
+      client = await AzureClient.create(config);
+      console.log(chalk.green(`  ✓ Azure connection established (${config.orgUrl})`));
+    } catch (err: any) {
+      console.log(chalk.red(`  ✗ Azure connection failed: ${formatError(err)}`));
+      process.exit(1);
+    }
+
+    // 3. Verify project
+    try {
+      const coreApi = await client.getCoreApi();
+      const project = await coreApi.getProject(config.project);
+      if (!project) throw new Error('not found');
+      console.log(chalk.green(`  ✓ Project "${config.project}" found`));
+    } catch (err: any) {
+      console.log(chalk.red(`  ✗ Project "${config.project}" not found: ${formatError(err)}`));
+      process.exit(1);
+    }
+
+    // 4. Verify test plan(s)
+    const plans = config.testPlans ?? [config.testPlan];
+    const testPlanApi = await client.getTestPlanApi();
+    let allPlansOk = true;
+    for (const plan of plans) {
+      try {
+        const tp = await testPlanApi.getTestPlanById(config.project, plan.id);
+        console.log(chalk.green(`  ✓ Test Plan ${plan.id} "${tp.name}" found`));
+      } catch (err: any) {
+        console.log(chalk.red(`  ✗ Test Plan ${plan.id} not found: ${formatError(err)}`));
+        allPlansOk = false;
+      }
+    }
+
+    if (!allPlansOk) process.exit(1);
+    console.log('');
+    console.log(chalk.green('All checks passed.'));
+  });
+
+// ─── diff ────────────────────────────────────────────────────────────────────
+
+program
+  .command('diff')
+  .description('Show field-level diff between local specs and Azure DevOps')
+  .option('--tags <expression>', 'Only check scenarios matching this tag expression')
+  .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
+  .option('--ai-provider <provider>', 'AI provider for test step generation')
+  .option('--ai-model <model>', 'AI model path or name')
+  .option('--ai-url <url>', 'Base URL for AI endpoint')
+  .option('--ai-key <key>', 'API key for AI provider')
+  .action(async (opts) => {
+    const globalOpts = program.opts();
+    try {
+      const configPath = resolveConfigPath(globalOpts.config);
+      const config = loadConfig(configPath);
+      if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
+      const configDir = path.dirname(configPath);
+
+      console.log(chalk.bold('ado-sync diff'));
+      console.log(chalk.dim(`Config: ${configPath}`));
+      if (opts.tags) console.log(chalk.dim(`Tags:   ${opts.tags}`));
+      console.log('');
+
+      const aiSummary = buildAiOpts(opts, config, configDir);
+      const results = await status(config, configDir, { tags: opts.tags, aiSummary });
+
+      const outputFormat = program.opts().output;
+      if (outputFormat === 'json') {
+        process.stdout.write(JSON.stringify(results, null, 2) + '\n');
+        return;
+      }
+
+      let anyDiff = false;
+      for (const r of results) {
+        if (r.action !== 'updated' && r.action !== 'conflict') continue;
+        anyDiff = true;
+        const idStr = r.azureId ? chalk.dim(` [#${r.azureId}]`) : '';
+        const filePart = r.filePath ? chalk.dim(path.relative(process.cwd(), r.filePath) + ':') : '';
+        const symbol = r.action === 'conflict' ? chalk.yellow('!') : chalk.blue('~');
+        console.log(`${symbol} ${filePart} ${r.title}${idStr}`);
+        if (r.changedFields?.length) {
+          console.log(chalk.dim(`    changed fields: ${r.changedFields.join(', ')}`));
+        } else if (r.detail) {
+          console.log(chalk.dim(`    ${r.detail}`));
+        }
+      }
+      if (!anyDiff) console.log(chalk.dim('No differences found.'));
+    } catch (err: any) {
+      handleError(err);
+    }
+  });
+
+// ─── generate ────────────────────────────────────────────────────────────────
+
+program
+  .command('generate')
+  .description('Generate local spec files from Azure DevOps User Stories')
+  .option('--story-ids <ids>', 'Comma-separated ADO work item IDs (e.g. 1234,5678)')
+  .option('--query <wiql>', 'WIQL query string to select stories')
+  .option('--area-path <path>', 'Filter by area path')
+  .option('--format <fmt>', 'Output format: gherkin or markdown (default: markdown)')
+  .option('--output-folder <dir>', 'Where to write files (default: config pull.targetFolder or .)')
+  .option('--force', 'Overwrite existing files')
+  .option('--dry-run', 'Show what would be created without writing files')
+  .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
+  .action(async (opts) => {
+    const globalOpts = program.opts();
+    try {
+      const configPath = resolveConfigPath(globalOpts.config);
+      const config = loadConfig(configPath);
+      if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
+      const configDir = path.dirname(configPath);
+
+      console.log(chalk.bold('ado-sync generate'));
+      console.log(chalk.dim(`Config: ${configPath}`));
+      if (opts.dryRun) console.log(chalk.yellow('Dry run — no files will be written'));
+      console.log('');
+
+      const storyIds = opts.storyIds
+        ? opts.storyIds.split(',').map((s: string) => parseInt(s.trim(), 10)).filter(Boolean)
+        : undefined;
+
+      const outputFormat = program.opts().output;
+      const results = await generateSpecs(config, configDir, {
+        storyIds,
+        query: opts.query,
+        areaPath: opts.areaPath,
+        format: opts.format,
+        outputFolder: opts.outputFolder,
+        force: opts.force ?? false,
+        dryRun: opts.dryRun ?? false,
+      });
+
+      if (outputFormat === 'json') {
+        process.stdout.write(JSON.stringify(results, null, 2) + '\n');
+        return;
+      }
+
+      for (const r of results) {
+        const symbol = r.action === 'created' ? chalk.green('+') : chalk.dim('=');
+        const relPath = path.relative(process.cwd(), r.filePath);
+        console.log(`${symbol} [#${r.storyId}] ${relPath} — ${r.title}`);
+      }
+      console.log('');
+      const created = results.filter((r) => r.action === 'created').length;
+      const skipped = results.filter((r) => r.action === 'skipped').length;
+      console.log([
+        created && chalk.green(`${created} created`),
+        skipped && chalk.dim(`${skipped} skipped`),
+      ].filter(Boolean).join(chalk.dim('  ')) || chalk.dim('Nothing to generate.'));
+    } catch (err: any) {
+      handleError(err);
+    }
+  });
 
 // ─── Run ─────────────────────────────────────────────────────────────────────
 

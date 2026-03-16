@@ -9,8 +9,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { AdoStory, getWorkItemsByAreaPath, getWorkItemsByIds, getWorkItemsByQuery } from '../azure/work-items';
 import { AzureClient } from '../azure/client';
+import { AdoStory, getWorkItemsByAreaPath, getWorkItemsByIds, getWorkItemsByQuery } from '../azure/work-items';
 import { SyncConfig } from '../types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
