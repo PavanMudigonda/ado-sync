@@ -34,13 +34,11 @@
  * directory by default. Override with ADO_SYNC_CONFIG env var.
  */
 
-// Suppress DEP0169 (url.parse) from azure-devops-node-api
-const originalEmit = process.emit;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(process as any).emit = function (event: string, ...args: any[]) {
-  if (event === 'warning' && args[0]?.code === 'DEP0169') return false;
-  return originalEmit.apply(process, [event, ...args] as any);
-};
+// Suppress DEP0169 (url.parse) from azure-devops-node-api internals.
+process.on('warning', (warning) => {
+  if ((warning as NodeJS.ErrnoException).code === 'DEP0169') return;
+  process.stderr.write(`[node:warning] ${warning.name}: ${warning.message}\n`);
+});
 
 import 'dotenv/config';
 
@@ -98,8 +96,8 @@ server.tool(
     try {
       cfg = resolveConfig(configPath);
       checks.push({ label: 'Config loaded', ok: true, detail: cfg.configPath });
-    } catch (err: any) {
-      checks.push({ label: 'Config loaded', ok: false, detail: err.message });
+    } catch (err: unknown) {
+      checks.push({ label: 'Config loaded', ok: false, detail: err instanceof Error ? err.message : String(err) });
       return { content: [{ type: 'text', text: formatChecks(checks) }] };
     }
 
@@ -110,8 +108,8 @@ server.tool(
     try {
       client = await AzureClient.create(config);
       checks.push({ label: 'Azure connection', ok: true, detail: config.orgUrl });
-    } catch (err: any) {
-      checks.push({ label: 'Azure connection', ok: false, detail: err.message });
+    } catch (err: unknown) {
+      checks.push({ label: 'Azure connection', ok: false, detail: err instanceof Error ? err.message : String(err) });
       return { content: [{ type: 'text', text: formatChecks(checks) }] };
     }
 
@@ -120,8 +118,8 @@ server.tool(
       const coreApi = await client.getCoreApi();
       const proj = await coreApi.getProject(config.project);
       checks.push({ label: `Project "${config.project}"`, ok: !!proj?.id, detail: proj?.id ? 'found' : 'not found' });
-    } catch (err: any) {
-      checks.push({ label: `Project "${config.project}"`, ok: false, detail: err.message });
+    } catch (err: unknown) {
+      checks.push({ label: `Project "${config.project}"`, ok: false, detail: err instanceof Error ? err.message : String(err) });
     }
 
     // Step 4: test plans
@@ -131,8 +129,8 @@ server.tool(
       try {
         const plan = await planApi.getTestPlanById(config.project, id);
         checks.push({ label: `Test Plan #${id}`, ok: !!plan?.id, detail: plan?.name ?? 'not found' });
-      } catch (err: any) {
-        checks.push({ label: `Test Plan #${id}`, ok: false, detail: err.message });
+      } catch (err: unknown) {
+        checks.push({ label: `Test Plan #${id}`, ok: false, detail: err instanceof Error ? err.message : String(err) });
       }
     }
 
@@ -154,7 +152,7 @@ server.tool(
   'get_test_cases',
   'List all test cases in a Azure DevOps test suite. Returns id, title, tags, and step count.',
   {
-    suiteId: z.number().optional().describe('Suite ID (defaults to plan root suite)'),
+    suiteId: z.number().int().positive().optional().describe('Suite ID (defaults to plan root suite)'),
     configPath: z.string().optional().describe('Path to ado-sync config file'),
   },
   async ({ suiteId, configPath }) => {
@@ -183,7 +181,7 @@ server.tool(
   'get_test_case',
   'Fetch a single Azure DevOps test case by ID. Returns full details including steps.',
   {
-    id: z.number().describe('Azure DevOps Test Case work item ID'),
+    id: z.number().int().positive().describe('Azure DevOps Test Case work item ID'),
     configPath: z.string().optional().describe('Path to ado-sync config file'),
   },
   async ({ id, configPath }) => {
@@ -266,7 +264,7 @@ server.tool(
   'Pulls the story title, description, and acceptance criteria to scaffold the spec file. ' +
   'Provide story_ids, a WIQL query, or an area_path.',
   {
-    storyIds: z.array(z.number()).optional().describe('ADO work item IDs to generate specs for'),
+    storyIds: z.array(z.number().int().positive()).optional().describe('ADO work item IDs to generate specs for'),
     query: z.string().optional().describe('WIQL query string to select stories'),
     areaPath: z.string().optional().describe('Area path — generates specs for all User Stories under it'),
     format: z.enum(['gherkin', 'markdown']).optional().describe('Output format (default: based on config local.type)'),
@@ -311,7 +309,7 @@ server.tool(
   'Fetch Azure DevOps work items (User Stories, Bugs, etc.) with their title, description, ' +
   'acceptance criteria, state, and tags. Useful for understanding what needs to be tested before generating specs.',
   {
-    ids: z.array(z.number()).optional().describe('Work item IDs to fetch'),
+    ids: z.array(z.number().int().positive()).optional().describe('Work item IDs to fetch'),
     query: z.string().optional().describe('WIQL query to select work items'),
     areaPath: z.string().optional().describe('Fetch all User Stories under this area path'),
     workItemType: z.string().optional().default('User Story').describe('Work item type for area path query (default: "User Story")'),
@@ -355,7 +353,7 @@ server.tool(
     resultFiles: z.array(z.string()).optional().describe('Paths to result files'),
     resultFormat: z.string().optional().describe('Format: trx, junit, nunitXml, cucumberJson, playwrightJson, ctrfJson'),
     runName: z.string().optional().describe('Name for the test run in Azure DevOps'),
-    buildId: z.number().optional().describe('Build ID to associate with the run'),
+    buildId: z.number().int().positive().optional().describe('Build ID to associate with the run'),
     attachmentsFolder: z.string().optional().describe('Folder with screenshots/videos to attach'),
     dryRun: z.boolean().optional().default(false).describe('Parse results without publishing'),
     createIssuesOnFailure: z.boolean().optional().describe('File GitHub Issues or ADO Bugs for failed tests'),
@@ -424,7 +422,7 @@ server.tool(
     githubToken:   z.string().optional().describe('GitHub token or $ENV_VAR reference'),
     labels:        z.array(z.string()).optional().describe('Labels to apply (GitHub only)'),
     assignees:     z.array(z.string()).optional().describe('GitHub assignees (logins)'),
-    testCaseId:    z.number().optional().describe('ADO Test Case ID to link the bug to (ADO provider)'),
+    testCaseId:    z.number().int().positive().optional().describe('ADO Test Case ID to link the bug to (ADO provider)'),
     areaPath:      z.string().optional().describe('ADO area path for the Bug work item'),
     configPath:    z.string().optional().describe('Path to ado-sync config file'),
     configOverrides: z.array(z.string()).optional().describe('Config overrides'),
@@ -480,7 +478,7 @@ server.tool(
   'and IDs of any Test Cases already linked via TestedBy relation. ' +
   'Use this before generate_specs to give the spec writer full context.',
   {
-    storyId:         z.number().describe('ADO work item ID of the User Story'),
+    storyId:         z.number().int().positive().describe('ADO work item ID of the User Story'),
     configPath:      z.string().optional().describe('Path to ado-sync config file'),
     configOverrides: z.array(z.string()).optional().describe('Config overrides'),
   },
@@ -523,7 +521,7 @@ server.tool(
   'required documents checklist, and validation steps — giving any AI agent the ' +
   'structured context needed to drive the full Planner → Generator → Push → CI → Publish cycle.',
   {
-    storyIds:        z.array(z.number()).describe('ADO work item IDs to generate manifests for'),
+    storyIds:        z.array(z.number().int().positive()).describe('ADO work item IDs to generate manifests for'),
     outputFolder:    z.string().optional().describe('Where to write manifest files (default: config dir)'),
     format:          z.enum(['gherkin', 'markdown']).optional().describe('Spec format to reference in the manifest'),
     force:           z.boolean().optional().default(false).describe('Overwrite existing manifest files'),
@@ -589,7 +587,8 @@ async function main() {
   await server.connect(transport);
 }
 
-main().catch((err) => {
-  process.stderr.write(`[ado-sync mcp] fatal: ${err?.message ?? err}\n`);
+main().catch((err: unknown) => {
+  const msg = err instanceof Error ? err.message : String(err);
+  process.stderr.write(`[ado-sync mcp] fatal: ${msg}\n`);
   process.exit(1);
 });

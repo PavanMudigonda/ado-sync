@@ -1007,8 +1007,10 @@ export async function summarizeTest(
   let body = '';
   try {
     body = extractFunctionBody(test.filePath, test.line, localType);
-  } catch {
-    // Can't read body — heuristic will produce an empty step list
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[ado-sync] Warning: could not read function body for "${test.title}" (${test.filePath}:${test.line}): ${msg}\n`);
+    // heuristic summary will produce an empty step list
   }
 
   const fallbackTitle = test.title;
@@ -1057,9 +1059,10 @@ export async function summarizeTest(
           ctx
         );
     }
-  } catch (err: any) {
+  } catch (err: unknown) {
     if (heuristicFallback) {
-      process.stderr.write(`  [ai-summary] ${opts.provider} failed (${err.message}), falling back to heuristic\n`);
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`  [ai-summary] ${opts.provider} failed (${msg}), falling back to heuristic\n`);
       return heuristicSummary(body, fallbackTitle);
     }
     throw err;

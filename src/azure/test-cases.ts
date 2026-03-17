@@ -54,15 +54,15 @@ async function withRetry<T>(
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       return await fn();
-    } catch (err: any) {
+    } catch (err: unknown) {
       lastErr = err;
-      const status: number = err.statusCode ?? err.status ?? 0;
+      const status: number = (err as any).statusCode ?? (err as any).status ?? 0;
       const isTransient = status === 429 || status === 503;
       if (!isTransient || attempt === retries) throw err;
 
       // Respect Retry-After header if present (value is in seconds)
       const retryAfterHeader: string | undefined =
-        err.response?.headers?.['retry-after'] ?? err.headers?.['retry-after'];
+        (err as any).response?.headers?.['retry-after'] ?? (err as any).headers?.['retry-after'];
       let delayMs: number;
       if (retryAfterHeader) {
         delayMs = parseFloat(retryAfterHeader) * 1000;
@@ -161,8 +161,25 @@ function parseStepsXml(xml: string): AzureStep[] {
  * i.e. an embedded xs:schema section followed by the data rows. Without
  * the schema, the parameter grid shows column names but leaves values empty.
  */
+const MAX_PARAM_ROWS    = 500;
+const MAX_PARAM_COLUMNS = 50;
+
 function buildParameterDataXml(headers: string[], rows: string[][]): string {
   if (!headers.length || !rows.length) return '';
+
+  if (headers.length > MAX_PARAM_COLUMNS) {
+    process.stderr.write(
+      `  [warn] Scenario Outline has ${headers.length} columns — truncating to ${MAX_PARAM_COLUMNS} (Azure DevOps limit).\n`
+    );
+    headers = headers.slice(0, MAX_PARAM_COLUMNS);
+    rows = rows.map((r) => r.slice(0, MAX_PARAM_COLUMNS));
+  }
+  if (rows.length > MAX_PARAM_ROWS) {
+    process.stderr.write(
+      `  [warn] Scenario Outline has ${rows.length} example rows — truncating to ${MAX_PARAM_ROWS} to stay within Azure DevOps payload limits.\n`
+    );
+    rows = rows.slice(0, MAX_PARAM_ROWS);
+  }
 
   const safeNames = headers.map(escapeXmlName);
 
@@ -692,8 +709,9 @@ async function syncAttachments(
             tcId
           );
         }
-      } catch (err: any) {
-        console.warn(`  [warn] Failed to attach ${fileName} to TC #${tcId}: ${err.message}`);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`  [warn] Failed to attach ${fileName} to TC #${tcId}: ${msg}`);
       }
     }
   }
@@ -1021,9 +1039,10 @@ export async function createTestCase(
   let wi: any;
   try {
     wi = await withRetry(() => wit.createWorkItem({}, patchDoc, config.project, 'Test Case'));
-  } catch (err: any) {
-    const status: string = err?.statusCode ? ` (HTTP ${err.statusCode})` : '';
-    const detail: string = err?.message ?? String(err);
+  } catch (err: unknown) {
+    const httpCode = (err as any)?.statusCode ?? (err as any)?.status;
+    const status: string = httpCode ? ` (HTTP ${httpCode})` : '';
+    const detail: string = err instanceof Error ? err.message : String(err);
     throw new Error(`Failed to create test case for: ${test.title}${status} — ${detail}`);
   }
   if (!wi?.id) throw new Error(`Failed to create test case for: ${test.title} — Azure returned no work item ID. Check that the project name, plan ID, and PAT permissions (Test Management: Write) are correct.`);
@@ -1118,9 +1137,10 @@ export async function updateTestCase(
 
   try {
     await withRetry(() => wit.updateWorkItem({}, patchDoc, id));
-  } catch (err: any) {
-    const status: string = err?.statusCode ? ` (HTTP ${err.statusCode})` : '';
-    const detail: string = err?.message ?? String(err);
+  } catch (err: unknown) {
+    const httpCode = (err as any)?.statusCode ?? (err as any)?.status;
+    const status: string = httpCode ? ` (HTTP ${httpCode})` : '';
+    const detail: string = err instanceof Error ? err.message : String(err);
     throw new Error(`Failed to update test case #${id} for: ${test.title}${status} — ${detail}`);
   }
 
@@ -1172,9 +1192,10 @@ export async function addTestCaseToSuite(
       config.testPlan.id,
       suiteId
     );
-  } catch (err: any) {
+  } catch (err: unknown) {
     // Azure returns an error when the TC is already in the suite — safe to ignore.
-    if (/duplicate/i.test(err?.message ?? '')) return;
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/duplicate/i.test(msg)) return;
     throw err;
   }
 }
@@ -1196,8 +1217,9 @@ export async function addTestCaseToRootSuite(
       config.testPlan.id,
       rootSuiteId
     );
-  } catch (err: any) {
-    if (/duplicate/i.test(err?.message ?? '')) return;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/duplicate/i.test(msg)) return;
     throw err;
   }
 }
