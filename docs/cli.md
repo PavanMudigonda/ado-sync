@@ -217,9 +217,31 @@ Publish test results from TRX, JUnit XML, NUnit XML, Cucumber JSON, or Playwrigh
 ado-sync publish-test-results --testResult results/test.trx
 ado-sync publish-test-results --testResult results/test.xml --testResultFormat junit --dry-run
 ado-sync publish-test-results --testResult results/playwright.json --attachmentsFolder test-results/
+
+# AI failure analysis — posts root-cause + fix suggestion as a comment on each failed result
+ado-sync publish-test-results \
+  --testResult results/playwright.json \
+  --analyze-failures \
+  --ai-provider anthropic \
+  --ai-model claude-haiku-4-5-20251001 \
+  --ai-key $ANTHROPIC_API_KEY
+
+# Or with OpenAI
+ado-sync publish-test-results \
+  --testResult results/test.trx \
+  --analyze-failures \
+  --ai-provider openai \
+  --ai-key $OPENAI_API_KEY
+
+# Or with a local Ollama server (no cloud cost)
+ado-sync publish-test-results \
+  --testResult results/junit.xml \
+  --analyze-failures \
+  --ai-provider ollama \
+  --ai-model qwen2.5-coder:7b
 ```
 
-See [publish-test-results.md](publish-test-results.md) for full reference.
+See [publish-test-results.md](publish-test-results.md) for full reference including config-based setup.
 
 ---
 

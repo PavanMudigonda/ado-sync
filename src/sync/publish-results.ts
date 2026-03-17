@@ -28,6 +28,7 @@ import { glob } from 'glob';
 import * as path from 'path';
 
 import { AzureClient } from '../azure/client';
+import { AiSummaryOpts, analyzeFailure } from '../ai/summarizer';
 import { createIssuesFromResults, CreateIssuesResult } from '../issues/create-issues';
 import { CreateIssuesConfig, SyncConfig } from '../types';
 
@@ -1248,6 +1249,12 @@ export async function publishTestResults(
     createIssuesOnFailure?: boolean;
     /** CLI overrides for issue-creation config. */
     issueOverrides?: Partial<CreateIssuesConfig>;
+    /**
+     * When provided, use this AI provider to analyse each failed test result and
+     * post a root-cause + suggestion comment on the Azure test result.
+     * Supported providers: ollama, openai, anthropic.
+     */
+    aiOpts?: AiSummaryOpts;
   } = {}
 ): Promise<PublishResult> {
   const pubConfig = config.publishTestResults;
@@ -1468,6 +1475,43 @@ export async function publishTestResults(
       { attachmentType: att.attachmentType, fileName: att.fileName, stream: att.data.toString('base64') },
       config.project, runId
     );
+  }
+
+  // ── AI failure analysis ───────────────────────────────────────────────────
+  // Resolve effective AI opts: CLI flags override config-level sync.ai settings.
+  const configAi = config.sync?.ai;
+  const effectiveAiOpts: AiSummaryOpts | undefined =
+    opts.aiOpts
+      ? opts.aiOpts
+      : configAi?.analyzeFailures && configAi.provider && configAi.provider !== 'none' && configAi.provider !== 'heuristic' && configAi.provider !== 'local'
+        ? { provider: configAi.provider as AiSummaryOpts['provider'], model: configAi.model, baseUrl: configAi.baseUrl, apiKey: configAi.apiKey }
+        : undefined;
+
+  if (effectiveAiOpts) {
+    for (let i = 0; i < allResults.length; i++) {
+      const resultEntry = allResults[i];
+      if (resultEntry.outcome !== 'Failed') continue;
+      const addedResult = addedResults?.[i];
+      if (!addedResult?.id) continue;
+
+      const analysis = await analyzeFailure(
+        resultEntry.testName,
+        resultEntry.errorMessage ?? '',
+        resultEntry.stackTrace,
+        effectiveAiOpts,
+      ).catch(() => null);
+
+      if (analysis) {
+        const comment = `**Root cause:** ${analysis.rootCause}\n\n**Suggestion:** ${analysis.suggestion}`;
+        try {
+          await (testApi as any).updateTestResults(
+            [{ id: addedResult.id, comment }],
+            config.project,
+            runId,
+          );
+        } catch { /* best-effort — don't fail the publish if comment update fails */ }
+      }
+    }
   }
 
   await testApi.updateTestRun({ state: 'Completed' } as any, config.project, runId);

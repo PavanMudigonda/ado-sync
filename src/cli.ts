@@ -344,6 +344,11 @@ program
   .option('--github-token <token>', 'GitHub token ($ENV_VAR reference supported)')
   .option('--bug-threshold <percent>', 'Failure % above which one env-failure issue is filed instead of per-test (default: 20)')
   .option('--max-issues <n>', 'Hard cap on issues filed per run (default: 50)')
+  .option('--analyze-failures', 'Use AI to analyse each failed result and post a root-cause comment on the Azure test result')
+  .option('--ai-provider <provider>', 'AI provider for failure analysis: ollama, openai, or anthropic')
+  .option('--ai-model <model>', 'AI model: ollama tag, openai model name, or anthropic model name')
+  .option('--ai-url <url>', 'Base URL for ollama or OpenAI-compatible endpoint')
+  .option('--ai-key <key>', 'API key for openai or anthropic ($ENV_VAR reference supported)')
   .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
   .action(async (opts) => {
     const globalOpts = program.opts();
@@ -357,6 +362,21 @@ program
       console.log(chalk.dim(`Config: ${configPath}`));
       if (opts.dryRun) console.log(chalk.yellow('Dry run — no changes will be made'));
       console.log('');
+
+      // Build AI opts if --analyze-failures is set or config.sync.ai.analyzeFailures is true
+      const wantAnalysis = opts.analyzeFailures || config.sync?.ai?.analyzeFailures;
+      const aiProvider = opts.aiProvider ?? config.sync?.ai?.provider;
+      let aiOpts: AiSummaryOpts | undefined;
+      if (wantAnalysis && aiProvider && aiProvider !== 'none' && aiProvider !== 'heuristic' && aiProvider !== 'local') {
+        aiOpts = {
+          provider: aiProvider as AiSummaryOpts['provider'],
+          model:    opts.aiModel  ?? config.sync?.ai?.model,
+          baseUrl:  opts.aiUrl    ?? config.sync?.ai?.baseUrl,
+          apiKey:   opts.aiKey    ?? config.sync?.ai?.apiKey,
+        };
+      } else if (wantAnalysis && !aiProvider) {
+        process.stderr.write(chalk.yellow('  [warn] --analyze-failures requires --ai-provider (ollama, openai, or anthropic). Skipping analysis.\n'));
+      }
 
       const result = await publishTestResults(config, configDir, {
         dryRun: opts.dryRun,
@@ -373,6 +393,7 @@ program
           ...(opts.bugThreshold   && { threshold:   parseInt(opts.bugThreshold) }),
           ...(opts.maxIssues      && { maxIssues:   parseInt(opts.maxIssues) }),
         },
+        aiOpts,
       });
 
       console.log(chalk.green(`Total results: ${result.totalResults}`));
