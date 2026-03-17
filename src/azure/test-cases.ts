@@ -765,10 +765,12 @@ async function applyLinkRelations(
   config: SyncConfig,
   isCreate: boolean
 ): Promise<any[]> {
-  const linkConfigs = config.sync?.links;
-  if (!linkConfigs?.length) return [];
-
+  const linkConfigs = config.sync?.links ?? [];
   const desired = test.linkRefs ?? [];
+  // When autoLinkStories is on, linkRefs may be populated without explicit sync.links config.
+  // Only skip if there are truly no refs to process.
+  if (!linkConfigs.length && !desired.length) return [];
+
   const patches: any[] = [];
 
   if (isCreate) {

@@ -21,7 +21,7 @@ import pkg from '../package.json';
 import { AiSummaryOpts } from './ai/summarizer';
 import { AzureClient } from './azure/client';
 import { applyOverrides, CONFIG_TEMPLATE_JSON, CONFIG_TEMPLATE_YAML, loadConfig, resolveConfigPath } from './config';
-import { pull, push, status } from './sync/engine';
+import { coverageReport, detectStaleTestCases, pull, push, status } from './sync/engine';
 import { generateSpecs } from './sync/generate';
 import { generateManifests } from './sync/manifest';
 import { publishTestResults } from './sync/publish-results';
@@ -602,6 +602,8 @@ program
   .description('Show field-level diff between local specs and Azure DevOps')
   .option('--tags <expression>', 'Only check scenarios matching this tag expression')
   .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
+  .option('--format <fmt>', 'Output format: text (default) or json')
+  .option('--fail-on-drift', 'Exit with code 1 when any differences are found (useful as a CI quality gate)')
   .option('--ai-provider <provider>', 'AI provider for test step generation')
   .option('--ai-model <model>', 'AI model path or name')
   .option('--ai-url <url>', 'Base URL for AI endpoint')
@@ -622,9 +624,21 @@ program
       const aiSummary = buildAiOpts(opts, config, configDir);
       const results = await status(config, configDir, { tags: opts.tags, aiSummary });
 
-      const outputFormat = program.opts().output;
+      // --format json or global --output json
+      const outputFormat = opts.format ?? program.opts().output;
       if (outputFormat === 'json') {
-        process.stdout.write(JSON.stringify(results, null, 2) + '\n');
+        const diffs = results
+          .filter((r) => r.action === 'updated' || r.action === 'conflict')
+          .map((r) => ({
+            action: r.action,
+            azureId: r.azureId,
+            title: r.title,
+            filePath: r.filePath ? path.relative(process.cwd(), r.filePath) : '',
+            changedFields: r.changedFields ?? [],
+            diffDetail: r.diffDetail ?? [],
+          }));
+        process.stdout.write(JSON.stringify({ total: results.length, diffs }, null, 2) + '\n');
+        if (opts.failOnDrift && diffs.length > 0) process.exit(1);
         return;
       }
 
@@ -638,11 +652,21 @@ program
         console.log(`${symbol} ${filePart} ${r.title}${idStr}`);
         if (r.changedFields?.length) {
           console.log(chalk.dim(`    changed fields: ${r.changedFields.join(', ')}`));
+        }
+        if (r.diffDetail?.length) {
+          for (const d of r.diffDetail) {
+            const local  = String(d.local).slice(0, 80).replace(/\n/g, '↵');
+            const remote = String(d.remote).slice(0, 80).replace(/\n/g, '↵');
+            console.log(chalk.dim(`    ${d.field}:`));
+            console.log(chalk.green(`      local:  ${local}`));
+            console.log(chalk.red(`      remote: ${remote}`));
+          }
         } else if (r.detail) {
           console.log(chalk.dim(`    ${r.detail}`));
         }
       }
       if (!anyDiff) console.log(chalk.dim('No differences found.'));
+      if (opts.failOnDrift && anyDiff) process.exit(1);
     } catch (err: unknown) {
       handleError(err);
     }
@@ -800,6 +824,198 @@ program
       } else {
         console.log(chalk.dim('No linked test cases yet.'));
       }
+    } catch (err: unknown) {
+      handleError(err);
+    }
+  });
+
+// ─── stale ───────────────────────────────────────────────────────────────────
+
+program
+  .command('stale')
+  .description('List Azure DevOps Test Cases that have no corresponding local spec')
+  .option('--tags <expression>', 'Only consider local specs matching this tag expression')
+  .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
+  .action(async (opts) => {
+    const globalOpts = program.opts();
+    try {
+      const configPath = resolveConfigPath(globalOpts.config);
+      const config = loadConfig(configPath);
+      if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
+      const configDir = path.dirname(configPath);
+
+      console.log(chalk.bold('ado-sync stale'));
+      console.log(chalk.dim(`Config: ${configPath}`));
+      if (opts.tags) console.log(chalk.dim(`Tags:   ${opts.tags}`));
+      console.log('');
+
+      const staleCases = await detectStaleTestCases(config, configDir, { tags: opts.tags });
+
+      const outputFormat = globalOpts.output;
+      if (outputFormat === 'json') {
+        process.stdout.write(JSON.stringify(staleCases, null, 2) + '\n');
+        return;
+      }
+
+      if (staleCases.length === 0) {
+        console.log(chalk.green('No stale test cases found.'));
+        return;
+      }
+
+      for (const tc of staleCases) {
+        const tagsStr = tc.tags.length ? chalk.dim(`  [${tc.tags.join(', ')}]`) : '';
+        console.log(`${chalk.yellow('?')} ${chalk.dim(`[#${tc.id}]`)} ${tc.title}${tagsStr}`);
+      }
+      console.log('');
+      console.log(chalk.yellow(`${staleCases.length} stale test case${staleCases.length !== 1 ? 's' : ''} — not referenced by any local spec.`));
+      console.log(chalk.dim('Run `ado-sync push` to tag them as ado-sync:removed, or delete them manually.'));
+    } catch (err: unknown) {
+      handleError(err);
+    }
+  });
+
+// ─── coverage ────────────────────────────────────────────────────────────────
+
+program
+  .command('coverage')
+  .description('Show spec link rate and story coverage for local specs vs Azure DevOps')
+  .option('--tags <expression>', 'Only consider local specs matching this tag expression')
+  .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
+  .option('--fail-below <percent>', 'Exit with code 1 when spec link rate is below this threshold (0–100)')
+  .action(async (opts) => {
+    const globalOpts = program.opts();
+    try {
+      const configPath = resolveConfigPath(globalOpts.config);
+      const config = loadConfig(configPath);
+      if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
+      const configDir = path.dirname(configPath);
+
+      console.log(chalk.bold('ado-sync coverage'));
+      console.log(chalk.dim(`Config: ${configPath}`));
+      if (opts.tags) console.log(chalk.dim(`Tags:   ${opts.tags}`));
+      console.log('');
+
+      const report = await coverageReport(config, configDir, { tags: opts.tags });
+
+      const outputFormat = globalOpts.output;
+      if (outputFormat === 'json') {
+        process.stdout.write(JSON.stringify(report, null, 2) + '\n');
+      } else {
+        const linkColor = report.specLinkRate >= 80 ? chalk.green : report.specLinkRate >= 50 ? chalk.yellow : chalk.red;
+        console.log(chalk.bold('Spec link rate'));
+        console.log(`  ${linkColor(`${report.specLinkRate}%`)}  ${chalk.dim(`(${report.linkedSpecs} of ${report.totalLocalSpecs} specs linked to Azure Test Cases)`)}`);
+        if (report.unlinkedSpecs > 0) {
+          console.log(`  ${chalk.dim(`${report.unlinkedSpecs} unlinked — run \`ado-sync push\` to create Azure Test Cases for them`)}`);
+        }
+
+        if (report.storiesReferenced.length > 0) {
+          console.log('');
+          const storyColor = report.storyCoverageRate >= 80 ? chalk.green : report.storyCoverageRate >= 50 ? chalk.yellow : chalk.red;
+          console.log(chalk.bold('Story coverage'));
+          console.log(`  ${storyColor(`${report.storyCoverageRate}%`)}  ${chalk.dim(`(${report.storiesCovered.length} of ${report.storiesReferenced.length} referenced stories have linked specs)`)}`);
+          if (report.storiesUncovered.length > 0) {
+            console.log(`  ${chalk.dim('Uncovered stories: ')}${report.storiesUncovered.map((id) => `#${id}`).join(', ')}`);
+          }
+        } else {
+          console.log('');
+          console.log(chalk.dim('No @story: tags found — add @story:ID tags to specs to track story coverage.'));
+        }
+      }
+
+      const threshold = opts.failBelow ? parseInt(opts.failBelow, 10) : undefined;
+      if (threshold !== undefined && report.specLinkRate < threshold) {
+        console.error(chalk.red(`\nSpec link rate ${report.specLinkRate}% is below threshold ${threshold}%`));
+        process.exit(1);
+      }
+    } catch (err: unknown) {
+      handleError(err);
+    }
+  });
+
+// ─── watch ────────────────────────────────────────────────────────────────────
+
+program
+  .command('watch')
+  .description('Watch local spec files for changes and auto-push on save')
+  .option('--dry-run', 'Show what would change without making any modifications')
+  .option('--tags <expression>', 'Only sync scenarios matching this tag expression')
+  .option('--debounce <ms>', 'Debounce delay in milliseconds before running push (default: 800)', '800')
+  .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
+  .option('--ai-provider <provider>', 'AI provider for test step generation')
+  .option('--ai-model <model>', 'AI model path or name')
+  .option('--ai-url <url>', 'Base URL for AI endpoint')
+  .option('--ai-key <key>', 'API key for AI provider')
+  .action(async (opts) => {
+    const globalOpts = program.opts();
+    try {
+      const configPath = resolveConfigPath(globalOpts.config);
+      const config = loadConfig(configPath);
+      if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
+      const configDir = path.dirname(configPath);
+      const debounceMs = parseInt(opts.debounce ?? '800', 10);
+
+      console.log(chalk.bold('ado-sync watch'));
+      console.log(chalk.dim(`Config:  ${configPath}`));
+      console.log(chalk.dim(`Project: ${config.project}`));
+      console.log(chalk.dim(`Plan:    ${config.testPlan.id}`));
+      if (opts.dryRun) console.log(chalk.yellow('Dry run — no changes will be made'));
+      if (opts.tags) console.log(chalk.dim(`Tags:    ${opts.tags}`));
+      console.log('');
+      console.log(chalk.dim(`Watching ${configDir} for changes... (Ctrl+C to stop)`));
+      console.log('');
+
+      const aiSummary = buildAiOpts(opts, config, configDir);
+
+      let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+      let running = false;
+
+      const runPush = async () => {
+        if (running) return;
+        running = true;
+        const ts = new Date().toLocaleTimeString();
+        console.log(chalk.dim(`[${ts}] Change detected — running push...`));
+        try {
+          const isTTY = process.stdout.isTTY ?? false;
+          const onProgress = createProgressCallback(isTTY);
+          const results = await push(config, configDir, {
+            dryRun: opts.dryRun,
+            tags: opts.tags,
+            onProgress,
+            aiSummary,
+          });
+          if (isTTY) clearProgressLine();
+          printResults(results, config.toolSettings?.outputLevel);
+        } catch (err: unknown) {
+          console.error(chalk.red(`Push failed: ${err instanceof Error ? err.message : String(err)}`));
+        } finally {
+          running = false;
+        }
+      };
+
+      const onChange = () => {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(runPush, debounceMs);
+      };
+
+      // Watch the config directory recursively for changes to spec files
+      const watcher = fs.watch(configDir, { recursive: true }, (eventType, filename) => {
+        if (!filename) return;
+        // Only react to spec file changes, not the cache or config file itself
+        const skipPatterns = ['.ado-sync-cache.json', 'ado-sync.json', 'ado-sync.yml', 'node_modules'];
+        if (skipPatterns.some((p) => filename.includes(p))) return;
+        onChange();
+      });
+
+      // Keep process alive
+      process.on('SIGINT', () => {
+        watcher.close();
+        console.log('\n' + chalk.dim('Watch mode stopped.'));
+        process.exit(0);
+      });
+
+      // Trigger an initial push on start
+      await runPush();
+
     } catch (err: unknown) {
       handleError(err);
     }
