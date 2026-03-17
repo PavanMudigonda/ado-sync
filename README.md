@@ -32,6 +32,8 @@ Supports a wide range of test file formats and frameworks:
 
 Inspired by [SpecSync](https://docs.specsolutions.eu/specsync/).
 
+Also available as a **[VS Code Extension](https://marketplace.visualstudio.com/items?itemName=PavanMudigonda.ado-sync-vscode)** — CodeLens, sidebar tree, status bar, and all commands without leaving the editor.
+
 ---
 
 ## How it works
@@ -116,6 +118,42 @@ See [docs/publish-test-results.md](docs/publish-test-results.md) for TRX, NUnit,
 
 ---
 
+## VS Code Extension
+
+Install the **ado-sync VS Code Extension** for a seamless in-editor experience:
+
+[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/PavanMudigonda.ado-sync-vscode?label=VS%20Code%20Marketplace)](https://marketplace.visualstudio.com/items?itemName=PavanMudigonda.ado-sync-vscode)
+
+```
+ext install PavanMudigonda.ado-sync-vscode
+```
+
+**What you get:**
+
+- **CodeLens** — inline `View in ADO` / `Push` / `Fetch` links above every `@tc:12345` tag
+- **Hover tooltips** — hover any `@tc:` tag to open it directly in Azure DevOps
+- **Sidebar tree** — Testing panel lists all spec files and their linked test cases with line numbers
+- **Status bar** — live sync state; click to run `ado-sync status`
+- **All commands** available from the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
+
+| Command | Description |
+|---|---|
+| `ado-sync: Push` | Push local changes to Azure DevOps |
+| `ado-sync: Push (Dry Run)` | Preview push without applying changes |
+| `ado-sync: Pull` | Pull ADO changes into local files |
+| `ado-sync: Pull (Dry Run)` | Preview pull without applying changes |
+| `ado-sync: Status` | Show local vs. ADO diff |
+| `ado-sync: Validate Config` | Check config and Azure connectivity |
+| `ado-sync: Generate Spec from Story` | Create `.feature`/`.md` from a User Story ID |
+| `ado-sync: Fetch Test Case` | Retrieve a test case by ID |
+| `ado-sync: Publish Test Results` | Upload result files (JUnit, TRX, Playwright, Cucumber, CTRF) |
+
+**Requirements:** `ado-sync` npm package installed globally (`npm install -g ado-sync`) and an `ado-sync.json` config in the workspace root.
+
+See [docs/vscode-extension.md](docs/vscode-extension.md) for the full reference.
+
+---
+
 ## Output symbols
 
 ```
@@ -143,6 +181,7 @@ See [docs/publish-test-results.md](docs/publish-test-results.md) for TRX, NUnit,
 | Publishing test results | [docs/publish-test-results.md](docs/publish-test-results.md) |
 | Advanced features (format, state, fieldUpdates, attachments, AI, CI) | [docs/advanced.md](docs/advanced.md) |
 | MCP Server (use ado-sync from AI agents) | [docs/mcp-server.md](docs/mcp-server.md) |
+| **VS Code Extension** | [docs/vscode-extension.md](docs/vscode-extension.md) |
 | Troubleshooting | [docs/troubleshooting.md](docs/troubleshooting.md) |
 
 > **AI models / LLM crawlers:** [`llms.txt`](llms.txt) contains a flat single-file summary of this entire project — framework type mappings, config schema, CLI flags, ID writeback formats, and the full doc index. Read that first.

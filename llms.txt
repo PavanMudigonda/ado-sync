@@ -131,6 +131,29 @@ Automatically route Test Cases into named suites by tag:
 
 A `.env` file in the working directory is loaded automatically.
 
+## VS Code Extension
+
+`ado-sync-vscode` — VS Code extension (marketplace ID: `PavanMudigonda.ado-sync-vscode`)
+
+Requires `ado-sync` npm package installed globally and an `ado-sync.json` config in the workspace root.
+
+Features:
+- CodeLens: inline View / Push / Fetch links above every `@tc:12345` tag
+- Hover tooltips: hover `@tc:` to open Test Case in Azure DevOps
+- Sidebar tree: Testing panel lists spec files and linked test cases with line numbers
+- Status bar: live sync state, click to run status
+
+Commands (Command Palette):
+`ado-sync: Push`, `ado-sync: Push (Dry Run)`, `ado-sync: Pull`, `ado-sync: Pull (Dry Run)`,
+`ado-sync: Status`, `ado-sync: Validate Config`, `ado-sync: Generate Spec from Story`,
+`ado-sync: Fetch Test Case`, `ado-sync: Publish Test Results`
+
+Settings:
+- `ado-sync.configPath` (string, default "") — config file path relative to workspace root
+- `ado-sync.showCodeLens` (boolean, default true) — toggle CodeLens
+- `ado-sync.autoStatus` (boolean, default false) — auto-run status on spec file save
+- `ado-sync.outputLevel` (string, default "normal") — "normal" | "verbose" | "quiet"
+
 ## MCP server
 
 `ado-sync-mcp` starts an MCP stdio server exposing 13 tools:
@@ -162,3 +185,4 @@ Register in Claude Code (`~/.claude/claude_desktop_config.json`):
 - docs/mcp-server.md        — MCP server setup and tool reference
 - docs/troubleshooting.md   — common errors and fixes
 - docs/agent-setup.md       — step-by-step guide for AI agents doing autonomous setup
+- docs/vscode-extension.md  — VS Code extension commands, settings, CodeLens, sidebar, troubleshooting
