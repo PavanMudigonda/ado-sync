@@ -18,4 +18,5 @@ yarn-error.log
 .saffron_design_system
 .saffron_design_system
 .playwright-atrium
-.saffron_design_system/
+.saffron_design_system/specs/
+specs/
