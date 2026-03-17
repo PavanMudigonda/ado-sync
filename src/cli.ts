@@ -869,7 +869,7 @@ program
       if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
 
       const { AzureClient } = await import('./azure/client');
-      const { acGate, getWorkItemsByIds, getWorkItemsByQuery, getWorkItemsByAreaPath } = await import('./azure/work-items');
+      const { acGate, getWorkItemsByQuery, getWorkItemsByAreaPath } = await import('./azure/work-items');
       const client = await AzureClient.create(config);
 
       let storyIds: number[] = [];
@@ -1092,7 +1092,7 @@ program
       const config = loadConfig(configPath);
       if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
 
-      const { trendReport, buildMarkdownSummary, postTrendToWebhook } = await import('./azure/test-runs');
+      const { trendReport, postTrendToWebhook } = await import('./azure/test-runs');
 
       console.log(chalk.bold('ado-sync trend'));
       console.log(chalk.dim(`Config:  ${configPath}`));

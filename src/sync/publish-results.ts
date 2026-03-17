@@ -27,8 +27,8 @@ import * as fs from 'fs';
 import { glob } from 'glob';
 import * as path from 'path';
 
-import { AzureClient } from '../azure/client';
 import { AiSummaryOpts, analyzeFailure } from '../ai/summarizer';
+import { AzureClient } from '../azure/client';
 import { createIssuesFromResults, CreateIssuesResult } from '../issues/create-issues';
 import { CreateIssuesConfig, SyncConfig } from '../types';
 
