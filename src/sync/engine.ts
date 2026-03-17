@@ -91,6 +91,7 @@ async function parseLocalFiles(
 ): Promise<ParsedTest[]> {
   const tagPrefix = config.sync?.tagPrefix ?? 'tc';
   const linkConfigs = config.sync?.links;
+  const autoLinkStories = config.sync?.autoLinkStories ?? false;
   const attachmentsConfig = config.sync?.attachments;
   const localCondition = config.local.condition;
   const results: ParsedTest[] = [];
@@ -172,6 +173,29 @@ async function parseLocalFiles(
       for (const t of tests) {
         if (localCondition && !matchesTags(t, localCondition)) continue;
         if (tagsFilter && !matchesTags(t, tagsFilter)) continue;
+
+        // Auto-link: if autoLinkStories is enabled and the test has @story:NNN tags
+        // not already covered by an explicit sync.links entry, add implicit linkRefs.
+        if (autoLinkStories) {
+          const storyPrefixConfigured = linkConfigs?.some((l) => l.prefix === 'story');
+          if (!storyPrefixConfigured) {
+            const storyRe = /^(?:@)?story:(\d+)$/i;
+            const implicitStoryRefs: Array<{ prefix: string; id: number }> = [];
+            for (const tag of t.tags) {
+              const m = tag.match(storyRe);
+              if (m) implicitStoryRefs.push({ prefix: 'story', id: parseInt(m[1], 10) });
+            }
+            if (implicitStoryRefs.length > 0) {
+              const existing = t.linkRefs ?? [];
+              const existingIds = new Set(existing.filter((r) => r.prefix === 'story').map((r) => r.id));
+              const newRefs = implicitStoryRefs.filter((r) => !existingIds.has(r.id));
+              if (newRefs.length > 0) {
+                t.linkRefs = [...existing, ...newRefs];
+              }
+            }
+          }
+        }
+
         results.push(t);
       }
     } catch (err: unknown) {
@@ -453,6 +477,32 @@ async function pushSingle(
     } catch { /* best-effort: if pre-load fails, continue without matching */ }
   }
 
+  // ── Parallel pre-fetch of remote TCs ────────────────────────────────────
+  // For suites with many linked tests, fetching each TC individually is slow.
+  // Pre-fetch all linked IDs concurrently (up to 8 in-flight at once) and store
+  // them in a Map so the sync loop can look them up without extra round-trips.
+  const linkedTests = tests.filter((t) => t.azureId !== undefined);
+  const remoteTcCache = new Map<number, AzureTestCase | null>();
+
+  if (linkedTests.length > 0) {
+    const CONCURRENCY = 8;
+    const queue = [...linkedTests];
+    const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
+      while (queue.length > 0) {
+        const t = queue.shift();
+        if (!t?.azureId) continue;
+        if (remoteTcCache.has(t.azureId)) continue;
+        try {
+          const tc = await getTestCase(client, t.azureId, titleField);
+          remoteTcCache.set(t.azureId, tc);
+        } catch {
+          remoteTcCache.set(t.azureId, null);
+        }
+      }
+    });
+    await Promise.all(workers);
+  }
+
   let done = 0;
   const reportProgress = (result: SyncResult) => {
     results.push(result);
@@ -463,7 +513,10 @@ async function pushSingle(
     if (test.azureId) {
       try {
         const cached = cache[test.azureId];
-        const remote = await getTestCase(client, test.azureId, titleField);
+        // Use pre-fetched TC from cache; fall back to live fetch on miss
+        const remote = remoteTcCache.has(test.azureId)
+          ? remoteTcCache.get(test.azureId)!
+          : await getTestCase(client, test.azureId, titleField);
 
         if (!remote) {
           // TC was deleted from Azure — re-create it and write back the new ID.
@@ -521,6 +574,18 @@ async function pushSingle(
         if (tagsChanged) changedFields.push('tags');
         if (descriptionChanged || remoteDescriptionChanged) changedFields.push('description');
 
+        // Build per-field diff details for structured JSON output
+        const diffDetail: import('../types').DiffDetail[] = [];
+        if (titleChanged) diffDetail.push({ field: 'title', local: test.title, remote: remote.title });
+        if (stepsChanged) diffDetail.push({ field: 'steps', local: localStepsText, remote: remoteStepsText });
+        if (tagsChanged) {
+          const addedTags = [...localTags].filter((t) => !remoteTags.has(t));
+          diffDetail.push({ field: 'tags', local: addedTags.join(', '), remote: remote.tags.join(', ') });
+        }
+        if (descriptionChanged || remoteDescriptionChanged) {
+          diffDetail.push({ field: 'description', local: test.description ?? '', remote: remote.description ?? '' });
+        }
+
         if (changedFields.length === 0) {
           // Update cache entry even on skip (changedDate may differ due to other fields)
           updateCacheEntry(cache, test, remote);
@@ -537,6 +602,7 @@ async function pushSingle(
             title: test.title,
             azureId: test.azureId,
             changedFields,
+            diffDetail,
             detail: `${relFile}:${test.line} — changed fields: ${changedFields.join(', ')}`,
           };
           if (conflictAction === 'skip') {
@@ -566,7 +632,7 @@ async function pushSingle(
           await addTestCaseToConditionSuites(client, config, test.azureId, test, conditionSuiteCache);
           updateCacheEntry(cache, test, remote);
         }
-        reportProgress({ action: 'updated', filePath: test.filePath, title: test.title, azureId: test.azureId });
+        reportProgress({ action: 'updated', filePath: test.filePath, title: test.title, azureId: test.azureId, changedFields, diffDetail });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         reportProgress({ action: 'error', filePath: test.filePath, title: test.title, azureId: test.azureId, detail: msg });
@@ -1107,4 +1173,134 @@ function buildPullMarkdownContent(tc: AzureTestCase, tagPrefix: string): string 
     lines.push('');
   }
   return lines.join('\n');
+}
+
+// ─── Stale test case detection ────────────────────────────────────────────────
+
+export interface StaleTestCase {
+  id: number;
+  title: string;
+  tags: string[];
+}
+
+/**
+ * Detect Azure DevOps Test Cases that have no corresponding local spec.
+ * A TC is "stale" when it exists in the plan suite but no local file references it
+ * via the tc-tag (e.g. @tc:12345). Stale TCs accumulate when specs are deleted locally
+ * without running push, or when TCs are created directly in Azure without a local spec.
+ */
+export async function detectStaleTestCases(
+  config: SyncConfig,
+  configDir: string,
+  opts: { tags?: string } = {}
+): Promise<StaleTestCase[]> {
+  const files = await discoverFiles(config.local.include, config.local.exclude, configDir);
+  const tests = await parseLocalFiles(files, config, opts.tags);
+  const localIds = new Set(tests.map((t) => t.azureId).filter(Boolean) as number[]);
+
+  const client = await AzureClient.create(config);
+  const plans = config.testPlans?.length ? config.testPlans : [config.testPlan];
+  const stale: StaleTestCase[] = [];
+
+  for (const plan of plans) {
+    const planConfig = config.testPlans?.length
+      ? configForPlanEntry(config, plan as TestPlanEntry)
+      : config;
+    try {
+      const remoteTcs = await getTestCasesInSuite(client, planConfig);
+      for (const tc of remoteTcs) {
+        if (!localIds.has(tc.id)) {
+          stale.push({ id: tc.id, title: tc.title, tags: tc.tags });
+        }
+      }
+    } catch { /* best-effort per-plan */ }
+  }
+
+  return stale;
+}
+
+// ─── Spec coverage report ─────────────────────────────────────────────────────
+
+export interface CoverageReport {
+  /** Total local specs discovered */
+  totalLocalSpecs: number;
+  /** Local specs that have an azureId (linked to a TC) */
+  linkedSpecs: number;
+  /** Local specs with NO azureId (never pushed) */
+  unlinkedSpecs: number;
+  /** Unique story IDs referenced via @story: (or configured link prefix) tags */
+  storiesReferenced: number[];
+  /** Story IDs that have at least one linked TC via a local spec */
+  storiesCovered: number[];
+  /** Story IDs with no linked TC in local specs */
+  storiesUncovered: number[];
+  /** Spec link rate as a percentage (0–100) */
+  specLinkRate: number;
+  /** Story coverage rate as a percentage (0–100), or -1 if no story refs found */
+  storyCoverageRate: number;
+}
+
+/**
+ * Compute a coverage report for local specs vs Azure DevOps.
+ * Reports two metrics:
+ *   1. Spec link rate   — % of local specs that have an @tc:ID (are synced to Azure)
+ *   2. Story coverage   — % of referenced User Stories that have at least one linked spec
+ */
+export async function coverageReport(
+  config: SyncConfig,
+  configDir: string,
+  opts: { tags?: string } = {}
+): Promise<CoverageReport> {
+  const files = await discoverFiles(config.local.include, config.local.exclude, configDir);
+  const tests = await parseLocalFiles(files, config, opts.tags);
+
+  const linked   = tests.filter((t) => t.azureId !== undefined);
+  const unlinked = tests.filter((t) => t.azureId === undefined);
+
+  // Find story link prefix from sync.links config; default to 'story'
+  const storyPrefix = config.sync?.links?.find((l) => l.prefix === 'story')?.prefix ?? 'story';
+  const storyRe = new RegExp(`^(?:@)?${storyPrefix}:(\\d+)$`, 'i');
+
+  // Collect all story IDs referenced via tags
+  const allStoryIds = new Set<number>();
+  const storiesWithLinkedSpec = new Set<number>();
+
+  for (const test of tests) {
+    for (const tag of test.tags) {
+      const m = tag.match(storyRe);
+      if (m) {
+        const storyId = parseInt(m[1], 10);
+        allStoryIds.add(storyId);
+        if (test.azureId !== undefined) {
+          storiesWithLinkedSpec.add(storyId);
+        }
+      }
+    }
+    // Also check linkRefs (parsed by link-aware parsers)
+    for (const ref of test.linkRefs ?? []) {
+      if (ref.prefix === storyPrefix) {
+        allStoryIds.add(ref.id);
+        if (test.azureId !== undefined) {
+          storiesWithLinkedSpec.add(ref.id);
+        }
+      }
+    }
+  }
+
+  const storiesUncovered = [...allStoryIds].filter((id) => !storiesWithLinkedSpec.has(id));
+  const specLinkRate = tests.length > 0 ? Math.round((linked.length / tests.length) * 100) : 100;
+  const storyCoverageRate = allStoryIds.size > 0
+    ? Math.round((storiesWithLinkedSpec.size / allStoryIds.size) * 100)
+    : -1;
+
+  return {
+    totalLocalSpecs:   tests.length,
+    linkedSpecs:       linked.length,
+    unlinkedSpecs:     unlinked.length,
+    storiesReferenced: [...allStoryIds],
+    storiesCovered:    [...storiesWithLinkedSpec],
+    storiesUncovered,
+    specLinkRate,
+    storyCoverageRate,
+  };
 }

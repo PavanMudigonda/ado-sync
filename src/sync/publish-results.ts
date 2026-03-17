@@ -1257,15 +1257,40 @@ export async function publishTestResults(
 
   const tagPrefix = config.sync?.tagPrefix ?? 'tc';
 
-  // Gather result files
+  // Gather result files — entries may be literal paths or glob patterns
   const sources: Array<{ filePath: string; format?: string }> = [];
+
+  function isGlobPattern(p: string): boolean {
+    return p.includes('*') || p.includes('?') || p.includes('{');
+  }
+
   if (opts.resultFiles?.length) {
     for (const f of opts.resultFiles) {
-      sources.push({ filePath: path.resolve(configDir, f), format: opts.resultFormat });
+      if (isGlobPattern(f)) {
+        const matches = await glob(f, { cwd: configDir, absolute: true });
+        if (matches.length === 0) {
+          process.stderr.write(`  [warn] No files matched glob pattern: ${f}\n`);
+        }
+        for (const match of matches.sort()) {
+          sources.push({ filePath: match, format: opts.resultFormat });
+        }
+      } else {
+        sources.push({ filePath: path.resolve(configDir, f), format: opts.resultFormat });
+      }
     }
   } else if (pubConfig?.testResult?.sources) {
     for (const src of pubConfig.testResult.sources) {
-      sources.push({ filePath: path.resolve(configDir, src.value), format: src.format });
+      if (isGlobPattern(src.value)) {
+        const matches = await glob(src.value, { cwd: configDir, absolute: true });
+        if (matches.length === 0) {
+          process.stderr.write(`  [warn] No files matched glob pattern: ${src.value}\n`);
+        }
+        for (const match of matches.sort()) {
+          sources.push({ filePath: match, format: src.format });
+        }
+      } else {
+        sources.push({ filePath: path.resolve(configDir, src.value), format: src.format });
+      }
     }
   }
 

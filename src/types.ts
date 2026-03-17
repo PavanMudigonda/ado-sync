@@ -393,6 +393,13 @@ export interface SyncConfig {
      */
     links?: LinkConfig[];
     /**
+     * When true, automatically detect @story:NNN tags in spec files and create
+     * System.LinkTypes.Related work item links from Test Case → User Story, even
+     * if `sync.links` is not explicitly configured.
+     * Default: false.
+     */
+    autoLinkStories?: boolean;
+    /**
      * Condition-based suite assignment. Each entry specifies a static suite name
      * and an optional tag filter. Matching test cases are added to that suite after
      * being created or updated. Suites are created automatically if they don't exist.
