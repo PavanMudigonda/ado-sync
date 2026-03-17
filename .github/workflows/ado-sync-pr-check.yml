@@ -1,0 +1,200 @@
+# ado-sync PR check
+#
+# On every pull request, runs `ado-sync push --dry-run --output json` and posts
+# a summary comment listing unlinked scenarios (specs not yet pushed to Azure
+# DevOps) and any drift detected vs. existing Test Cases.
+#
+# Required secrets:
+#   ADO_PAT                  — Azure DevOps Personal Access Token (read/write test cases)
+#   GITHUB_TOKEN             — provided automatically by GitHub Actions
+#
+# Optional inputs (set as env vars or repository variables):
+#   ADO_SYNC_CONFIG          — path to the ado-sync config file (default: ado-sync.json)
+#   ADO_SYNC_TAGS            — tag expression to filter specs (e.g. "@smoke and not @wip")
+
+name: ADO Sync — PR Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  ado-sync-pr-check:
+    name: Check spec ↔ Azure DevOps drift
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install ado-sync
+        run: npm install --global ado-sync
+
+      - name: Run ado-sync push --dry-run
+        id: dry_run
+        env:
+          ADO_PAT: ${{ secrets.ADO_PAT }}
+        run: |
+          CONFIG="${ADO_SYNC_CONFIG:-ado-sync.json}"
+          TAGS_ARG=""
+          if [ -n "$ADO_SYNC_TAGS" ]; then
+            TAGS_ARG="--tags \"$ADO_SYNC_TAGS\""
+          fi
+
+          # Capture JSON output; allow non-zero exit (failures are shown as comment, not CI failure)
+          set +e
+          OUTPUT=$(ado-sync push --dry-run --output json --config "$CONFIG" $TAGS_ARG 2>&1)
+          EXIT_CODE=$?
+          set -e
+
+          # Write outputs for the next step
+          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+          printf '%s' "$OUTPUT" > /tmp/ado_sync_output.json
+
+      - name: Post PR comment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+
+            let raw = '';
+            try {
+              raw = fs.readFileSync('/tmp/ado_sync_output.json', 'utf8');
+            } catch {
+              raw = '[]';
+            }
+
+            let results = [];
+            try {
+              const parsed = JSON.parse(raw);
+              // ado-sync --output json returns either an array or {results:[...]}
+              results = Array.isArray(parsed) ? parsed : (parsed.results ?? []);
+            } catch {
+              // Not valid JSON — likely an auth/config error; show raw
+              const body = [
+                '## ADO Sync PR Check',
+                '',
+                '> **Error**: Could not parse ado-sync output. Check Actions logs for details.',
+                '',
+                '```',
+                raw.slice(0, 2000),
+                '```',
+              ].join('\n');
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+              return;
+            }
+
+            const created  = results.filter(r => r.action === 'created');
+            const updated  = results.filter(r => r.action === 'updated');
+            const conflict = results.filter(r => r.action === 'conflict');
+            const skipped  = results.filter(r => r.action === 'skipped');
+            const errors   = results.filter(r => r.action === 'error');
+
+            const total = results.length;
+            const icon = (conflict.length || errors.length) ? '⚠️' : (created.length || updated.length) ? '🔵' : '✅';
+
+            const lines = [
+              `## ${icon} ADO Sync — PR Spec Check`,
+              '',
+              `| Status | Count |`,
+              `|--------|-------|`,
+              `| 🆕 Would create (unlinked specs) | ${created.length} |`,
+              `| ✏️ Would update (drift detected) | ${updated.length} |`,
+              `| ⚠️ Conflicts | ${conflict.length} |`,
+              `| ⏭️ Skipped (already in sync) | ${skipped.length} |`,
+              `| ❌ Errors | ${errors.length} |`,
+              '',
+            ];
+
+            if (created.length) {
+              lines.push('### 🆕 Unlinked specs (would be created in Azure DevOps)');
+              lines.push('> Run `ado-sync push` after merge to create these Test Cases.');
+              lines.push('');
+              for (const r of created.slice(0, 20)) {
+                lines.push(`- \`${r.filePath?.split('/').slice(-2).join('/')}\` — **${r.title}**`);
+              }
+              if (created.length > 20) lines.push(`- _…and ${created.length - 20} more_`);
+              lines.push('');
+            }
+
+            if (updated.length) {
+              lines.push('### ✏️ Specs with drift vs. Azure DevOps');
+              lines.push('');
+              for (const r of updated.slice(0, 20)) {
+                const fields = r.changedFields?.join(', ') ?? '';
+                lines.push(`- [#${r.azureId}] **${r.title}** — changed: \`${fields}\``);
+              }
+              if (updated.length > 20) lines.push(`- _…and ${updated.length - 20} more_`);
+              lines.push('');
+            }
+
+            if (conflict.length) {
+              lines.push('### ⚠️ Conflicts (both local and remote changed)');
+              lines.push('');
+              for (const r of conflict.slice(0, 10)) {
+                lines.push(`- [#${r.azureId}] **${r.title}** — ${r.detail ?? ''}`);
+              }
+              lines.push('');
+            }
+
+            if (errors.length) {
+              lines.push('### ❌ Errors');
+              lines.push('');
+              for (const r of errors.slice(0, 10)) {
+                lines.push(`- **${r.title}** — ${r.detail ?? 'unknown error'}`);
+              }
+              lines.push('');
+            }
+
+            if (total === 0) {
+              lines.push('_No local specs found — check your `ado-sync.json` config._');
+            } else if (created.length === 0 && updated.length === 0 && conflict.length === 0 && errors.length === 0) {
+              lines.push('✅ All specs are in sync with Azure DevOps. No action needed.');
+            }
+
+            lines.push('');
+            lines.push('---');
+            lines.push('_Generated by [ado-sync](https://github.com/PavanMudigonda/ado-sync) · `ado-sync push --dry-run`_');
+
+            const body = lines.join('\n');
+
+            // Find and update an existing bot comment, or create a new one
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const marker = '<!-- ado-sync-pr-check -->';
+            const existing = comments.find(c => c.body?.includes('ADO Sync — PR Spec Check'));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: marker + '\n' + body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: marker + '\n' + body,
+              });
+            }

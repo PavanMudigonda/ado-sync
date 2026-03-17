@@ -1180,6 +1180,38 @@ export async function tagTestCaseAsRemoved(
   ], id);
 }
 
+/**
+ * Retire an Azure DevOps Test Case by transitioning its state.
+ * Typical retire state is 'Closed' (built-in) but can be overridden via `targetState`.
+ * Also tags the item with 'ado-sync:retired' for visibility.
+ */
+export async function retireTestCase(
+  client: AzureClient,
+  id: number,
+  targetState = 'Closed',
+): Promise<void> {
+  const wit = await client.getWitApi();
+  const wi  = await wit.getWorkItem(id, ['System.State', 'System.Tags']);
+  const currentState = wi?.fields?.['System.State'] as string | undefined;
+  const existing     = (wi?.fields?.['System.Tags'] as string | undefined) ?? '';
+  const currentTags  = tagsFromString(existing);
+
+  const patch: any[] = [];
+
+  if (currentState !== targetState) {
+    patch.push({ op: 'replace', path: '/fields/System.State', value: targetState });
+  }
+
+  if (!currentTags.includes('ado-sync:retired')) {
+    const newTags = [...currentTags, 'ado-sync:retired'].join('; ');
+    patch.push({ op: 'replace', path: '/fields/System.Tags', value: newTags });
+  }
+
+  if (patch.length > 0) {
+    await wit.updateWorkItem({}, patch, id);
+  }
+}
+
 export async function addTestCaseToSuite(
   client: AzureClient,
   config: SyncConfig,

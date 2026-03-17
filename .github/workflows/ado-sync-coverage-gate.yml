@@ -1,0 +1,190 @@
+# ado-sync coverage gate
+#
+# Enforces spec link rate and (optionally) story AC gate as a CI quality gate.
+# Fails the build when the percentage of local specs that are linked to Azure
+# DevOps Test Cases drops below the configured threshold.
+#
+# Combine with the ado-sync-pr-check.yml workflow to get drift commentary on
+# pull requests AND hard enforcement on merge / push.
+#
+# Required secrets:
+#   ADO_PAT   — Azure DevOps Personal Access Token (read test cases + work items)
+#
+# Required repository variables (or hardcode below):
+#   ADO_SYNC_COVERAGE_MIN    — minimum spec link rate % (default: 80)
+#   ADO_SYNC_AC_GATE_STATES  — story states to validate (default: Active,Resolved,Closed)
+#   ADO_SYNC_CONFIG          — path to ado-sync config file (default: ado-sync.json)
+#
+# Optional:
+#   ADO_SYNC_TAGS            — tag expression to filter specs (e.g. "@smoke and not @wip")
+#   ADO_SYNC_AC_AREA_PATH    — area path to scope AC gate (validates all User Stories under path)
+#   ADO_SYNC_TREND_DAYS      — days of history for trend report (default: 30)
+#   ADO_SYNC_TREND_WEBHOOK   — Slack/Teams webhook URL for trend summary
+#   ADO_SYNC_TREND_WEBHOOK_TYPE — slack | teams | generic (default: slack)
+
+name: ADO Sync — Coverage Gate
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  # Allow manual trigger with custom thresholds
+  workflow_dispatch:
+    inputs:
+      coverage_min:
+        description: Minimum spec link rate (%)
+        required: false
+        default: '80'
+      skip_ac_gate:
+        description: Skip the AC gate step
+        required: false
+        default: 'false'
+      skip_trend:
+        description: Skip the trend report step
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+  pull-requests: write  # needed to post coverage summary comment on PRs
+
+jobs:
+  coverage-gate:
+    name: Spec coverage & AC gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install ado-sync
+        run: npm install --global ado-sync
+
+      # ── 1. Spec coverage gate ────────────────────────────────────────────────
+      - name: Spec link rate coverage gate
+        id: coverage
+        env:
+          ADO_PAT: ${{ secrets.ADO_PAT }}
+        run: |
+          CONFIG="${ADO_SYNC_CONFIG:-ado-sync.json}"
+          MIN="${{ github.event.inputs.coverage_min || vars.ADO_SYNC_COVERAGE_MIN || '80' }}"
+          TAGS_ARG=""
+          if [ -n "$ADO_SYNC_TAGS" ]; then
+            TAGS_ARG="--tags \"$ADO_SYNC_TAGS\""
+          fi
+
+          echo "Running ado-sync coverage --fail-below $MIN"
+          ado-sync coverage \
+            --config "$CONFIG" \
+            --fail-below "$MIN" \
+            $TAGS_ARG
+
+      # ── 2. AC gate (stories must have AC + linked TCs) ───────────────────────
+      - name: Acceptance criteria gate
+        id: ac_gate
+        if: ${{ github.event.inputs.skip_ac_gate != 'true' }}
+        env:
+          ADO_PAT: ${{ secrets.ADO_PAT }}
+        run: |
+          CONFIG="${ADO_SYNC_CONFIG:-ado-sync.json}"
+          STATES="${ADO_SYNC_AC_GATE_STATES:-Active,Resolved,Closed}"
+          AREA_ARG=""
+          if [ -n "$ADO_SYNC_AC_AREA_PATH" ]; then
+            AREA_ARG="--area-path \"$ADO_SYNC_AC_AREA_PATH\""
+          fi
+
+          echo "Running ado-sync ac-gate --states \"$STATES\""
+          ado-sync ac-gate \
+            --config "$CONFIG" \
+            --states "$STATES" \
+            $AREA_ARG \
+            --output json | tee /tmp/ac_gate_output.json
+
+          # ac-gate exits 1 on failure; propagate that
+          EXIT_CODE="${PIPESTATUS[0]}"
+          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+          exit "$EXIT_CODE"
+
+      # ── 3. Trend report (informational — does NOT fail the gate) ────────────
+      - name: Test result trend report
+        id: trend
+        if: ${{ github.event.inputs.skip_trend != 'true' && vars.ADO_SYNC_TREND_DAYS != '' || env.ADO_SYNC_TREND_DAYS != '' }}
+        env:
+          ADO_PAT: ${{ secrets.ADO_PAT }}
+        run: |
+          CONFIG="${ADO_SYNC_CONFIG:-ado-sync.json}"
+          DAYS="${ADO_SYNC_TREND_DAYS:-30}"
+          WEBHOOK_ARG=""
+          if [ -n "$ADO_SYNC_TREND_WEBHOOK" ]; then
+            WEBHOOK_ARG="--webhook-url \"$ADO_SYNC_TREND_WEBHOOK\" --webhook-type \"${ADO_SYNC_TREND_WEBHOOK_TYPE:-slack}\""
+          fi
+
+          echo "Running ado-sync trend --days $DAYS"
+          # Non-fatal: trend is informational; use || true to prevent gate failure
+          ado-sync trend \
+            --config "$CONFIG" \
+            --days "$DAYS" \
+            $WEBHOOK_ARG || true
+
+      # ── 4. Post PR summary comment ──────────────────────────────────────────
+      - name: Post coverage summary to PR
+        if: ${{ github.event_name == 'pull_request' && always() }}
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const coverageOutcome = '${{ steps.coverage.outcome }}';
+            const acOutcome       = '${{ steps.ac_gate.outcome }}';
+            const trendOutcome    = '${{ steps.trend.outcome }}';
+
+            const icon = (coverageOutcome === 'success' && acOutcome !== 'failure') ? '✅' : '❌';
+
+            const lines = [
+              `## ${icon} ADO Sync — Coverage Gate Results`,
+              '',
+              `| Check | Result |`,
+              `|-------|--------|`,
+              `| Spec link rate (≥ ${{ github.event.inputs.coverage_min || vars.ADO_SYNC_COVERAGE_MIN || '80' }}%) | ${coverageOutcome === 'success' ? '✅ Pass' : coverageOutcome === 'failure' ? '❌ Fail' : '⏭️ Skipped'} |`,
+              `| AC gate (stories have AC + linked TCs) | ${acOutcome === 'success' ? '✅ Pass' : acOutcome === 'failure' ? '❌ Fail' : '⏭️ Skipped'} |`,
+              `| Trend report | ${trendOutcome === 'success' ? '✅ Done' : trendOutcome === 'failure' ? '⚠️ Error' : '⏭️ Skipped'} |`,
+              '',
+              coverageOutcome !== 'success'
+                ? '> **Spec link rate below threshold.** Run `ado-sync push` to create missing Azure Test Cases.'
+                : '',
+              acOutcome === 'failure'
+                ? '> **AC gate failed.** Some stories are missing Acceptance Criteria or linked Test Cases.'
+                : '',
+              '',
+              '---',
+              '_Generated by [ado-sync](https://github.com/PavanMudigonda/ado-sync) · `ado-sync coverage` + `ado-sync ac-gate`_',
+            ].filter(l => l !== '').join('\n');
+
+            const marker = '<!-- ado-sync-coverage-gate -->';
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c => c.body?.includes('ADO Sync — Coverage Gate Results'));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: marker + '\n' + lines,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: marker + '\n' + lines,
+              });
+            }

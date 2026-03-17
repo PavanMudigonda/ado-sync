@@ -829,12 +829,99 @@ program
     }
   });
 
+// ─── ac-gate ─────────────────────────────────────────────────────────────────
+
+program
+  .command('ac-gate')
+  .description('Validate that ADO User Stories have Acceptance Criteria and linked Test Cases (CI quality gate)')
+  .option('--story-ids <ids>', 'Comma-separated ADO work item IDs to validate (e.g. 1234,5678)')
+  .option('--query <wiql>', 'WIQL query string to select stories (overrides --story-ids)')
+  .option('--area-path <path>', 'Validate all User Stories under this area path (overrides --story-ids)')
+  .option('--states <states>', 'Comma-separated story states to include (default: Active,Resolved,Closed)')
+  .option('--fail-on-no-ac', 'Exit 1 only for stories without Acceptance Criteria (no-ac), not just missing TCs')
+  .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
+  .action(async (opts) => {
+    const globalOpts = program.opts();
+    try {
+      const configPath = resolveConfigPath(globalOpts.config);
+      const config = loadConfig(configPath);
+      if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
+
+      const { AzureClient } = await import('./azure/client');
+      const { acGate, getWorkItemsByIds, getWorkItemsByQuery, getWorkItemsByAreaPath } = await import('./azure/work-items');
+      const client = await AzureClient.create(config);
+
+      let storyIds: number[] = [];
+
+      if (opts.query) {
+        const stories = await getWorkItemsByQuery(client, config.project, opts.query);
+        storyIds = stories.map((s: any) => s.id);
+      } else if (opts.areaPath) {
+        const stories = await getWorkItemsByAreaPath(client, config.project, opts.areaPath);
+        storyIds = stories.map((s: any) => s.id);
+      } else if (opts.storyIds) {
+        storyIds = opts.storyIds.split(',').map((s: string) => parseInt(s.trim(), 10)).filter(Boolean);
+      } else {
+        // Default: all active stories in project
+        const states = opts.states ?? 'Active,Resolved,Closed';
+        const stateList = states.split(',').map((s: string) => `'${s.trim()}'`).join(',');
+        const wiql = `SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = '${config.project.replace(/'/g, "''")}' AND [System.WorkItemType] = 'User Story' AND [System.State] IN (${stateList}) ORDER BY [System.Id]`;
+        const stories = await getWorkItemsByQuery(client, config.project, wiql);
+        storyIds = stories.map((s: any) => s.id);
+      }
+
+      if (storyIds.length === 0) {
+        console.log(chalk.yellow('No stories found to validate.'));
+        return;
+      }
+
+      console.log(chalk.bold('ado-sync ac-gate'));
+      console.log(chalk.dim(`Config:  ${configPath}`));
+      console.log(chalk.dim(`Stories: ${storyIds.length} to validate`));
+      console.log('');
+
+      const report = await acGate(client, config.project, storyIds, config.orgUrl);
+
+      const outputFormat = globalOpts.output;
+      if (outputFormat === 'json') {
+        process.stdout.write(JSON.stringify(report, null, 2) + '\n');
+      } else {
+        for (const r of report.passed) {
+          console.log(`${chalk.green('✓')} ${chalk.dim(`[#${r.storyId}]`)} ${r.title}  ${chalk.dim(`(${r.acCount} AC, ${r.linkedTcs.length} TC)`)}`);
+        }
+        for (const r of report.failed) {
+          const reason = r.outcome === 'no-ac'
+            ? chalk.red('no acceptance criteria')
+            : chalk.yellow('no linked test cases');
+          console.log(`${chalk.red('✗')} ${chalk.dim(`[#${r.storyId}]`)} ${r.title}  — ${reason}  ${chalk.dim(r.url)}`);
+        }
+        console.log('');
+        if (report.failed.length === 0) {
+          console.log(chalk.green(`All ${report.passed.length} stories passed the AC gate.`));
+        } else {
+          console.log(chalk.red(`${report.failed.length} of ${storyIds.length} stories failed the AC gate.`));
+          const noAc = report.failed.filter((r) => r.outcome === 'no-ac').length;
+          const noTc = report.failed.filter((r) => r.outcome === 'no-tc').length;
+          if (noAc) console.log(chalk.dim(`  ${noAc} missing acceptance criteria — add AC in Azure DevOps`));
+          if (noTc) console.log(chalk.dim(`  ${noTc} missing test cases        — run \`ado-sync push\` to create them`));
+        }
+      }
+
+      if (report.exitCode !== 0) process.exit(report.exitCode);
+    } catch (err: unknown) {
+      handleError(err);
+    }
+  });
+
 // ─── stale ───────────────────────────────────────────────────────────────────
 
 program
   .command('stale')
   .description('List Azure DevOps Test Cases that have no corresponding local spec')
   .option('--tags <expression>', 'Only consider local specs matching this tag expression')
+  .option('--retire', 'Automatically transition stale Test Cases to Closed state and tag ado-sync:retired')
+  .option('--retire-state <state>', 'Target state when retiring (default: Closed)', 'Closed')
+  .option('--dry-run', 'Show what --retire would do without making changes')
   .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
   .action(async (opts) => {
     const globalOpts = program.opts();
@@ -846,7 +933,8 @@ program
 
       console.log(chalk.bold('ado-sync stale'));
       console.log(chalk.dim(`Config: ${configPath}`));
-      if (opts.tags) console.log(chalk.dim(`Tags:   ${opts.tags}`));
+      if (opts.tags)  console.log(chalk.dim(`Tags:   ${opts.tags}`));
+      if (opts.retire) console.log(chalk.dim(`Retire: will transition to "${opts.retireState}"${opts.dryRun ? ' (dry-run)' : ''}`));
       console.log('');
 
       const staleCases = await detectStaleTestCases(config, configDir, { tags: opts.tags });
@@ -868,7 +956,37 @@ program
       }
       console.log('');
       console.log(chalk.yellow(`${staleCases.length} stale test case${staleCases.length !== 1 ? 's' : ''} — not referenced by any local spec.`));
-      console.log(chalk.dim('Run `ado-sync push` to tag them as ado-sync:removed, or delete them manually.'));
+
+      if (opts.retire) {
+        const { retireTestCase } = await import('./azure/test-cases');
+        const { AzureClient } = await import('./azure/client');
+        const client = await AzureClient.create(config);
+
+        let retired = 0;
+        let failed  = 0;
+        for (const tc of staleCases) {
+          if (opts.dryRun) {
+            console.log(chalk.dim(`  [dry-run] would retire #${tc.id} → ${opts.retireState}`));
+            continue;
+          }
+          try {
+            await retireTestCase(client, tc.id, opts.retireState);
+            console.log(`${chalk.green('↓')} Retired  ${chalk.dim(`[#${tc.id}]`)} ${tc.title}`);
+            retired++;
+          } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : String(e);
+            console.log(`${chalk.red('✗')} Failed   ${chalk.dim(`[#${tc.id}]`)} ${tc.title}  — ${msg}`);
+            failed++;
+          }
+        }
+        console.log('');
+        if (!opts.dryRun) {
+          if (retired > 0) console.log(chalk.green(`${retired} test case${retired !== 1 ? 's' : ''} retired → ${opts.retireState}.`));
+          if (failed  > 0) console.log(chalk.red(`${failed} retirement${failed !== 1 ? 's' : ''} failed — check permissions.`));
+        }
+      } else {
+        console.log(chalk.dim('Run `ado-sync stale --retire` to close them in Azure DevOps, or `ado-sync push` to tag them as ado-sync:removed.'));
+      }
     } catch (err: unknown) {
       handleError(err);
     }
@@ -925,6 +1043,96 @@ program
       const threshold = opts.failBelow ? parseInt(opts.failBelow, 10) : undefined;
       if (threshold !== undefined && report.specLinkRate < threshold) {
         console.error(chalk.red(`\nSpec link rate ${report.specLinkRate}% is below threshold ${threshold}%`));
+        process.exit(1);
+      }
+    } catch (err: unknown) {
+      handleError(err);
+    }
+  });
+
+// ─── trend ────────────────────────────────────────────────────────────────────
+
+program
+  .command('trend')
+  .description('Analyse historical test run results to detect flaky tests and failing patterns')
+  .option('--days <n>', 'How many days of history to analyse (default: 30)', '30')
+  .option('--max-runs <n>', 'Maximum number of test runs to sample (default: 50)', '50')
+  .option('--top <n>', 'How many top-failing tests to show (default: 10)', '10')
+  .option('--run-name <filter>', 'Only include runs whose name contains this string')
+  .option('--webhook-url <url>', 'Post a summary to this webhook URL')
+  .option('--webhook-type <type>', 'Webhook type: slack (default), teams, or generic', 'slack')
+  .option('--fail-on-flaky', 'Exit with code 1 when any flaky tests are detected')
+  .option('--fail-below <percent>', 'Exit with code 1 when overall pass rate is below this threshold (0–100)')
+  .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
+  .action(async (opts) => {
+    const globalOpts = program.opts();
+    try {
+      const configPath = resolveConfigPath(globalOpts.config);
+      const config = loadConfig(configPath);
+      if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
+
+      const { trendReport, buildMarkdownSummary, postTrendToWebhook } = await import('./azure/test-runs');
+
+      console.log(chalk.bold('ado-sync trend'));
+      console.log(chalk.dim(`Config:  ${configPath}`));
+      console.log(chalk.dim(`Period:  last ${opts.days} days  (max ${opts.maxRuns} runs)`));
+      console.log('');
+
+      const report = await trendReport(config, {
+        days:          parseInt(opts.days,    10),
+        maxRuns:       parseInt(opts.maxRuns, 10),
+        topN:          parseInt(opts.top,     10),
+        runNameFilter: opts.runName,
+      });
+
+      const outputFormat = globalOpts.output;
+      if (outputFormat === 'json') {
+        process.stdout.write(JSON.stringify(report, null, 2) + '\n');
+      } else {
+        const passColor = report.overallPassRate >= 90 ? chalk.green : report.overallPassRate >= 70 ? chalk.yellow : chalk.red;
+        console.log(chalk.bold('Overall pass rate'));
+        console.log(`  ${passColor(`${report.overallPassRate}%`)}  ${chalk.dim(`(${report.totalPassed} passed / ${report.totalFailed} failed across ${report.runsAnalyzed} runs)`)}`);
+        console.log('');
+
+        if (report.flakyTests.length > 0) {
+          console.log(chalk.bold(`Flaky tests  (${report.flakyTests.length} detected)`));
+          for (const t of report.flakyTests.slice(0, parseInt(opts.top, 10))) {
+            const tcTag = t.testCaseId ? chalk.dim(` [#${t.testCaseId}]`) : '';
+            console.log(`  ${chalk.yellow('~')}${tcTag} ${t.testName.slice(0, 70)}  ${chalk.dim(`${t.passRate}% pass  (${t.passed}✓ ${t.failed}✗)`)}`);
+          }
+          console.log('');
+        } else {
+          console.log(chalk.green('No flaky tests detected.'));
+          console.log('');
+        }
+
+        if (report.topFailingTests.length > 0) {
+          console.log(chalk.bold(`Top failing tests`));
+          for (const t of report.topFailingTests) {
+            const tcTag = t.testCaseId ? chalk.dim(` [#${t.testCaseId}]`) : '';
+            console.log(`  ${chalk.red('✗')}${tcTag} ${t.testName.slice(0, 70)}  ${chalk.dim(`${t.failed} failure${t.failed !== 1 ? 's' : ''}  (${t.passRate}% pass)`)}`);
+          }
+          console.log('');
+        }
+      }
+
+      if (opts.webhookUrl) {
+        const webhookType = opts.webhookType ?? 'slack';
+        if (!['slack', 'teams', 'generic'].includes(webhookType)) {
+          throw new Error(`Unknown --webhook-type "${webhookType}". Use slack, teams, or generic.`);
+        }
+        await postTrendToWebhook(report, { type: webhookType as 'slack' | 'teams' | 'generic', webhookUrl: opts.webhookUrl });
+        console.log(chalk.dim(`Summary posted to ${webhookType} webhook.`));
+      }
+
+      if (opts.failOnFlaky && report.flakyTests.length > 0) {
+        console.error(chalk.red(`\n${report.flakyTests.length} flaky test${report.flakyTests.length !== 1 ? 's' : ''} detected.`));
+        process.exit(1);
+      }
+
+      const threshold = opts.failBelow ? parseInt(opts.failBelow, 10) : undefined;
+      if (threshold !== undefined && report.overallPassRate < threshold) {
+        console.error(chalk.red(`\nOverall pass rate ${report.overallPassRate}% is below threshold ${threshold}%`));
         process.exit(1);
       }
     } catch (err: unknown) {
