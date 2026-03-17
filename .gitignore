@@ -20,3 +20,4 @@ yarn-error.log
 .playwright-atrium
 .saffron_design_system/specs/
 specs/
+.next-steps.md
