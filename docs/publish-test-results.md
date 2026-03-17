@@ -1,6 +1,6 @@
 # publish-test-results
 
-Parses test result files (TRX, NUnit XML, JUnit, Cucumber JSON, Playwright JSON) and publishes them to an Azure DevOps Test Run, linking results back to Test Cases either directly by TC ID (when available in the result file) or by `AutomatedTestName` matching.
+Parses test result files (TRX, NUnit XML, JUnit, Cucumber JSON, Playwright JSON, CTRF JSON) and publishes them to an Azure DevOps Test Run, linking results back to Test Cases either directly by TC ID (when available in the result file) or by `AutomatedTestName` matching.
 
 ---
 
@@ -31,11 +31,17 @@ ado-sync publish-test-results \
 | Option | Description |
 |--------|-------------|
 | `--testResult <path>` | Path to a result file. Repeatable. |
-| `--testResultFormat <format>` | `trx` · `nunitXml` · `junit` · `cucumberJson` · `playwrightJson`. Auto-detected when omitted. |
+| `--testResultFormat <format>` | `trx` · `nunitXml` · `junit` · `cucumberJson` · `playwrightJson` · `ctrfJson`. Auto-detected when omitted. |
 | `--attachmentsFolder <path>` | Folder to scan for screenshots/videos/logs to attach to test results. |
 | `--runName <name>` | Name for the Test Run in Azure DevOps. Defaults to `ado-sync <ISO timestamp>`. |
 | `--buildId <id>` | Build ID to associate with the Test Run. |
 | `--dry-run` | Parse results and print summary without creating a run in Azure. |
+| `--create-issues-on-failure` | File GitHub Issues or ADO Bugs for each failed test after publishing. |
+| `--issue-provider <github\|ado>` | Issue provider. Default: `github`. |
+| `--github-repo <owner/repo>` | GitHub repository to file issues in. |
+| `--github-token <token>` | GitHub token. Supports `$ENV_VAR` references. |
+| `--bug-threshold <percent>` | If more than this % of tests fail, one environment-failure issue is filed instead of per-test issues. Default: `20`. |
+| `--max-issues <n>` | Hard cap on issues filed per run. Default: `50`. |
 | `--config-override` | Override config values (repeatable, same as other commands). |
 
 ---
@@ -50,6 +56,7 @@ ado-sync publish-test-results \
 | Cucumber JSON | `.json` | Yes (JSON array, Cucumber format) | Yes — via `@tc:ID` tag on scenario | `step.embeddings[]` (base64 screenshots/video) |
 | Playwright JSON | `.json` | Yes (JSON object with `suites` key) | Yes — via `test.annotations[{ type: 'tc', description: 'ID' }]` (preferred) or `@tc:ID` in test title | `test.results[].attachments[]` (screenshots, videos, traces) |
 | Robot Framework XML | `output.xml` | Yes (`<robot>` root element) | Yes — via `<tags><tag>tc:ID</tag></tags>` | — |
+| CTRF JSON | `.json` | Yes (`results.tests` array) | Yes — via `tags: ["@tc:ID"]` or `@tc:ID` in test name | `attachments[].path` files, `stdout`/`stderr` arrays |
 
 > **NUnit via TRX**: when NUnit tests are run through the VSTest adapter (`--logger trx`), `[Property]` values are **not** included in the TRX output. Use `--logger "nunit3;LogFileName=results.xml"` to get the native NUnit XML format, which does include property values.
 
@@ -441,6 +448,38 @@ Recommended config:
 
 ---
 
+### CTRF (Common Test Report Format)
+
+[CTRF](https://ctrf.io) is a framework-agnostic JSON report format supported by reporters for Playwright, Cypress, Jest, k6, and many others. ado-sync auto-detects CTRF from the `results.tests` array structure.
+
+```bash
+# Example: Playwright with CTRF reporter
+npm install --save-dev playwright-ctrf-json-reporter
+
+# playwright.config.ts:
+# reporter: [['playwright-ctrf-json-reporter', { outputFile: 'results/ctrf.json' }]]
+
+npx playwright test
+ado-sync publish-test-results --testResult results/ctrf.json
+```
+
+```bash
+# Example: Jest with CTRF reporter
+npm install --save-dev jest-ctrf-json-reporter
+
+# jest.config.ts:
+# reporters: [['jest-ctrf-json-reporter', { outputFile: 'results/ctrf.json' }]]
+
+npx jest
+ado-sync publish-test-results --testResult results/ctrf.json
+```
+
+TC IDs are extracted from the `tags` array (e.g. `["@tc:1234", "@smoke"]`) or, as a fallback, from `@tc:ID` in the test name. `stdout`/`stderr` arrays and `attachments[].path` files are uploaded automatically.
+
+> **Status mapping**: CTRF `passed` → `Passed`, `failed` → `Failed`, `skipped`/`pending`/`other` → `NotExecuted`.
+
+---
+
 ### Flutter
 
 Flutter can produce JUnit XML via the `flutter_test_junit` package or by piping `--reporter junit`:
@@ -483,6 +522,7 @@ TC linking uses `AutomatedTestName` matching — set `sync.markAutomated: true` 
 | Espresso | JUnit XML | ❌ AutomatedTestName matching only | `<system-out>`, `<system-err>` | |
 | Flutter | JUnit XML | ❌ AutomatedTestName matching only | `<system-out>`, `<system-err>` | |
 | Robot Framework | Robot XML (`output.xml`) | ✅ `tc:N` in `<tags>` | — | |
+| CTRF (any framework) | CTRF JSON | ✅ `tags: ["@tc:ID"]` or `@tc:ID` in name | `attachments[].path` files + `stdout`/`stderr` | |
 
 ---
 
@@ -499,6 +539,7 @@ ado-sync uploads screenshots, videos, and logs from test results to the correspo
 | JUnit XML | `<system-out>` → log; `<system-err>` → log; `[[ATTACHMENT\|path]]` → Playwright files |
 | Cucumber JSON | `step.embeddings[]` → base64-encoded screenshots/video |
 | Playwright JSON | `results[].attachments[].path` → files on disk (screenshots, videos, traces) |
+| CTRF JSON | `tests[].attachments[].path` → files on disk; `tests[].stdout[]` / `tests[].stderr[]` → console logs |
 
 > **Note**: All file paths are resolved relative to the result file's directory, not the process working directory. This matches how test runners (Playwright, MSTest, NUnit) write relative paths in their output.
 
@@ -667,6 +708,99 @@ Results can also be configured in the config file under `publishTestResults`:
 | `testRunSettings.runType` | `"Automated"` *(default)* · `"Manual"`. |
 | `testResultSettings.comment` | Comment applied to every test result. |
 | `publishAttachmentsForPassingTests` | `"none"` *(default)* · `"files"` · `"all"`. |
+
+---
+
+## Creating issues on failure
+
+`--create-issues-on-failure` automatically files a GitHub Issue or ADO Bug for each failed test
+after the run is published. Multiple guards prevent flooding your tracker when the environment is
+the problem rather than individual tests.
+
+### Guard logic (applied in order)
+
+```
+failures > threshold% of total?
+  └─ YES → 1 environment-failure issue, stop
+  └─ NO
+       └─ cluster by error signature
+            └─ cluster size > 1?
+                 └─ YES → 1 issue per cluster (lists affected test names)
+                 └─ NO  → 1 issue per TC (up to maxIssues cap)
+                               └─ cap hit? → 1 overflow summary issue
+```
+
+| Guard | Default | Description |
+|---|---|---|
+| Failure-rate threshold | 20% | Above this, one env-failure issue is filed instead of per-test |
+| Error clustering | enabled | Tests with the same error message are grouped into one issue |
+| Hard cap | 50 | No more than this many issues per run; one overflow summary when exceeded |
+| Dedup | enabled | Skip if an open issue already exists for the same TC (GitHub: by `tc:ID` label; ADO: by title) |
+
+### GitHub Issues (recommended)
+
+```bash
+ado-sync publish-test-results \
+  --testResult results/ctrf.json \
+  --create-issues-on-failure \
+  --github-repo myorg/myrepo \
+  --github-token $GITHUB_TOKEN
+```
+
+Each issue is labelled `test-failure` and `tc:{ID}` (when a TC ID is available). The issue body
+contains the error message, stack trace, ADO TC link, and run URL — everything a healer agent
+needs to propose a fix PR.
+
+### ADO Bugs
+
+```bash
+ado-sync publish-test-results \
+  --testResult results/junit.xml \
+  --create-issues-on-failure \
+  --issue-provider ado
+```
+
+ADO Bugs are created as Bug work items in the same project. The `Repro Steps` field is populated
+with the error details. When a TC ID is known, a `TestedBy` relation is added linking the Bug to
+the Test Case.
+
+### Config-based setup
+
+```json
+{
+  "publishTestResults": {
+    "createIssuesOnFailure": {
+      "provider": "github",
+      "repo": "myorg/myrepo",
+      "token": "$GITHUB_TOKEN",
+      "labels": ["test-failure", "automated"],
+      "threshold": 20,
+      "maxIssues": 50,
+      "clusterByError": true,
+      "dedupByTestCase": true
+    }
+  }
+}
+```
+
+CLI flags override the config values when both are present.
+
+### MCP tool: `create_issue`
+
+The `create_issue` MCP tool lets healer agents file a single issue directly:
+
+```
+create_issue({
+  title:       "[FAILED] Login with valid credentials",
+  body:        "Error: Expected 200 but got 401\n\nStack: ...",
+  provider:    "github",
+  githubRepo:  "myorg/myrepo",
+  githubToken: "$GITHUB_TOKEN",
+  testCaseId:  1234
+})
+```
+
+Returns the issue URL immediately, which the agent can embed in its fix PR.
 
 ---
 
