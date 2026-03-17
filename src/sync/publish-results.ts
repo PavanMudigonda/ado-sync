@@ -28,7 +28,8 @@ import { glob } from 'glob';
 import * as path from 'path';
 
 import { AzureClient } from '../azure/client';
-import { SyncConfig } from '../types';
+import { createIssuesFromResults, CreateIssuesResult } from '../issues/create-issues';
+import { CreateIssuesConfig, SyncConfig } from '../types';
 
 // ─── Result file parsing ──────────────────────────────────────────────────────
 
@@ -996,6 +997,118 @@ function parseRustTestJson(content: string, tagPrefix: string, treatInconclusive
   return results;
 }
 
+// ─── CTRF JSON parser ─────────────────────────────────────────────────────────
+//
+// Common Test Report Format — https://ctrf.io
+// Produced by @ctrf/playwright-ctrf-json-reporter, jest-ctrf-json-reporter,
+// cypress-ctrf-json-reporter, and others.
+//
+//   {
+//     "results": {
+//       "tool": { "name": "playwright" },
+//       "summary": { "tests": 10, "passed": 8, "failed": 1, "skipped": 1, ... },
+//       "tests": [
+//         {
+//           "name": "should login",
+//           "status": "passed",           // passed | failed | skipped | pending | other
+//           "duration": 1234,             // milliseconds
+//           "suite": "Login Tests",       // optional — becomes "suite > name"
+//           "message": "Error message",   // populated on failure
+//           "trace": "Stack trace",       // populated on failure
+//           "tags": ["@tc:12345", "@smoke"],
+//           "filepath": "tests/login.spec.ts",
+//           "retries": 2,
+//           "flaky": false,
+//           "attachments": [
+//             { "name": "screenshot", "contentType": "image/png", "path": "/abs/path/..." }
+//           ],
+//           "stdout": ["line1", "line2"],
+//           "stderr": ["line1"]
+//         }
+//       ],
+//       "environment": { "appName": "MyApp", "buildNumber": "42" }
+//     }
+//   }
+//
+// TC ID extraction:
+//   1. tags[] — look for "@tc:12345" or "tc:12345" entries
+//   2. name   — fallback: match @tc:12345 in the test name string
+
+function parseCtrfJson(content: string, tagPrefix: string, treatInconclusiveAs?: string, resultFileDir = ''): ParsedResult[] {
+  const report = JSON.parse(content);
+  const ctrfResults = report?.results;
+  if (!ctrfResults) return [];
+
+  const tests: any[] = ctrfResults.tests ?? [];
+  const idRe = new RegExp(`(?:@)?${tagPrefix}:(\\d+)`, 'i');
+  const results: ParsedResult[] = [];
+
+  for (const t of tests) {
+    const status: string = t.status ?? 'other';
+    let outcome: string;
+    if (status === 'passed') outcome = 'Passed';
+    else if (status === 'failed') outcome = 'Failed';
+    else outcome = 'NotExecuted'; // skipped | pending | other
+    outcome = normaliseOutcome(outcome, treatInconclusiveAs);
+
+    // Build test name: "Suite > name" when suite is present
+    const suite: string = t.suite ?? '';
+    const name: string  = t.name  ?? '';
+    const testName = suite ? `${suite} > ${name}` : name;
+
+    // TC ID — tags first, then name
+    let testCaseId: number | undefined;
+    for (const tag of t.tags ?? []) {
+      const m = String(tag).match(idRe);
+      if (m) { testCaseId = parseInt(m[1], 10); break; }
+    }
+    if (testCaseId === undefined) {
+      const nameMatch = name.match(idRe);
+      if (nameMatch) testCaseId = parseInt(nameMatch[1], 10);
+    }
+
+    // Attachments (path-based files)
+    const ctrfAttachments: TestAttachment[] = [];
+    for (const att of t.attachments ?? []) {
+      const filePath: string    = att.path ?? '';
+      const contentType: string = att.contentType ?? '';
+      if (!filePath) continue;
+      const ext     = path.extname(filePath);
+      const absPath = resultFileDir && !path.isAbsolute(filePath)
+        ? path.resolve(resultFileDir, filePath)
+        : filePath;
+      const data = safeReadFile(absPath);
+      if (data) {
+        const attName: string = att.name ?? path.basename(filePath, ext);
+        const fileName = `${attName}${ext || mimeToExt(contentType)}`;
+        ctrfAttachments.push({
+          fileName,
+          data,
+          attachmentType: mimeToAttachmentType(contentType) || extToAttachmentType(ext),
+        });
+      }
+    }
+
+    // stdout / stderr arrays → log attachments
+    const stdoutText = (t.stdout ?? []).join('').trim();
+    const stderrText = (t.stderr ?? []).join('').trim();
+    if (stdoutText) ctrfAttachments.push({ fileName: 'stdout.log', data: Buffer.from(stdoutText, 'utf8'), attachmentType: 'ConsoleLog' });
+    if (stderrText) ctrfAttachments.push({ fileName: 'stderr.log', data: Buffer.from(stderrText, 'utf8'), attachmentType: 'ConsoleLog' });
+
+    results.push({
+      testName,
+      outcome,
+      durationMs: t.duration ?? 0,
+      errorMessage: t.message || undefined,
+      stackTrace:   t.trace   || undefined,
+      testCaseId,
+      attachments: ctrfAttachments.length ? ctrfAttachments : undefined,
+    });
+  }
+
+  return results;
+}
+
 // ─── Auto-detect format ───────────────────────────────────────────────────────
 
 function detectFormat(filePath: string, content: string): string {
@@ -1026,6 +1139,9 @@ function detectFormat(filePath: string, content: string): string {
           parsed.results.length > 0 && (Array.isArray(parsed.results[0].suites) || Array.isArray(parsed.results[0].tests))) return 'mochawesome';
       // RSpec JSON has top-level "examples" array and "summary" object
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.examples) && parsed.summary) return 'rspecJson';
+      // CTRF JSON has top-level "results" object with a "tests" array
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&
+          parsed.results && typeof parsed.results === 'object' && Array.isArray(parsed.results.tests)) return 'ctrfJson';
     } catch { /* fall through */ }
     return 'cucumberJson';
   }
@@ -1113,6 +1229,8 @@ export interface PublishResult {
   passed: number;
   failed: number;
   other: number;
+  /** Summary of issues filed for failures. Present only when createIssuesOnFailure is configured. */
+  issuesSummary?: CreateIssuesResult;
 }
 
 export async function publishTestResults(
@@ -1126,6 +1244,10 @@ export async function publishTestResults(
     buildId?: number;
     /** Extra folder to scan for screenshots/videos/logs to attach to test results. */
     attachmentsFolder?: string;
+    /** When true, file GitHub Issues or ADO Bugs for failures (uses config + CLI overrides). */
+    createIssuesOnFailure?: boolean;
+    /** CLI overrides for issue-creation config. */
+    issueOverrides?: Partial<CreateIssuesConfig>;
   } = {}
 ): Promise<PublishResult> {
   const pubConfig = config.publishTestResults;
@@ -1187,6 +1309,9 @@ export async function publishTestResults(
       case 'rspecJson':
         allResults.push(...parseRspecJson(content, tagPrefix, treatInconclusiveAs));
         break;
+      case 'ctrfJson':
+        allResults.push(...parseCtrfJson(content, tagPrefix, treatInconclusiveAs, fileDir));
+        break;
       case 'rustTest':
         allResults.push(...parseRustTestJson(content, tagPrefix, treatInconclusiveAs));
         break;
@@ -1204,7 +1329,19 @@ export async function publishTestResults(
   const other  = allResults.length - passed - failed;
 
   if (opts.dryRun) {
-    return { runId: 0, runUrl: '', totalResults: allResults.length, passed, failed, other };
+    // Still run issue creation logic in dry-run so the caller gets a preview
+    const issueConfig: CreateIssuesConfig | undefined =
+      opts.createIssuesOnFailure || pubConfig?.createIssuesOnFailure
+        ? { ...(pubConfig?.createIssuesOnFailure ?? {}), ...(opts.issueOverrides ?? {}) }
+        : undefined;
+    const issuesSummary = issueConfig && failed > 0
+      ? await createIssuesFromResults(
+          allResults, config, issueConfig,
+          { totalResults: allResults.length },
+          /* dryRun */ true,
+        )
+      : undefined;
+    return { runId: 0, runUrl: '', totalResults: allResults.length, passed, failed, other, issuesSummary };
   }
 
   const client = await AzureClient.create(config);
@@ -1311,5 +1448,23 @@ export async function publishTestResults(
   await testApi.updateTestRun({ state: 'Completed' } as any, config.project, runId);
 
   const runUrl = `${config.orgUrl}/${config.project}/_testManagement/runs?runId=${runId}`;
-  return { runId, runUrl, totalResults: allResults.length, passed, failed, other };
+
+  // ── Create issues for failures ────────────────────────────────────────────
+  let issuesSummary: CreateIssuesResult | undefined;
+  const issueConfig: CreateIssuesConfig | undefined =
+    opts.createIssuesOnFailure || pubConfig?.createIssuesOnFailure
+      ? { ...(pubConfig?.createIssuesOnFailure ?? {}), ...(opts.issueOverrides ?? {}) }
+      : undefined;
+
+  if (issueConfig && failed > 0) {
+    issuesSummary = await createIssuesFromResults(
+      allResults,
+      config,
+      issueConfig,
+      { runId, runUrl, buildId: opts.buildId, totalResults: allResults.length },
+      opts.dryRun,
+    );
+  }
+
+  return { runId, runUrl, totalResults: allResults.length, passed, failed, other, issuesSummary };
 }

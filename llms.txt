@@ -9,7 +9,7 @@ npm package: `ado-sync` | bin: `ado-sync` and `ado-sync-mcp`
 - `pull` — reads Test Cases from Azure DevOps and updates matching local files
 - `status` — dry-run diff: shows what would change without touching anything
 - `diff` — field-level diff showing exactly which fields (title, steps, description) differ
-- `publish-test-results` — publishes TRX / JUnit XML / NUnit XML / Cucumber JSON / Playwright JSON results to an Azure DevOps Test Run
+- `publish-test-results` — publishes TRX / JUnit XML / NUnit XML / Cucumber JSON / Playwright JSON / CTRF JSON results to an Azure DevOps Test Run
 - `generate` — creates local spec files (.feature or .md) from Azure DevOps User Stories
 - `validate` — checks config validity and Azure connectivity
 - `init` — interactive wizard that generates ado-sync.json
@@ -133,9 +133,10 @@ A `.env` file in the working directory is loaded automatically.
 
 ## MCP server
 
-`ado-sync-mcp` starts an MCP stdio server exposing 10 tools:
+`ado-sync-mcp` starts an MCP stdio server exposing 13 tools:
 `validate_config`, `get_test_cases`, `get_test_case`, `push_specs`, `pull_specs`,
-`status`, `diff`, `generate_specs`, `get_work_items`, `publish_test_results`
+`status`, `diff`, `generate_specs`, `get_work_items`, `publish_test_results`,
+`create_issue`, `get_story_context`, `generate_manifest`
 
 Register in Claude Code (`~/.claude/claude_desktop_config.json`):
 ```json

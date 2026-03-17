@@ -13,11 +13,31 @@
  */
 
 import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 import { writebackCsv } from '../parsers/csv';
 import { writebackExcel } from '../parsers/excel';
 import { detectJavaFramework } from '../parsers/java';
 import { ParsedStep, ParsedTest } from '../types';
+
+// ─── Atomic write helper ──────────────────────────────────────────────────────
+
+/**
+ * Write content atomically: write to a temp file then rename to the target.
+ * Prevents partial writes from corrupting spec files if the process is interrupted.
+ */
+function atomicWriteFileSync(filePath: string, content: string): void {
+  const dir = path.dirname(filePath);
+  const tmp = path.join(dir, `.ado-sync-tmp-${process.pid}-${Date.now()}`);
+  try {
+    fs.writeFileSync(tmp, content, 'utf8');
+    fs.renameSync(tmp, filePath);
+  } catch (err) {
+    try { fs.unlinkSync(tmp); } catch { /* ignore cleanup error */ }
+    throw err;
+  }
+}
 
 // ─── Gherkin writeback ────────────────────────────────────────────────────────
 
@@ -59,7 +79,7 @@ export function writebackGherkin(test: ParsedTest, id: number, tagPrefix: string
     lines.splice(scenarioLineIdx, 0, `${indent}${tagToken}`);
   }
 
-  fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+  atomicWriteFileSync(test.filePath, lines.join('\n'));
 }
 
 // ─── Markdown writeback ───────────────────────────────────────────────────────
@@ -104,7 +124,7 @@ export function writebackMarkdown(test: ParsedTest, id: number, tagPrefix: strin
     lines.splice(headingLineIdx + 1, 0, comment);
   }
 
-  fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+  atomicWriteFileSync(test.filePath, lines.join('\n'));
 }
 
 // ─── C# writeback ─────────────────────────────────────────────────────────────
@@ -158,7 +178,7 @@ export function writebackCsharp(test: ParsedTest, id: number, tagPrefix: string)
     lines.splice(testMethodLineIdx + 1, 0, `${indent}${newAttr}`);
   }
 
-  fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+  atomicWriteFileSync(test.filePath, lines.join('\n'));
 }
 
 // ─── Comment-style writeback (JavaScript, TypeScript, Swift, Dart) ───────────
@@ -213,7 +233,7 @@ export function writebackJavaScript(test: ParsedTest, id: number, tagPrefix: str
     lines.splice(itLineIdx, 0, `${indent}${comment}`);
   }
 
-  fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+  atomicWriteFileSync(test.filePath, lines.join('\n'));
 }
 
 // ─── Playwright writeback ─────────────────────────────────────────────────────
@@ -260,12 +280,12 @@ export function writebackPlaywright(test: ParsedTest, id: number, tagPrefix: str
   for (let i = itLineIdx; i < scanEnd; i++) {
     if (inlineRe.test(lines[i])) {
       lines[i] = lines[i].replace(inlineRe, `$1${id}$2`);
-      fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+      atomicWriteFileSync(test.filePath, lines.join('\n'));
       return;
     }
     if (inlineRevRe.test(lines[i])) {
       lines[i] = lines[i].replace(inlineRevRe, `$1${id}$2`);
-      fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+      atomicWriteFileSync(test.filePath, lines.join('\n'));
       return;
     }
     if (i > itLineIdx && /^\s*async[\s(]/.test(lines[i])) break;
@@ -280,7 +300,7 @@ export function writebackPlaywright(test: ParsedTest, id: number, tagPrefix: str
       for (const j of [i - 1, i + 1, i + 2]) {
         if (j >= 0 && j < lines.length && descLineRe.test(lines[j])) {
           lines[j] = lines[j].replace(descLineRe, `$1${id}$2`);
-          fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+          atomicWriteFileSync(test.filePath, lines.join('\n'));
           return;
         }
       }
@@ -314,7 +334,7 @@ export function writebackPlaywright(test: ParsedTest, id: number, tagPrefix: str
       `{ annotation: ${newAnnotation} }, ` +
       noOptsMatch[2] +
       itLine.slice(noOptsMatch[0].length);
-    fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+    atomicWriteFileSync(test.filePath, lines.join('\n'));
     return;
   }
 
@@ -341,7 +361,7 @@ export function writebackPlaywright(test: ParsedTest, id: number, tagPrefix: str
       const after  = itLine.slice(braceEnd);
       const sep    = before.trimEnd().endsWith(',') ? ' ' : ', ';
       lines[itLineIdx] = `${before}${sep}annotation: ${newAnnotation}${after}`;
-      fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+      atomicWriteFileSync(test.filePath, lines.join('\n'));
       return;
     }
   }
@@ -380,7 +400,7 @@ export function writebackTestCafe(test: ParsedTest, id: number, tagPrefix: strin
   for (let i = testLineIdx; i < scanEnd; i++) {
     if (kvRe.test(lines[i])) {
       lines[i] = lines[i].replace(kvRe, `$1${id}$2`);
-      fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+      atomicWriteFileSync(test.filePath, lines.join('\n'));
       return;
     }
     if (i > testLineIdx && /^\s*async[\s(]/.test(lines[i])) break;
@@ -393,7 +413,7 @@ export function writebackTestCafe(test: ParsedTest, id: number, tagPrefix: strin
   for (let i = testLineIdx; i < scanEnd; i++) {
     if (objRe.test(lines[i])) {
       lines[i] = lines[i].replace(objRe, `$1${id}$2`);
-      fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+      atomicWriteFileSync(test.filePath, lines.join('\n'));
       return;
     }
     if (i > testLineIdx && /^\s*async[\s(]/.test(lines[i])) break;
@@ -413,7 +433,7 @@ export function writebackTestCafe(test: ParsedTest, id: number, tagPrefix: strin
     );
     if (injected !== testLine) {
       lines[testLineIdx] = injected;
-      fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+      atomicWriteFileSync(test.filePath, lines.join('\n'));
       return;
     }
   }
@@ -479,7 +499,7 @@ export function writebackPython(test: ParsedTest, id: number, tagPrefix: string)
     lines.splice(defLineIdx, 0, newMark);
   }
 
-  fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+  atomicWriteFileSync(test.filePath, lines.join('\n'));
 }
 
 // ─── Java writeback ───────────────────────────────────────────────────────────
@@ -577,7 +597,7 @@ export function writebackJava(test: ParsedTest, id: number, tagPrefix: string): 
     }
   }
 
-  fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+  atomicWriteFileSync(test.filePath, lines.join('\n'));
 }
 
 // ─── Robot Framework writeback ────────────────────────────────────────────────
@@ -630,7 +650,7 @@ export function writebackRobot(test: ParsedTest, id: number, tagPrefix: string):
     lines.splice(testNameLineIdx + 1, 0, `${indent}[Tags]    ${tagToken}`);
   }
 
-  fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+  atomicWriteFileSync(test.filePath, lines.join('\n'));
 }
 
 // ─── Ruby writeback ───────────────────────────────────────────────────────────
@@ -668,7 +688,7 @@ export function writebackRuby(test: ParsedTest, id: number, tagPrefix: string): 
     lines.splice(itLineIdx, 0, `${indent}${comment}`);
   }
 
-  fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+  atomicWriteFileSync(test.filePath, lines.join('\n'));
 }
 
 // ─── PHP writeback ────────────────────────────────────────────────────────────
@@ -707,7 +727,7 @@ export function writebackPhp(test: ParsedTest, id: number, tagPrefix: string): v
       const trimmed = lines[i].trim();
       if (existingRe.test(trimmed)) {
         lines[i] = lines[i].replace(existingRe, newAnnotation);
-        fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+        atomicWriteFileSync(test.filePath, lines.join('\n'));
         return;
       }
       if (trimmed.startsWith('/**') || trimmed === '/*') { break; }
@@ -724,7 +744,7 @@ export function writebackPhp(test: ParsedTest, id: number, tagPrefix: string): v
     );
   }
 
-  fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+  atomicWriteFileSync(test.filePath, lines.join('\n'));
 }
 
 // ─── Rust writeback ───────────────────────────────────────────────────────────
@@ -763,7 +783,7 @@ export function writebackRust(test: ParsedTest, id: number, tagPrefix: string): 
     lines.splice(attrLineIdx, 0, `${indent}${comment}`);
   }
 
-  fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+  atomicWriteFileSync(test.filePath, lines.join('\n'));
 }
 
 // ─── Dispatcher ──────────────────────────────────────────────────────────────
@@ -918,5 +938,5 @@ export function writebackDocComment(
   // ── Step 3: splice the new block in ───────────────────────────────────────
 
   lines.splice(insertAt, 0, ...docLines);
-  fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
+  atomicWriteFileSync(test.filePath, lines.join('\n'));
 }

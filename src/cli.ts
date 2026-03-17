@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 
-// Suppress the url.parse() deprecation warning emitted by azure-devops-node-api internals.
-// This is DEP0169 and cannot be fixed on our side.
-const originalEmit = process.emit;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(process as any).emit = function (event: string, ...args: any[]) {
-  if (event === 'warning' && args[0]?.code === 'DEP0169') return false;
-  return originalEmit.apply(process, [event, ...args] as any);
-};
+// Suppress the url.parse() deprecation warning (DEP0169) emitted by azure-devops-node-api
+// internals. Cannot be fixed on our side; use the warning event listener instead of
+// monkey-patching process.emit.
+process.on('warning', (warning) => {
+  if ((warning as NodeJS.ErrnoException).code === 'DEP0169') return;
+  process.stderr.write(`[node:warning] ${warning.name}: ${warning.message}\n`);
+});
 
 import 'dotenv/config';
 
@@ -24,6 +23,7 @@ import { AzureClient } from './azure/client';
 import { applyOverrides, CONFIG_TEMPLATE_JSON, CONFIG_TEMPLATE_YAML, loadConfig, resolveConfigPath } from './config';
 import { pull, push, status } from './sync/engine';
 import { generateSpecs } from './sync/generate';
+import { generateManifests } from './sync/manifest';
 import { publishTestResults } from './sync/publish-results';
 import { SyncConfig, SyncResult } from './types';
 
@@ -42,19 +42,26 @@ program.option('--output <format>', 'Output format: text (default) or json');
 
 // ─── Error formatting (L) ─────────────────────────────────────────────────────
 
-function formatError(err: any): string {
-  const status: number = err?.statusCode ?? err?.status ?? 0;
-  if (status === 401) return 'Authentication failed. Check your token (auth.token) and permissions.';
-  if (status === 403) return 'Access denied. Your token lacks the required Azure DevOps scopes.';
-  if (status === 404) return `Resource not found. Check your orgUrl, project, or test plan ID.\n  ${err.message}`;
-  if (status === 429) return 'Azure DevOps rate limit hit. Reduce concurrent operations or retry later.';
-  if (status === 503) return 'Azure DevOps is temporarily unavailable (503). Retry later.';
-  return err?.message ?? String(err);
+function toError(err: unknown): { message: string; statusCode?: number; status?: number; stack?: string } {
+  if (err instanceof Error) return err as any;
+  return { message: String(err) };
 }
 
-function handleError(err: any): never {
-  console.error(chalk.red(formatError(err)));
-  if (process.env.DEBUG) console.error(chalk.dim(err?.stack ?? ''));
+function formatError(err: unknown): string {
+  const e = toError(err);
+  const status: number = (e as any).statusCode ?? (e as any).status ?? 0;
+  if (status === 401) return 'Authentication failed. Check your token (auth.token) and permissions.';
+  if (status === 403) return 'Access denied. Your token lacks the required Azure DevOps scopes.';
+  if (status === 404) return `Resource not found. Check your orgUrl, project, or test plan ID.\n  ${e.message}`;
+  if (status === 429) return 'Azure DevOps rate limit hit. Reduce concurrent operations or retry later.';
+  if (status === 503) return 'Azure DevOps is temporarily unavailable (503). Retry later.';
+  return e.message;
+}
+
+function handleError(err: unknown): never {
+  const e = toError(err);
+  console.error(chalk.red(formatError(e)));
+  if (process.env.DEBUG) console.error(chalk.dim(e.stack ?? ''));
   process.exit(1);
 }
 
@@ -112,8 +119,9 @@ function buildAiOpts(
       : path.resolve(configDir ?? process.cwd(), contextFilePath);
     try {
       contextContent = fs.readFileSync(absContextPath, 'utf8');
-    } catch (err: any) {
-      process.stderr.write(`  [ai-summary] Warning: could not read contextFile "${absContextPath}": ${err.message}\n`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`  [ai-summary] Warning: could not read contextFile "${absContextPath}": ${msg}\n`);
     }
   }
 
@@ -243,7 +251,7 @@ program
       const results = await push(config, configDir, { dryRun: opts.dryRun, tags: opts.tags, onProgress, onAiProgress, aiSummary });
       if (isTTY && outputFormat !== 'json') clearProgressLine();
       printResults(results, config.toolSettings?.outputLevel, outputFormat);
-    } catch (err: any) {
+    } catch (err: unknown) {
       handleError(err);
     }
   });
@@ -276,7 +284,7 @@ program
       const results = await pull(config, configDir, { dryRun: opts.dryRun, tags: opts.tags, onProgress });
       if (isTTY && outputFormat !== 'json') clearProgressLine();
       printResults(results, config.toolSettings?.outputLevel, outputFormat);
-    } catch (err: any) {
+    } catch (err: unknown) {
       handleError(err);
     }
   });
@@ -314,7 +322,7 @@ program
       const results = await status(config, configDir, { tags: opts.tags, onProgress, onAiProgress, aiSummary });
       if (isTTY && outputFormat !== 'json') clearProgressLine();
       printResults(results, config.toolSettings?.outputLevel, outputFormat);
-    } catch (err: any) {
+    } catch (err: unknown) {
       handleError(err);
     }
   });
@@ -323,13 +331,19 @@ program
 
 program
   .command('publish-test-results')
-  .description('Publish test results from result files (TRX, JUnit, Cucumber JSON) to Azure DevOps')
+  .description('Publish test results from result files (TRX, JUnit, Cucumber JSON, CTRF) to Azure DevOps')
   .option('--testResult <path>', 'Path to a test result file (repeatable)', collect, [])
-  .option('--testResultFormat <format>', 'Result file format: trx, nunitXml, junit, cucumberJson, playwrightJson')
+  .option('--testResultFormat <format>', 'Result file format: trx, nunitXml, junit, cucumberJson, playwrightJson, ctrfJson')
   .option('--attachmentsFolder <path>', 'Folder with screenshots/videos/logs to attach to test results')
   .option('--runName <name>', 'Name for the test run in Azure DevOps')
   .option('--buildId <id>', 'Build ID to associate with the test run')
   .option('--dry-run', 'Parse results and show summary without publishing')
+  .option('--create-issues-on-failure', 'File GitHub Issues or ADO Bugs for each failed test')
+  .option('--issue-provider <provider>', 'Issue provider: github (default) or ado')
+  .option('--github-repo <owner/repo>', 'GitHub repository to file issues in (e.g. "myorg/myrepo")')
+  .option('--github-token <token>', 'GitHub token ($ENV_VAR reference supported)')
+  .option('--bug-threshold <percent>', 'Failure % above which one env-failure issue is filed instead of per-test (default: 20)')
+  .option('--max-issues <n>', 'Hard cap on issues filed per run (default: 50)')
   .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
   .action(async (opts) => {
     const globalOpts = program.opts();
@@ -351,6 +365,14 @@ program
         attachmentsFolder: opts.attachmentsFolder,
         runName: opts.runName,
         buildId: opts.buildId ? parseInt(opts.buildId) : undefined,
+        createIssuesOnFailure: opts.createIssuesOnFailure,
+        issueOverrides: {
+          ...(opts.issueProvider  && { provider:   opts.issueProvider }),
+          ...(opts.githubRepo     && { repo:        opts.githubRepo }),
+          ...(opts.githubToken    && { token:       opts.githubToken }),
+          ...(opts.bugThreshold   && { threshold:   parseInt(opts.bugThreshold) }),
+          ...(opts.maxIssues      && { maxIssues:   parseInt(opts.maxIssues) }),
+        },
       });
 
       console.log(chalk.green(`Total results: ${result.totalResults}`));
@@ -359,7 +381,23 @@ program
         console.log(chalk.dim(`Run ID: ${result.runId}`));
         console.log(chalk.dim(`URL: ${result.runUrl}`));
       }
-    } catch (err: any) {
+
+      if (result.issuesSummary) {
+        const s = result.issuesSummary;
+        console.log('');
+        console.log(chalk.bold('Issues filed:'));
+        console.log(chalk.dim(`  Mode: ${s.mode}  |  Total failed: ${s.totalFailed}  |  Suppressed: ${s.suppressed}`));
+        for (const issue of s.issued) {
+          const prefix = issue.action === 'created' ? chalk.green('+')
+                       : issue.action === 'skipped'  ? chalk.dim('=')
+                       : chalk.yellow('~');
+          const detail = issue.url    ? chalk.dim(` → ${issue.url}`)
+                       : issue.reason ? chalk.dim(` (${issue.reason})`)
+                       : '';
+          console.log(`  ${prefix} ${issue.title}${detail}`);
+        }
+      }
+    } catch (err: unknown) {
       handleError(err);
     }
   });
@@ -511,8 +549,9 @@ program
       config = loadConfig(configPath);
       if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
       console.log(chalk.green('  ✓ Config is valid'));
-    } catch (err: any) {
-      console.log(chalk.red(`  ✗ Config error: ${err.message}`));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(chalk.red(`  ✗ Config error: ${msg}`));
       process.exit(1);
     }
 
@@ -521,7 +560,7 @@ program
     try {
       client = await AzureClient.create(config);
       console.log(chalk.green(`  ✓ Azure connection established (${config.orgUrl})`));
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.log(chalk.red(`  ✗ Azure connection failed: ${formatError(err)}`));
       process.exit(1);
     }
@@ -532,7 +571,7 @@ program
       const project = await coreApi.getProject(config.project);
       if (!project) throw new Error('not found');
       console.log(chalk.green(`  ✓ Project "${config.project}" found`));
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.log(chalk.red(`  ✗ Project "${config.project}" not found: ${formatError(err)}`));
       process.exit(1);
     }
@@ -545,7 +584,7 @@ program
       try {
         const tp = await testPlanApi.getTestPlanById(config.project, plan.id);
         console.log(chalk.green(`  ✓ Test Plan ${plan.id} "${tp.name}" found`));
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.log(chalk.red(`  ✗ Test Plan ${plan.id} not found: ${formatError(err)}`));
         allPlansOk = false;
       }
@@ -604,7 +643,7 @@ program
         }
       }
       if (!anyDiff) console.log(chalk.dim('No differences found.'));
-    } catch (err: any) {
+    } catch (err: unknown) {
       handleError(err);
     }
   });
@@ -613,12 +652,13 @@ program
 
 program
   .command('generate')
-  .description('Generate local spec files from Azure DevOps User Stories')
+  .description('Generate local spec files (or AI workflow manifests) from Azure DevOps User Stories')
   .option('--story-ids <ids>', 'Comma-separated ADO work item IDs (e.g. 1234,5678)')
   .option('--query <wiql>', 'WIQL query string to select stories')
   .option('--area-path <path>', 'Filter by area path')
   .option('--format <fmt>', 'Output format: gherkin or markdown (default: markdown)')
   .option('--output-folder <dir>', 'Where to write files (default: config pull.targetFolder or .)')
+  .option('--manifest', 'Generate .ai-workflow-manifest-{id}.json instead of spec files')
   .option('--force', 'Overwrite existing files')
   .option('--dry-run', 'Show what would be created without writing files')
   .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
@@ -629,17 +669,60 @@ program
       const config = loadConfig(configPath);
       if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
       const configDir = path.dirname(configPath);
-
-      console.log(chalk.bold('ado-sync generate'));
-      console.log(chalk.dim(`Config: ${configPath}`));
-      if (opts.dryRun) console.log(chalk.yellow('Dry run — no files will be written'));
-      console.log('');
+      const outputFormat = globalOpts.output;
 
       const storyIds = opts.storyIds
         ? opts.storyIds.split(',').map((s: string) => parseInt(s.trim(), 10)).filter(Boolean)
         : undefined;
 
-      const outputFormat = program.opts().output;
+      if (opts.manifest) {
+        // ── Manifest mode ──────────────────────────────────────────────────────
+        if (!storyIds?.length) {
+          console.error(chalk.red('--story-ids is required with --manifest'));
+          process.exit(1);
+        }
+        console.log(chalk.bold('ado-sync generate --manifest'));
+        console.log(chalk.dim(`Config: ${configPath}`));
+        if (opts.dryRun) console.log(chalk.yellow('Dry run — no files will be written'));
+        console.log('');
+
+        const results = await generateManifests(config, configDir, {
+          storyIds,
+          outputFolder: opts.outputFolder,
+          format: opts.format,
+          force: opts.force ?? false,
+          dryRun: opts.dryRun ?? false,
+        });
+
+        if (outputFormat === 'json') {
+          process.stdout.write(JSON.stringify(results, null, 2) + '\n');
+          return;
+        }
+
+        for (const r of results) {
+          const symbol = r.action === 'created' ? chalk.green('+') : chalk.dim('=');
+          const relPath = path.relative(process.cwd(), r.filePath);
+          console.log(`${symbol} [#${r.storyId}] ${relPath} — ${r.title}`);
+          if (r.manifest && r.action === 'created') {
+            console.log(chalk.dim(`    ${r.manifest.context.acceptanceCriteria.length} AC items · ${r.manifest.context.suggestedTags.join(' ')} · ${r.manifest.context.relatedTestCases.length} linked TCs`));
+          }
+        }
+        console.log('');
+        const created = results.filter((r) => r.action === 'created').length;
+        const skipped = results.filter((r) => r.action === 'skipped').length;
+        console.log([
+          created && chalk.green(`${created} manifest${created !== 1 ? 's' : ''} created`),
+          skipped && chalk.dim(`${skipped} skipped`),
+        ].filter(Boolean).join(chalk.dim('  ')) || chalk.dim('Nothing to generate.'));
+        return;
+      }
+
+      // ── Spec file mode ─────────────────────────────────────────────────────
+      console.log(chalk.bold('ado-sync generate'));
+      console.log(chalk.dim(`Config: ${configPath}`));
+      if (opts.dryRun) console.log(chalk.yellow('Dry run — no files will be written'));
+      console.log('');
+
       const results = await generateSpecs(config, configDir, {
         storyIds,
         query: opts.query,
@@ -667,7 +750,57 @@ program
         created && chalk.green(`${created} created`),
         skipped && chalk.dim(`${skipped} skipped`),
       ].filter(Boolean).join(chalk.dim('  ')) || chalk.dim('Nothing to generate.'));
-    } catch (err: any) {
+    } catch (err: unknown) {
+      handleError(err);
+    }
+  });
+
+// ─── story-context ────────────────────────────────────────────────────────────
+
+program
+  .command('story-context')
+  .description('Show planner-agent context for an ADO User Story (AC items, suggested tags, linked TCs)')
+  .requiredOption('--story-id <id>', 'ADO work item ID')
+  .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
+  .action(async (opts) => {
+    const globalOpts = program.opts();
+    try {
+      const configPath = resolveConfigPath(globalOpts.config);
+      const config = loadConfig(configPath);
+      if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
+
+      const { AzureClient } = await import('./azure/client');
+      const { getStoryContext } = await import('./azure/work-items');
+      const client = await AzureClient.create(config);
+      const ctx = await getStoryContext(client, config.project, parseInt(opts.storyId, 10), config.orgUrl);
+
+      if (globalOpts.output === 'json') {
+        process.stdout.write(JSON.stringify(ctx, null, 2) + '\n');
+        return;
+      }
+
+      console.log(chalk.bold(`Story #${ctx.storyId}: ${ctx.title}`));
+      console.log(chalk.dim(`State: ${ctx.state ?? 'unknown'}  |  ${ctx.url}`));
+      console.log('');
+
+      if (ctx.acItems.length) {
+        console.log(chalk.bold('Acceptance Criteria:'));
+        ctx.acItems.forEach((item, i) => console.log(`  ${chalk.dim(`${i + 1}.`)} ${item}`));
+        console.log('');
+      }
+
+      if (ctx.suggestedTags.length) {
+        console.log(`${chalk.bold('Suggested tags:')}  ${ctx.suggestedTags.join('  ')}`);
+      }
+      if (ctx.suggestedActors.length) {
+        console.log(`${chalk.bold('Actors:')}          ${ctx.suggestedActors.join(', ')}`);
+      }
+      if (ctx.relatedTestCases.length) {
+        console.log(`${chalk.bold('Linked TCs:')}      ${ctx.relatedTestCases.map((id) => `#${id}`).join(', ')}`);
+      } else {
+        console.log(chalk.dim('No linked test cases yet.'));
+      }
+    } catch (err: unknown) {
       handleError(err);
     }
   });

@@ -1,6 +1,10 @@
 /**
  * Fetch Azure DevOps User Stories (or any work item type) with their
  * Acceptance Criteria and Description fields, for use by the `generate` command.
+ *
+ * Also exposes getStoryContext() — a richer, planner-agent-optimised view that
+ * adds related Test Case IDs, bullet-formatted AC items, suggested tags, and
+ * extracted actors (user roles) parsed from the Acceptance Criteria text.
  */
 
 import { AzureClient } from './client';
@@ -105,6 +109,139 @@ export async function getWorkItemsByQuery(
   const queryResult = await witApi.queryByWiql({ query: wiql }, { project });
   const ids = (queryResult.workItems ?? []).map((ref: any) => ref.id as number).filter(Boolean);
   return getWorkItemsByIds(client, project, ids);
+}
+
+// ─── Story context (planner agent feed) ──────────────────────────────────────
+
+export interface StoryContext {
+  storyId: number;
+  title: string;
+  description?: string;
+  /** Raw AC text — HTML stripped */
+  acceptanceCriteria?: string;
+  /** AC split into individual bullet items, stripped of list markers */
+  acItems: string[];
+  state?: string;
+  adoTags?: string[];
+  /** Inferred test tags from AC/title keywords: @smoke, @regression, @auth, etc. */
+  suggestedTags: string[];
+  /** User roles / actors extracted from AC text (e.g. "admin", "guest user") */
+  suggestedActors: string[];
+  /** ADO Test Case IDs already linked to this story via TestedBy relation */
+  relatedTestCases: number[];
+  /** Direct URL to the work item in Azure DevOps */
+  url: string;
+}
+
+/**
+ * Return a planner-agent-optimised view of a single User Story.
+ * Includes related TC IDs (already written), suggested tags, and extracted actors.
+ */
+export async function getStoryContext(
+  client: AzureClient,
+  project: string,
+  storyId: number,
+  orgUrl: string,
+): Promise<StoryContext> {
+  const witApi = await client.getWitApi();
+
+  // Fetch with relations expanded (4 = WorkItemExpand.Relations)
+  const wi = await (witApi as any).getWorkItem(storyId, undefined, undefined, 4);
+  const f  = wi?.fields ?? {};
+
+  const rawTitle = f['System.Title'] ?? `Work Item ${storyId}`;
+  const rawDesc  = f['System.Description'];
+  const rawAc    = f['Microsoft.VSTS.Common.AcceptanceCriteria'];
+  const rawTags  = f['System.Tags'] ?? '';
+
+  const description        = stripHtml(rawDesc);
+  const acceptanceCriteria = stripHtml(rawAc);
+
+  // AC bullet items — split on newlines, strip list markers, drop blank lines
+  const acItems = (acceptanceCriteria ?? '')
+    .split('\n')
+    .map((l) => l.replace(/^[-*•\d.)\s]+/, '').trim())
+    .filter((l) => l.length > 0);
+
+  const adoTags = rawTags
+    ? rawTags.split(';').map((t: string) => t.trim()).filter(Boolean)
+    : [];
+
+  // Extract related TC IDs from relations
+  const relations: any[] = wi?.relations ?? [];
+  const relatedTestCases = relations
+    .filter((r) => typeof r.rel === 'string' && r.rel.includes('TestedBy'))
+    .map((r) => {
+      const match = (r.url ?? '').match(/\/(\d+)$/);
+      return match ? parseInt(match[1], 10) : NaN;
+    })
+    .filter((id) => !isNaN(id));
+
+  const searchText = [rawTitle, acceptanceCriteria ?? '', description ?? ''].join(' ').toLowerCase();
+  const suggestedTags   = inferTags(searchText);
+  const suggestedActors = extractActors(acceptanceCriteria ?? '');
+
+  const url = `${orgUrl.replace(/\/$/, '')}/${project}/_workitems/edit/${storyId}`;
+
+  return {
+    storyId,
+    title: rawTitle,
+    description,
+    acceptanceCriteria,
+    acItems,
+    state: f['System.State'],
+    adoTags: adoTags.length ? adoTags : undefined,
+    suggestedTags,
+    suggestedActors,
+    relatedTestCases,
+    url,
+  };
+}
+
+// ─── Tag inference ────────────────────────────────────────────────────────────
+
+const TAG_RULES: Array<{ patterns: RegExp; tag: string }> = [
+  { patterns: /\bsmoke\b/,                                       tag: '@smoke' },
+  { patterns: /\bregression\b/,                                  tag: '@regression' },
+  { patterns: /\b(login|sign[- ]?in|sign[- ]?out|log[- ]?out|auth(entication|oriz)?)\b/, tag: '@auth' },
+  { patterns: /\b(payment|checkout|billing|invoice|refund)\b/,  tag: '@payment' },
+  { patterns: /\b(performance|load test|speed|latency)\b/,      tag: '@performance' },
+  { patterns: /\bmobile\b/,                                      tag: '@mobile' },
+  { patterns: /\b(api|endpoint|rest|graphql|webhook)\b/,        tag: '@api' },
+  { patterns: /\b(security|permission|role|access control)\b/,  tag: '@security' },
+  { patterns: /\b(search|filter|sort)\b/,                       tag: '@search' },
+  { patterns: /\b(upload|download|file|attachment)\b/,          tag: '@files' },
+  { patterns: /\b(notification|email|sms|alert)\b/,             tag: '@notifications' },
+  { patterns: /\b(report|export|csv|excel|pdf)\b/,              tag: '@reporting' },
+  { patterns: /\bcritical\b/,                                    tag: '@critical' },
+  { patterns: /\bwip\b/,                                        tag: '@wip' },
+];
+
+function inferTags(text: string): string[] {
+  return TAG_RULES
+    .filter((r) => r.patterns.test(text))
+    .map((r) => r.tag);
+}
+
+// ─── Actor extraction ─────────────────────────────────────────────────────────
+
+function extractActors(ac: string): string[] {
+  const found = new Set<string>();
+
+  // "As a <actor>" / "As an <actor>"
+  for (const m of ac.matchAll(/\bas an?\s+([a-z][a-z\s]{1,25}?)(?:,|\.|I |can |should |must )/gi)) {
+    const actor = m[1].trim().replace(/\s+/g, ' ');
+    if (actor) found.add(actor);
+  }
+  // "the <actor> can/should/must"
+  for (const m of ac.matchAll(/\bthe\s+([a-z][a-z\s]{1,20}?)\s+(?:can|should|must|is able to)\b/gi)) {
+    const actor = m[1].trim().replace(/\s+/g, ' ');
+    if (actor && actor.split(' ').length <= 3) found.add(actor);
+  }
+
+  // Deduplicate substrings (e.g. "admin" vs "admin user" — keep longer)
+  const actors = [...found];
+  return actors.filter((a) => !actors.some((b) => b !== a && b.includes(a)));
 }
 
 /**

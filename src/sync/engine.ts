@@ -155,8 +155,18 @@ async function parseLocalFiles(
         case 'kotlin':
           tests = parseKotlinFile(fp, tagPrefix, linkConfigs);
           break;
-        default:
+        case 'markdown':
           tests = parseMarkdownFile(fp, tagPrefix, linkConfigs, attachmentsConfig);
+          break;
+        default:
+          // config.ts validateConfig() catches unknown types before we get here,
+          // but guard defensively rather than silently misparse as Markdown.
+          throw new Error(
+            `Unsupported local.type "${(config.local as any).type}" — check your config. ` +
+            `Valid types: gherkin, reqnroll, markdown, csv, excel, csharp, java, javascript, ` +
+            `python, playwright, puppeteer, cypress, testcafe, detox, espresso, xcuitest, ` +
+            `flutter, robot, go, rspec, phpunit, rust, kotlin`
+          );
       }
 
       for (const t of tests) {
@@ -164,8 +174,9 @@ async function parseLocalFiles(
         if (tagsFilter && !matchesTags(t, tagsFilter)) continue;
         results.push(t);
       }
-    } catch (err: any) {
-      console.warn(`  [warn] Failed to parse ${fp}: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`  [warn] Failed to parse ${fp}: ${msg}`);
     }
   }
 
@@ -382,9 +393,10 @@ async function pushSingle(
           `Verify testPlan.id and the project name in your config.`
         );
       }
-    } catch (err: any) {
-      const status: string = err?.statusCode ? ` (HTTP ${err.statusCode})` : '';
-      const base: string = err?.message ?? String(err);
+    } catch (err: unknown) {
+      const httpStatus = (err as any)?.statusCode ?? (err as any)?.status;
+      const status: string = httpStatus ? ` (HTTP ${httpStatus})` : '';
+      const base: string = err instanceof Error ? err.message : String(err);
       // Don't double-wrap if we threw the descriptive message above
       if (base.includes('not found in project')) throw err;
       throw new Error(
@@ -555,8 +567,9 @@ async function pushSingle(
           updateCacheEntry(cache, test, remote);
         }
         reportProgress({ action: 'updated', filePath: test.filePath, title: test.title, azureId: test.azureId });
-      } catch (err: any) {
-        reportProgress({ action: 'error', filePath: test.filePath, title: test.title, azureId: test.azureId, detail: err.message });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        reportProgress({ action: 'error', filePath: test.filePath, title: test.title, azureId: test.azureId, detail: msg });
       }
     } else {
       try {
@@ -576,8 +589,9 @@ async function pushSingle(
           if (created) updateCacheEntry(cache, test, created);
         }
         reportProgress({ action: 'created', filePath: test.filePath, title: test.title, azureId: newId });
-      } catch (err: any) {
-        reportProgress({ action: 'error', filePath: test.filePath, title: test.title, detail: err.message });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        reportProgress({ action: 'error', filePath: test.filePath, title: test.title, detail: msg });
       }
     }
   }
@@ -760,8 +774,9 @@ async function pullSingle(
           descriptionChanged && 'description',
         ].filter(Boolean).join(', ') + ' changed' + (disableLocal ? ' (local changes skipped)' : ''),
       });
-    } catch (err: any) {
-      reportProgress({ action: 'error', filePath: test.filePath, title: test.title, azureId: test.azureId, detail: err.message });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      reportProgress({ action: 'error', filePath: test.filePath, title: test.title, azureId: test.azureId, detail: msg });
     }
   }
 
@@ -785,8 +800,9 @@ async function pullSingle(
             azureId: tc.id,
             detail: 'new local file from Azure TC',
           });
-        } catch (err: any) {
-          results.push({ action: 'error', filePath: '', title: tc.title, azureId: tc.id, detail: `pull-create: ${err.message}` });
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          results.push({ action: 'error', filePath: '', title: tc.title, azureId: tc.id, detail: `pull-create: ${msg}` });
         }
       }
     } catch { /* best-effort */ }

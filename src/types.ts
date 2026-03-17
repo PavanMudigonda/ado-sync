@@ -168,6 +168,50 @@ export interface PullConfig {
   targetFolder?: string;
 }
 
+// ─── Create issues on failure configuration ───────────────────────────────────
+
+export interface CreateIssuesConfig {
+  /**
+   * Issue provider.
+   * 'github' (default): creates GitHub Issues via the REST API.
+   * 'ado': creates Azure DevOps Bug work items.
+   */
+  provider?: 'github' | 'ado';
+  /** GitHub only — "owner/repo". Can also be set via --github-repo CLI flag. */
+  repo?: string;
+  /** GitHub only — personal access token or $ENV_VAR reference. */
+  token?: string;
+  /** Labels to apply to every created issue. Defaults to ['test-failure']. */
+  labels?: string[];
+  /** GitHub only — login(s) to assign the issue to. */
+  assignees?: string[];
+  /** ADO only — area path for new Bug work items. */
+  areaPath?: string;
+  /** ADO only — assign Bug to this user (display name or email). */
+  assignTo?: string;
+  /**
+   * Failure rate threshold (percentage, 0–100). When more than this percentage
+   * of tests fail, one environment-failure issue is created instead of per-test
+   * issues. Default: 20.
+   */
+  threshold?: number;
+  /**
+   * Hard cap on the number of issues created per run. After this limit a single
+   * overflow-summary issue is filed. Default: 50.
+   */
+  maxIssues?: number;
+  /**
+   * Group failures with the same error message into a single cluster issue.
+   * Default: true.
+   */
+  clusterByError?: boolean;
+  /**
+   * Skip creating an issue when an open issue already exists for the same TC ID.
+   * Default: true.
+   */
+  dedupByTestCase?: boolean;
+}
+
 // ─── Publish test results configuration ──────────────────────────────────────
 
 export interface TestResultSource {
@@ -210,6 +254,11 @@ export interface PublishTestResultsConfig {
    * Failing tests always get all attachments.
    */
   publishAttachmentsForPassingTests?: 'none' | 'files' | 'all';
+  /**
+   * Automatically file GitHub Issues or ADO Bugs for failed tests after publishing.
+   * Includes guards: failure-rate threshold, error clustering, hard cap, and dedup.
+   */
+  createIssuesOnFailure?: CreateIssuesConfig;
   /**
    * Scan a directory for screenshots/videos/logs to attach to test results.
    * Files are matched to individual results by method name; unmatched files
