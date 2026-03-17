@@ -58,11 +58,22 @@ function loadRawConfig(configPath: string): Record<string, any> {
   return yaml.load(raw) as Record<string, any>;
 }
 
+const MAX_CONFIG_DEPTH = 10;
+
 /**
  * Resolve hierarchical configuration by loading parent configs recursively.
  * Parent configs are merged bottom-up: child values override parent values.
  */
-function resolveHierarchicalConfig(configPath: string, visited = new Set<string>()): Record<string, any> {
+function resolveHierarchicalConfig(
+  configPath: string,
+  visited = new Set<string>(),
+  depth = 0
+): Record<string, any> {
+  if (depth > MAX_CONFIG_DEPTH) {
+    throw new Error(
+      `Parent config chain exceeds maximum depth of ${MAX_CONFIG_DEPTH}. Check your parentConfig references.`
+    );
+  }
   const absPath = path.resolve(configPath);
   if (visited.has(absPath)) {
     throw new Error(`Circular parent config reference detected: ${absPath}`);
@@ -80,7 +91,7 @@ function resolveHierarchicalConfig(configPath: string, visited = new Set<string>
     if (!fs.existsSync(resolvedParent)) {
       throw new Error(`Parent config file not found: ${resolvedParent} (referenced from ${absPath})`);
     }
-    const parentConfig = resolveHierarchicalConfig(resolvedParent, visited);
+    const parentConfig = resolveHierarchicalConfig(resolvedParent, visited, depth + 1);
     // Child overrides parent
     return deepMerge(parentConfig, parsed);
   }
@@ -211,6 +222,8 @@ function validateConfig(cfg: SyncConfig, filePath: string): void {
  * Each override is a string like "sync.tagPrefix=mytag" or "testPlan.id=42".
  * Dot-path navigation sets nested values. Numbers are coerced automatically.
  */
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 export function applyOverrides(cfg: SyncConfig, overrides: string[]): void {
   for (const override of overrides) {
     const eqIdx = override.indexOf('=');
@@ -221,10 +234,22 @@ export function applyOverrides(cfg: SyncConfig, overrides: string[]): void {
     const rawValue = override.slice(eqIdx + 1);
 
     const segments = dotPath.split('.');
+    for (const seg of segments) {
+      if (FORBIDDEN_KEYS.has(seg)) {
+        throw new Error(`Invalid --config-override "${override}": key "${seg}" is not allowed`);
+      }
+    }
+
     let obj: any = cfg;
     for (let i = 0; i < segments.length - 1; i++) {
       const seg = segments[i];
-      if (obj[seg] === undefined || obj[seg] === null) obj[seg] = {};
+      if (obj[seg] === undefined || obj[seg] === null) {
+        obj[seg] = {};
+      } else if (typeof obj[seg] !== 'object' || Array.isArray(obj[seg])) {
+        throw new Error(
+          `Invalid --config-override "${override}": "${segments.slice(0, i + 1).join('.')}" is not an object`
+        );
+      }
       obj = obj[seg];
     }
 

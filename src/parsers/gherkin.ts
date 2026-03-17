@@ -344,8 +344,9 @@ export function parseGherkinFile(
         includeSource: false,
       }
     );
-  } catch (err: any) {
-    throw new Error(`Failed to parse ${filePath}: ${err.message}`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to parse ${filePath}: ${msg}`);
   }
 
   // Surface any parse errors from the envelope stream
