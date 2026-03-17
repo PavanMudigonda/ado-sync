@@ -366,6 +366,8 @@ Recommended config:
 
 ## CI pipeline (GitHub Actions)
 
+### Basic push + publish
+
 ```yaml
 - name: Sync test cases to Azure DevOps
   run: ado-sync push --config-override sync.disableLocalChanges=true
@@ -379,3 +381,77 @@ Recommended config:
 ```
 
 Use `sync.disableLocalChanges=true` in CI so the pipeline never commits ID writeback files.
+
+---
+
+### PR comment bot
+
+Copy [`.github/workflows/ado-sync-pr-check.yml`](../.github/workflows/ado-sync-pr-check.yml) into your repo. On every pull request it runs `ado-sync push --dry-run` and posts a comment showing:
+
+- Unlinked specs that would be created in Azure DevOps
+- Specs with drift vs. existing Test Cases
+- Conflicts where both local and remote changed
+
+Requires one secret: `ADO_PAT` (Azure DevOps PAT with Test Management read/write).
+
+---
+
+### Coverage gate + AC gate
+
+Copy [`.github/workflows/ado-sync-coverage-gate.yml`](../.github/workflows/ado-sync-coverage-gate.yml) into your repo. Runs three checks on push/PR to main:
+
+```
+Step 1 — Spec coverage gate
+  ado-sync coverage --fail-below 80
+  Fails if fewer than 80% of local specs are linked to Azure Test Cases.
+
+Step 2 — Acceptance criteria gate
+  ado-sync ac-gate --area-path "..."
+  Fails if any Active/Resolved story is missing AC or linked Test Cases.
+
+Step 3 — Trend report (informational)
+  ado-sync trend --days 30
+  Optionally posts a Slack/Teams webhook summary. Never fails the build.
+```
+
+Configure via GitHub repository variables (no code changes needed):
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ADO_SYNC_COVERAGE_MIN` | Minimum spec link rate % | `80` |
+| `ADO_SYNC_AC_AREA_PATH` | Area path scope for AC gate | *(all stories)* |
+| `ADO_SYNC_TREND_DAYS` | Days of history for trend report | `30` |
+| `ADO_SYNC_TREND_WEBHOOK` | Slack/Teams webhook URL | *(none)* |
+| `ADO_SYNC_TREND_WEBHOOK_TYPE` | `slack`, `teams`, or `generic` | `slack` |
+
+---
+
+### Stale TC cleanup in CI
+
+To periodically retire stale Azure Test Cases (TCs that no longer have a local spec):
+
+```yaml
+- name: Retire stale test cases
+  run: ado-sync stale --retire --dry-run   # remove --dry-run to apply
+  env:
+    AZURE_DEVOPS_TOKEN: ${{ secrets.AZURE_DEVOPS_TOKEN }}
+```
+
+This transitions orphaned TCs to `Closed` state and tags them `ado-sync:retired`. Use `--retire-state "Inactive"` if your process uses a different state name.
+
+---
+
+### Flaky test detection in CI
+
+```yaml
+- name: Detect flaky tests
+  run: |
+    ado-sync trend \
+      --days 14 \
+      --fail-on-flaky \
+      --webhook-url ${{ secrets.SLACK_WEBHOOK }}
+  env:
+    AZURE_DEVOPS_TOKEN: ${{ secrets.AZURE_DEVOPS_TOKEN }}
+```
+
+Exits 1 if any test both passed and failed in the last 14 days, and posts a summary to Slack. Drop `--fail-on-flaky` to run as informational-only.

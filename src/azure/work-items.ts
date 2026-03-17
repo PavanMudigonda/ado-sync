@@ -244,6 +244,92 @@ function extractActors(ac: string): string[] {
   return actors.filter((a) => !actors.some((b) => b !== a && b.includes(a)));
 }
 
+// ─── AC validation gate ───────────────────────────────────────────────────────
+
+export type AcGateOutcome = 'pass' | 'no-ac' | 'no-tc';
+
+export interface AcGateResult {
+  storyId: number;
+  title: string;
+  state?: string;
+  url: string;
+  outcome: AcGateOutcome;
+  /** Number of AC items found */
+  acCount: number;
+  /** Test Case IDs already linked to this story */
+  linkedTcs: number[];
+}
+
+export interface AcGateReport {
+  passed: AcGateResult[];
+  failed: AcGateResult[];
+  /** Exit code: 0 when all pass, 1 when any fail */
+  exitCode: 0 | 1;
+}
+
+/**
+ * Validate that each story in `storyIds` has:
+ *   - at least one AC item
+ *   - at least one linked Test Case
+ *
+ * Returns a report with per-story outcomes and an overall exitCode.
+ */
+export async function acGate(
+  client: AzureClient,
+  project: string,
+  storyIds: number[],
+  orgUrl: string,
+): Promise<AcGateReport> {
+  const witApi = await client.getWitApi();
+  const passed: AcGateResult[] = [];
+  const failed: AcGateResult[] = [];
+
+  for (const id of storyIds) {
+    // Expand relations (4 = WorkItemExpand.Relations)
+    const wi = await (witApi as any).getWorkItem(id, undefined, undefined, 4);
+    const f   = wi?.fields ?? {};
+
+    const rawAc    = f['Microsoft.VSTS.Common.AcceptanceCriteria'];
+    const rawTitle = f['System.Title'] ?? `Work Item ${id}`;
+    const state    = f['System.State'];
+
+    const acText = stripHtml(rawAc) ?? '';
+    const acItems = acText
+      .split('\n')
+      .map((l: string) => l.replace(/^[-*•\d.)\s]+/, '').trim())
+      .filter((l: string) => l.length > 0);
+
+    const relations: any[] = wi?.relations ?? [];
+    const linkedTcs = relations
+      .filter((r) => typeof r.rel === 'string' && r.rel.includes('TestedBy'))
+      .map((r) => {
+        const m = (r.url ?? '').match(/\/(\d+)$/);
+        return m ? parseInt(m[1], 10) : NaN;
+      })
+      .filter((tcId: number) => !isNaN(tcId));
+
+    const url = `${orgUrl.replace(/\/$/, '')}/${project}/_workitems/edit/${id}`;
+
+    let outcome: AcGateOutcome;
+    if (acItems.length === 0) {
+      outcome = 'no-ac';
+    } else if (linkedTcs.length === 0) {
+      outcome = 'no-tc';
+    } else {
+      outcome = 'pass';
+    }
+
+    const result: AcGateResult = { storyId: id, title: rawTitle, state, url, outcome, acCount: acItems.length, linkedTcs };
+    if (outcome === 'pass') {
+      passed.push(result);
+    } else {
+      failed.push(result);
+    }
+  }
+
+  return { passed, failed, exitCode: failed.length > 0 ? 1 : 0 };
+}
+
 /**
  * Fetch User Stories under a specific area path.
  */

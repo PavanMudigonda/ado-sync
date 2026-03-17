@@ -1,6 +1,6 @@
 {
   "name": "ado-sync",
-  "version": "0.1.47",
+  "version": "0.1.50",
   "description": "Bidirectional sync between local test specs (Cucumber/Markdown) and Azure DevOps Test Cases",
   "bin": {
     "ado-sync": "./dist/cli.js",

@@ -42,7 +42,76 @@ ado-sync publish-test-results \
 | `--github-token <token>` | GitHub token. Supports `$ENV_VAR` references. |
 | `--bug-threshold <percent>` | If more than this % of tests fail, one environment-failure issue is filed instead of per-test issues. Default: `20`. |
 | `--max-issues <n>` | Hard cap on issues filed per run. Default: `50`. |
+| `--analyze-failures` | Use AI to analyse each failed test and post a root-cause + suggestion comment on the Azure test result. |
+| `--ai-provider <provider>` | AI provider for failure analysis: `ollama`, `openai`, or `anthropic`. |
+| `--ai-model <model>` | Model name (e.g. `gpt-4o-mini`, `claude-haiku-4-5-20251001`, `qwen2.5-coder:7b`). |
+| `--ai-url <url>` | Base URL for Ollama or an OpenAI-compatible endpoint. |
+| `--ai-key <key>` | API key. Supports `$ENV_VAR` references. |
 | `--config-override` | Override config values (repeatable, same as other commands). |
+
+---
+
+## AI failure analysis
+
+When `--analyze-failures` is set, ado-sync calls the configured AI provider for each **failed** test result and posts a comment directly on the Azure DevOps test result containing:
+
+- **Root cause** — a concise one-line explanation of why the test failed
+- **Suggestion** — a concrete fix recommendation
+
+The comment appears in Azure DevOps under the test result's **Comments** tab, alongside the error message and stack trace.
+
+### CLI examples
+
+```bash
+# Analyse failures with OpenAI (gpt-4o-mini by default)
+ado-sync publish-test-results \
+  --testResult results/test.trx \
+  --analyze-failures \
+  --ai-provider openai \
+  --ai-key $OPENAI_API_KEY
+
+# Analyse with Claude (Haiku is fast and cost-effective)
+ado-sync publish-test-results \
+  --testResult results/playwright.json \
+  --analyze-failures \
+  --ai-provider anthropic \
+  --ai-model claude-haiku-4-5-20251001 \
+  --ai-key $ANTHROPIC_API_KEY
+
+# Analyse with a local Ollama server (no cloud cost)
+ado-sync publish-test-results \
+  --testResult results/junit.xml \
+  --analyze-failures \
+  --ai-provider ollama \
+  --ai-model qwen2.5-coder:7b
+```
+
+### Config-based (no CLI flags needed)
+
+```json
+{
+  "sync": {
+    "ai": {
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5-20251001",
+      "apiKey": "$ANTHROPIC_API_KEY",
+      "analyzeFailures": true
+    }
+  }
+}
+```
+
+With this in place, every `publish-test-results` run automatically analyses failures — no extra CLI flags needed.
+
+### Supported providers
+
+| Provider | Flag value | Notes |
+|----------|-----------|-------|
+| OpenAI | `openai` | Default model: `gpt-4o-mini`. Works with any OpenAI-compatible endpoint via `--ai-url`. |
+| Anthropic | `anthropic` | Default model: `claude-haiku-4-5-20251001`. Fast and cost-effective. |
+| Ollama | `ollama` | Default model: `qwen2.5-coder:7b`. Runs locally — no cloud cost or data egress. |
+
+> `heuristic` and `local` (node-llama-cpp) providers are not supported for failure analysis — they are suited for step generation, not conversational reasoning.
 
 ---
 
