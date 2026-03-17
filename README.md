@@ -52,14 +52,6 @@ Minimum config:
 
 ---
 
-## CI — GitHub Actions templates
-
-| Template | Purpose |
-|----------|---------|
-| [`.github/workflows/ado-sync-pr-check.yml`](.github/workflows/ado-sync-pr-check.yml) | Post a drift-summary comment on every PR |
-| [`.github/workflows/ado-sync-coverage-gate.yml`](.github/workflows/ado-sync-coverage-gate.yml) | Enforce spec link rate + AC gate on push/merge |
-
----
 
 ## Output symbols
 
