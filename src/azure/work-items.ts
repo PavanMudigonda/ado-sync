@@ -371,7 +371,9 @@ export async function findStoriesByTagAddedSince(
   const safeProject = project.replace(/'/g, "''");
   const safeType    = workItemType.replace(/'/g, "''");
   const safeTag     = tag.replace(/'/g, "''");
-  const sinceIso    = since.toISOString();
+  // WIQL only supports date precision (no time component) — truncate to YYYY-MM-DD.
+  // We still filter by exact time when scanning revisions below.
+  const sinceDate = since.toISOString().slice(0, 10);
 
   // Pre-filter: only work items that have the tag AND were changed recently.
   // This avoids fetching revisions for every item in the project.
@@ -380,7 +382,7 @@ export async function findStoriesByTagAddedSince(
     `WHERE [System.TeamProject] = '${safeProject}' ` +
     `AND [System.WorkItemType] = '${safeType}' ` +
     `AND [System.Tags] CONTAINS '${safeTag}' ` +
-    `AND [System.ChangedDate] >= '${sinceIso}' ` +
+    `AND [System.ChangedDate] >= '${sinceDate}' ` +
     `ORDER BY [System.ChangedDate] DESC`;
 
   const queryResult = await witApi.queryByWiql({ query: wiql }, { project });
