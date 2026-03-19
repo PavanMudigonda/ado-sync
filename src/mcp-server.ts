@@ -21,6 +21,7 @@
  *   create_issue           — file a GitHub Issue or ADO Bug for a test failure
  *   get_story_context      — planner-agent feed: AC items, suggested tags, linked TCs
  *   generate_manifest      — write .ai-workflow-manifest-{id}.json for a story
+ *   find_tagged_items      — find work items where a tag was added in the last N hours/days (exact timestamp)
  *
  * Usage (register in .claude/settings.json or .vscode/mcp.json):
  *
@@ -49,7 +50,7 @@ import { z } from 'zod';
 
 import { AzureClient } from './azure/client';
 import { getTestCase, getTestCasesInSuite } from './azure/test-cases';
-import { getStoryContext, getWorkItemsByAreaPath, getWorkItemsByIds, getWorkItemsByQuery } from './azure/work-items';
+import { findStoriesByTagAddedSince, getStoryContext, getWorkItemsByAreaPath, getWorkItemsByIds, getWorkItemsByQuery } from './azure/work-items';
 import { applyOverrides, loadConfig, resolveConfigPath } from './config';
 import { createIssuesFromResults } from './issues/create-issues';
 import { pull, push, status } from './sync/engine';
@@ -550,6 +551,75 @@ server.tool(
     }
 
     return { content: [{ type: 'text', text: lines.join('\n') }] };
+  }
+);
+
+// ─── Tool: find_tagged_items ──────────────────────────────────────────────────
+
+server.tool(
+  'find_tagged_items',
+  'Find Azure DevOps work items (User Stories, Bugs, etc.) where a specific tag was added ' +
+  'within the last N hours or days. Uses the revisions API to find the exact date and time ' +
+  'when the tag first appeared on each item — not just when the item was last changed. ' +
+  'Returns id, title, state, current tags, exact tagAddedAt timestamp, revision number, ' +
+  'the user who added the tag, and a direct URL to the work item.',
+  {
+    tag:             z.string().describe('The tag to search for, e.g. "regression" or "sprint-42"'),
+    hours:           z.number().positive().optional().describe('Return items where the tag was added in the last N hours'),
+    days:            z.number().positive().optional().describe('Return items where the tag was added in the last N days (mutually exclusive with hours)'),
+    workItemType:    z.string().optional().default('User Story').describe('Work item type to search (default: "User Story")'),
+    configPath:      z.string().optional().describe('Path to ado-sync config file'),
+    configOverrides: z.array(z.string()).optional().describe('Config overrides'),
+  },
+  async ({ tag, hours, days, workItemType, configPath, configOverrides }) => {
+    if (!hours && !days) {
+      return { content: [{ type: 'text', text: 'Provide either hours or days to define the time window.' }] };
+    }
+
+    const windowHours = hours ?? (days! * 24);
+    const since = new Date(Date.now() - windowHours * 3600 * 1000);
+
+    const { config } = resolveConfig(configPath, configOverrides);
+    const client = await AzureClient.create(config);
+
+    const results = await findStoriesByTagAddedSince(
+      client,
+      config.project,
+      tag,
+      since,
+      config.orgUrl,
+      workItemType,
+    );
+
+    if (!results.length) {
+      const windowLabel = hours ? `${hours} hour(s)` : `${days} day(s)`;
+      return {
+        content: [{
+          type: 'text',
+          text: `No ${workItemType} items found where tag "${tag}" was added in the last ${windowLabel}.`,
+        }],
+      };
+    }
+
+    const lines: string[] = [
+      `Found ${results.length} item(s) where tag "${tag}" was added since ${since.toISOString()}:`,
+      '',
+    ];
+
+    for (const r of results) {
+      lines.push(`#${r.id} — ${r.title}`);
+      lines.push(`  State:        ${r.state ?? 'unknown'}`);
+      lines.push(`  Tag added at: ${r.tagAddedAt}`);
+      lines.push(`  Added by:     ${r.tagAddedBy ?? 'unknown'}`);
+      lines.push(`  Revision:     ${r.tagAddedRevision}`);
+      lines.push(`  Current tags: ${r.currentTags.join(', ') || '(none)'}`);
+      lines.push(`  URL:          ${r.url}`);
+      lines.push('');
+    }
+
+    return {
+      content: [{ type: 'text', text: lines.join('\n') }],
+    };
   }
 );
 

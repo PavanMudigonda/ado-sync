@@ -1250,6 +1250,93 @@ program
     }
   });
 
+// ─── find-tagged ──────────────────────────────────────────────────────────────
+
+program
+  .command('find-tagged')
+  .description('Find work items where a specific tag was added in the last N hours or days')
+  .requiredOption('--tag <name>', 'The tag to search for (e.g. "regression" or "my-label")')
+  .option('--hours <n>', 'Find items where the tag was added in the last N hours')
+  .option('--days <n>', 'Find items where the tag was added in the last N days')
+  .option('--work-item-type <type>', 'Work item type to search (default: "User Story")', 'User Story')
+  .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
+  .action(async (opts) => {
+    const globalOpts = program.opts();
+    try {
+      const configPath = resolveConfigPath(globalOpts.config);
+      const config = loadConfig(configPath);
+      if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
+
+      if (!opts.hours && !opts.days) {
+        console.error(chalk.red('Specify a time window: --hours <n> or --days <n>'));
+        process.exit(1);
+      }
+
+      const windowHours = opts.hours
+        ? parseFloat(opts.hours)
+        : parseFloat(opts.days) * 24;
+
+      if (isNaN(windowHours) || windowHours <= 0) {
+        console.error(chalk.red('Time window must be a positive number.'));
+        process.exit(1);
+      }
+
+      const since = new Date(Date.now() - windowHours * 3600 * 1000);
+
+      const windowLabel = opts.hours
+        ? `${opts.hours} hour${parseFloat(opts.hours) !== 1 ? 's' : ''}`
+        : `${opts.days} day${parseFloat(opts.days) !== 1 ? 's' : ''}`;
+
+      console.log(chalk.bold('ado-sync find-tagged'));
+      console.log(chalk.dim(`Config:   ${configPath}`));
+      console.log(chalk.dim(`Tag:      ${opts.tag}`));
+      console.log(chalk.dim(`Type:     ${opts.workItemType}`));
+      console.log(chalk.dim(`Window:   last ${windowLabel}  (since ${since.toISOString()})`));
+      console.log('');
+
+      const { AzureClient } = await import('./azure/client');
+      const { findStoriesByTagAddedSince } = await import('./azure/work-items');
+      const client = await AzureClient.create(config);
+
+      const results = await findStoriesByTagAddedSince(
+        client,
+        config.project,
+        opts.tag,
+        since,
+        config.orgUrl,
+        opts.workItemType,
+      );
+
+      const outputFormat = globalOpts.output;
+      if (outputFormat === 'json') {
+        process.stdout.write(JSON.stringify(results, null, 2) + '\n');
+        return;
+      }
+
+      if (results.length === 0) {
+        console.log(chalk.dim(`No ${opts.workItemType} items found where tag "${opts.tag}" was added in the last ${windowLabel}.`));
+        return;
+      }
+
+      for (const r of results) {
+        const addedDate  = new Date(r.tagAddedAt);
+        const dateStr    = addedDate.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+        const timeStr    = addedDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const byStr      = r.tagAddedBy ? chalk.dim(` by ${r.tagAddedBy}`) : '';
+        const stateStr   = r.state      ? chalk.dim(` [${r.state}]`)       : '';
+        const revStr     = chalk.dim(` (rev ${r.tagAddedRevision})`);
+        console.log(`${chalk.green('+')} ${chalk.dim(`[#${r.id}]`)}${stateStr} ${r.title}`);
+        console.log(`   ${chalk.cyan('Tag added:')} ${dateStr} ${timeStr}${byStr}${revStr}`);
+        console.log(chalk.dim(`   ${r.url}`));
+        console.log('');
+      }
+
+      console.log(chalk.green(`${results.length} item${results.length !== 1 ? 's' : ''} found where "${opts.tag}" was added in the last ${windowLabel}.`));
+    } catch (err: unknown) {
+      handleError(err);
+    }
+  });
+
 // ─── Run ─────────────────────────────────────────────────────────────────────
 
 program.parse(process.argv);

@@ -330,6 +330,150 @@ export async function acGate(
   return { passed, failed, exitCode: failed.length > 0 ? 1 : 0 };
 }
 
+// ─── Tag-added-since query ────────────────────────────────────────────────────
+
+export interface TagAddedResult {
+  id: number;
+  title: string;
+  state?: string;
+  currentTags: string[];
+  /** The exact ISO timestamp when the tag was first added to this work item. */
+  tagAddedAt: string;
+  /** Revision number where the tag appeared for the first time. */
+  tagAddedRevision: number;
+  /** Display name of the user who added the tag (if available). */
+  tagAddedBy?: string;
+  url: string;
+}
+
+/**
+ * Find work items of a given type that currently contain `tag` AND where
+ * the tag was added within the specified time window.
+ *
+ * Strategy:
+ *  1. WIQL to fetch all work items of `workItemType` that contain `tag`
+ *     and were changed on/after `since` (pre-filter to limit revision fetches).
+ *  2. For each candidate, page through revisions to find the first revision
+ *     where `tag` appeared in System.Tags.
+ *  3. Return only those items where that revision's ChangedDate >= `since`.
+ */
+export async function findStoriesByTagAddedSince(
+  client: AzureClient,
+  project: string,
+  tag: string,
+  since: Date,
+  orgUrl: string,
+  workItemType = 'User Story',
+): Promise<TagAddedResult[]> {
+  const witApi = await client.getWitApi();
+
+  // Escape single quotes for WIQL
+  const safeProject = project.replace(/'/g, "''");
+  const safeType    = workItemType.replace(/'/g, "''");
+  const safeTag     = tag.replace(/'/g, "''");
+  const sinceIso    = since.toISOString();
+
+  // Pre-filter: only work items that have the tag AND were changed recently.
+  // This avoids fetching revisions for every item in the project.
+  const wiql =
+    `SELECT [System.Id] FROM WorkItems ` +
+    `WHERE [System.TeamProject] = '${safeProject}' ` +
+    `AND [System.WorkItemType] = '${safeType}' ` +
+    `AND [System.Tags] CONTAINS '${safeTag}' ` +
+    `AND [System.ChangedDate] >= '${sinceIso}' ` +
+    `ORDER BY [System.ChangedDate] DESC`;
+
+  const queryResult = await witApi.queryByWiql({ query: wiql }, { project });
+  const ids = (queryResult.workItems ?? []).map((ref: any) => ref.id as number).filter(Boolean);
+
+  if (!ids.length) return [];
+
+  // Fetch current field values for all candidates in one batch call
+  const fieldsNeeded = ['System.Id', 'System.Title', 'System.State', 'System.Tags'];
+  const BATCH = 200;
+  const currentItems: Map<number, any> = new Map();
+  for (let i = 0; i < ids.length; i += BATCH) {
+    const batch = ids.slice(i, i + BATCH);
+    const wis = await witApi.getWorkItems(batch, fieldsNeeded);
+    for (const wi of wis ?? []) {
+      if (wi?.id) currentItems.set(wi.id, wi.fields);
+    }
+  }
+
+  const normaliseTag = (t: string) => t.toLowerCase().trim();
+  const targetTag = normaliseTag(tag);
+
+  const hasTag = (rawTags: string | undefined): boolean => {
+    if (!rawTags) return false;
+    return rawTags.split(/[;,]/).some((t) => normaliseTag(t) === targetTag);
+  };
+
+  const results: TagAddedResult[] = [];
+
+  for (const id of ids) {
+    // Fetch all revisions for this work item (paged if needed)
+    let revisions: any[] = [];
+    try {
+      // getRevisions returns up to 200; use $top + $skip for more
+      let skip = 0;
+      const PAGE = 200;
+      while (true) {
+        const page = await (witApi as any).getRevisions(id, PAGE, skip);
+        if (!page?.length) break;
+        revisions.push(...page);
+        if (page.length < PAGE) break;
+        skip += PAGE;
+      }
+    } catch {
+      continue;
+    }
+
+    // Walk revisions in order to find the first one where the tag appeared
+    let firstAddedRevision: any | undefined;
+    for (let i = 0; i < revisions.length; i++) {
+      const rev = revisions[i];
+      const prevTags: string = revisions[i - 1]?.fields?.['System.Tags'] ?? '';
+      const curTags: string  = rev.fields?.['System.Tags'] ?? '';
+      if (hasTag(curTags) && !hasTag(prevTags)) {
+        firstAddedRevision = rev;
+        break;
+      }
+    }
+
+    if (!firstAddedRevision) continue;
+
+    const tagAddedAt: string = firstAddedRevision.fields?.['System.ChangedDate'] ?? '';
+    if (!tagAddedAt) continue;
+
+    const addedDate = new Date(tagAddedAt);
+    if (addedDate < since) continue;
+
+    const f = currentItems.get(id) ?? {};
+    const rawTags: string = f['System.Tags'] ?? '';
+    const currentTags = rawTags.split(/[;,]/).map((t: string) => t.trim()).filter(Boolean);
+
+    const changedBy: string | undefined =
+      firstAddedRevision.fields?.['System.ChangedBy']?.displayName ??
+      firstAddedRevision.fields?.['System.ChangedBy'] ??
+      undefined;
+
+    results.push({
+      id,
+      title: f['System.Title'] ?? `Work Item ${id}`,
+      state: f['System.State'],
+      currentTags,
+      tagAddedAt,
+      tagAddedRevision: firstAddedRevision.rev ?? 0,
+      tagAddedBy: typeof changedBy === 'string' ? changedBy : undefined,
+      url: `${orgUrl.replace(/\/$/, '')}/${project}/_workitems/edit/${id}`,
+    });
+  }
+
+  // Sort by tagAddedAt descending (most recent first)
+  results.sort((a, b) => b.tagAddedAt.localeCompare(a.tagAddedAt));
+  return results;
+}
+
 /**
  * Fetch User Stories under a specific area path.
  */

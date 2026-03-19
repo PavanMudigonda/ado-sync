@@ -47,6 +47,7 @@ Minimum config:
 | `coverage` | Spec link rate and story coverage report |
 | `stale` | List (and optionally retire) Azure TCs with no local spec |
 | `ac-gate` | Validate stories have AC and linked Test Cases — CI quality gate |
+| `find-tagged` | Find work items where a specific tag was added in the last N hours/days |
 | `trend` | Flaky test detection and pass-rate trends over historical runs |
 | `watch` | Auto-push on file save |
 
