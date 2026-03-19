@@ -160,6 +160,7 @@ Expected response includes config validity, Azure connection status, and test pl
 | `create_issue` | File a single GitHub Issue or ADO Bug for a test failure (for healer agents) |
 | `get_story_context` | Planner-agent feed: AC items, suggested tags, actors, linked TC IDs |
 | `generate_manifest` | Write `.ai-workflow-manifest-{id}.json` for the full Planner→CI cycle |
+| `find_tagged_items` | Find work items where a tag was added in the last N hours/days (exact timestamp via revisions API) |
 
 ---
 
@@ -242,6 +243,34 @@ Returns: AC items as a bullet list, inferred tags (`@smoke`, `@auth`, …), extr
 ```
 
 Writes `.ai-workflow-manifest-1234.json` in `outputFolder`. The manifest contains the ordered 8-step workflow, AC items, required documents checklist, and validation steps.
+
+### `find_tagged_items`
+
+```json
+{
+  "tag": "regression",
+  "hours": 24
+}
+```
+
+```json
+{
+  "tag": "sprint-42",
+  "days": 7,
+  "workItemType": "Bug"
+}
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `tag` | string | **Required.** Tag to search for |
+| `hours` | number | Time window in hours |
+| `days` | number | Time window in days (mutually exclusive with `hours`) |
+| `workItemType` | string | Work item type (default: `"User Story"`) |
+
+Returns per item: `id`, `title`, `state`, `tagAddedAt` (ISO timestamp), `tagAddedBy`, `tagAddedRevision`, `currentTags`, `url`.
+
+Uses the revisions API — finds the exact revision where the tag first appeared, not just when the item was last changed.
 
 ---
 

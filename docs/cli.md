@@ -22,6 +22,7 @@ Commands:
   coverage                Spec link rate and story coverage report
   stale                   List (and optionally retire) TCs with no local spec
   ac-gate                 Validate stories have AC + linked TCs (CI gate)
+  find-tagged             Find work items where a tag was added in the last N hours/days
   trend                   Flaky test detection and pass-rate trend report
   watch                   Auto-push on file save
   help [command]          Help for a specific command
@@ -242,6 +243,44 @@ ado-sync publish-test-results \
 ```
 
 See [publish-test-results.md](publish-test-results.md) for full reference including config-based setup.
+
+---
+
+## `find-tagged`
+
+Find work items where a specific tag was added within the last N hours or days. Uses the Azure DevOps **revisions API** to find the exact date and time the tag first appeared — not just the item's last-changed date.
+
+```bash
+# Tag added in the last 24 hours
+ado-sync find-tagged --tag "regression" --hours 24
+
+# Tag added in the last 7 days
+ado-sync find-tagged --tag "sprint-42" --days 7
+
+# Different work item type
+ado-sync find-tagged --tag "blocker" --hours 48 --work-item-type Bug
+
+# Machine-readable output
+ado-sync find-tagged --tag "regression" --days 3 --output json
+```
+
+| Flag | Description |
+|------|-------------|
+| `--tag <name>` | **Required.** Tag to search for |
+| `--hours <n>` | Return items where the tag was added in the last N hours |
+| `--days <n>` | Return items where the tag was added in the last N days |
+| `--work-item-type <type>` | Work item type to search (default: `User Story`) |
+
+One of `--hours` or `--days` is required.
+
+Example output:
+```
++ [#1234] [Active] User can reset password
+   Tag added: Mar 18, 2026 14:32:07 by Jane Smith (rev 5)
+   https://dev.azure.com/myorg/MyProject/_workitems/edit/1234
+
+3 items found where "regression" was added in the last 24 hours.
+```
 
 ---
 

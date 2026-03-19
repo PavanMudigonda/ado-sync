@@ -21,3 +21,4 @@ yarn-error.log
 .saffron_design_system/specs/
 specs/
 .next-steps.md
+playwright-ai-agents/
