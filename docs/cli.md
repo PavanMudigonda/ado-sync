@@ -84,6 +84,8 @@ ado-sync push --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
 ado-sync push --ai-provider huggingface --ai-model mistralai/Mistral-7B-Instruct-v0.3 --ai-key $HF_TOKEN
 ado-sync push --ai-provider bedrock --ai-model anthropic.claude-3-haiku-20240307-v1:0 --ai-region us-east-1
 ado-sync push --ai-provider azureai --ai-url https://myresource.openai.azure.com --ai-model gpt-4o --ai-key $AZURE_OPENAI_KEY
+ado-sync push --ai-provider github  --ai-model gpt-4o                              # uses $GITHUB_TOKEN automatically
+ado-sync push --ai-provider azureinference --ai-url https://myendpoint.inference.azure.com --ai-model gpt-4o --ai-key $AZURE_AI_KEY
 ado-sync push --ai-provider none                # disable AI entirely
 ado-sync push --ai-context ./docs/ai-context.md # inject domain context
 ```
@@ -111,6 +113,8 @@ For code-based types (`java`, `csharp`, `python`, `javascript`, `playwright`, `c
 | `huggingface` | Good–Excellent | `--ai-model <model-id> --ai-key $HF_TOKEN` |
 | `bedrock` | Excellent | AWS credentials + optional `--ai-region` |
 | `azureai` | Excellent | `--ai-url <endpoint> --ai-key $AZURE_OPENAI_KEY` |
+| `github` | Excellent | GitHub PAT with `models:read` — `$GITHUB_TOKEN` auto-detected |
+| `azureinference` | Excellent | `--ai-url <endpoint> --ai-key $AZURE_AI_KEY` |
 | `openai` + `--ai-url` | Excellent | Any OpenAI-compatible proxy (LiteLLM, vLLM) |
 
 #### Local LLM — model download
@@ -165,8 +169,10 @@ ado-sync pull --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
 ado-sync pull --ai-provider openai    --ai-key $OPENAI_API_KEY --ai-model gpt-4o
 ado-sync pull --ai-provider ollama    --ai-model qwen2.5-coder:7b
 ado-sync pull --ai-provider huggingface --ai-model mistralai/Mistral-7B-Instruct-v0.3 --ai-key $HF_TOKEN
-ado-sync pull --ai-provider bedrock   --ai-model anthropic.claude-3-haiku-20240307-v1:0 --ai-region us-east-1
-ado-sync pull --ai-provider azureai   --ai-url https://myresource.openai.azure.com --ai-model gpt-4o --ai-key $AZURE_OPENAI_KEY
+ado-sync pull --ai-provider bedrock      --ai-model anthropic.claude-3-haiku-20240307-v1:0 --ai-region us-east-1
+ado-sync pull --ai-provider azureai      --ai-url https://myresource.openai.azure.com --ai-model gpt-4o --ai-key $AZURE_OPENAI_KEY
+ado-sync pull --ai-provider github       --ai-model gpt-4o
+ado-sync pull --ai-provider azureinference --ai-url https://myendpoint.inference.azure.com --ai-model gpt-4o --ai-key $AZURE_AI_KEY
 ```
 
 ---
@@ -184,8 +190,10 @@ ado-sync status --output json    # machine-readable
 ado-sync status --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
 ado-sync status --ai-provider openai    --ai-key $OPENAI_API_KEY
 ado-sync status --ai-provider ollama    --ai-model qwen2.5-coder:7b
-ado-sync status --ai-provider bedrock   --ai-model anthropic.claude-3-haiku-20240307-v1:0 --ai-region us-east-1
-ado-sync status --ai-provider azureai   --ai-url https://myresource.openai.azure.com --ai-model gpt-4o --ai-key $AZURE_OPENAI_KEY
+ado-sync status --ai-provider bedrock        --ai-model anthropic.claude-3-haiku-20240307-v1:0 --ai-region us-east-1
+ado-sync status --ai-provider azureai        --ai-url https://myresource.openai.azure.com --ai-model gpt-4o --ai-key $AZURE_OPENAI_KEY
+ado-sync status --ai-provider github         --ai-model gpt-4o
+ado-sync status --ai-provider azureinference --ai-url https://myendpoint.inference.azure.com --ai-model gpt-4o --ai-key $AZURE_AI_KEY
 ```
 
 ---
@@ -233,16 +241,18 @@ ado-sync generate --story-ids 1234 --ai-provider anthropic --ai-key $ANTHROPIC_A
 ado-sync generate --story-ids 1234 --ai-provider openai --ai-key $OPENAI_API_KEY --ai-model gpt-4o
 ado-sync generate --story-ids 1234 --ai-provider ollama --ai-model qwen2.5-coder:7b
 ado-sync generate --story-ids 1234 --ai-provider huggingface --ai-model mistralai/Mistral-7B-Instruct-v0.3 --ai-key $HF_TOKEN
-ado-sync generate --story-ids 1234 --ai-provider bedrock --ai-model anthropic.claude-3-haiku-20240307-v1:0 --ai-region us-east-1
-ado-sync generate --story-ids 1234 --ai-provider azureai --ai-url https://myresource.openai.azure.com --ai-model gpt-4o --ai-key $AZURE_OPENAI_KEY
-ado-sync generate --story-ids 1234 --ai-provider local --ai-model ~/.cache/models/qwen2.5-coder-1.5b.gguf
+ado-sync generate --story-ids 1234 --ai-provider bedrock        --ai-model anthropic.claude-3-haiku-20240307-v1:0 --ai-region us-east-1
+ado-sync generate --story-ids 1234 --ai-provider azureai        --ai-url https://myresource.openai.azure.com --ai-model gpt-4o --ai-key $AZURE_OPENAI_KEY
+ado-sync generate --story-ids 1234 --ai-provider github         --ai-model gpt-4o
+ado-sync generate --story-ids 1234 --ai-provider azureinference --ai-url https://myendpoint.inference.azure.com --ai-model gpt-4o --ai-key $AZURE_AI_KEY
+ado-sync generate --story-ids 1234 --ai-provider local          --ai-model ~/.cache/models/qwen2.5-coder-1.5b.gguf
 ```
 
 ### AI generate flags
 
 | Flag | Description |
 |------|-------------|
-| `--ai-provider` | Provider: `local`, `ollama`, `openai`, `anthropic`, `huggingface`, `bedrock`, `azureai` |
+| `--ai-provider` | Provider: `local`, `ollama`, `openai`, `anthropic`, `huggingface`, `bedrock`, `azureai`, `github`, `azureinference` |
 | `--ai-model` | Model name, path, or deployment ID |
 | `--ai-key` | API key (or `$ENV_VAR` reference) |
 | `--ai-url` | Base URL override (Ollama, Azure OpenAI full endpoint, OpenAI-compatible) |
@@ -251,6 +261,10 @@ ado-sync generate --story-ids 1234 --ai-provider local --ai-model ~/.cache/model
 Without `--ai-provider`, `generate` uses the template scaffold (no AI required). With it, the AI reads the story's title, description, and acceptance criteria and produces realistic Given/When/Then steps.
 
 For `bedrock`, AWS credentials are picked up from the standard chain (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` env vars, `~/.aws/credentials`, or IAM role). Install the SDK if needed: `npm install @aws-sdk/client-bedrock-runtime`.
+
+For `github`, create a GitHub PAT with `models:read` scope and set `GITHUB_TOKEN` in your environment — no `--ai-key` flag needed. Available models: `gpt-4o`, `gpt-4o-mini`, `Meta-Llama-3.1-70B-Instruct`, `Mistral-large`, and others from [GitHub Models](https://github.com/marketplace/models).
+
+For `azureinference`, the endpoint is your Azure AI Inference resource URL (e.g. from Azure AI Foundry). Install the SDK if needed: `npm install @azure-rest/ai-inference @azure/core-auth`.
 
 AI settings also fall back to `sync.ai` in `ado-sync.json`, so you can configure a provider once and all commands (`push`, `generate`, `publish-test-results`) will use it automatically.
 
@@ -323,6 +337,22 @@ ado-sync publish-test-results \
   --ai-url https://myresource.openai.azure.com \
   --ai-model gpt-4o \
   --ai-key $AZURE_OPENAI_KEY
+
+# GitHub Models (uses $GITHUB_TOKEN automatically)
+ado-sync publish-test-results \
+  --testResult results/playwright.json \
+  --analyze-failures \
+  --ai-provider github \
+  --ai-model gpt-4o
+
+# Azure AI Inference (Azure AI Foundry endpoint)
+ado-sync publish-test-results \
+  --testResult results/playwright.json \
+  --analyze-failures \
+  --ai-provider azureinference \
+  --ai-url https://myendpoint.inference.azure.com \
+  --ai-model gpt-4o \
+  --ai-key $AZURE_AI_KEY
 ```
 
 See [publish-test-results.md](publish-test-results.md) for full reference including config-based setup.
