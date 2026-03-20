@@ -263,6 +263,7 @@ server.tool(
   'generate_specs',
   'Generate local spec files (.feature or .md) from Azure DevOps User Stories. ' +
   'Pulls the story title, description, and acceptance criteria to scaffold the spec file. ' +
+  'Optionally uses AI to generate realistic steps from the story content. ' +
   'Provide story_ids, a WIQL query, or an area_path.',
   {
     storyIds: z.array(z.number().int().positive()).optional().describe('ADO work item IDs to generate specs for'),
@@ -272,11 +273,32 @@ server.tool(
     outputFolder: z.string().optional().describe('Folder to write spec files (default: config pull.targetFolder or config dir)'),
     force: z.boolean().optional().default(false).describe('Overwrite existing spec files'),
     dryRun: z.boolean().optional().default(false).describe('Preview without writing files'),
+    aiProvider: z.enum(['local', 'ollama', 'openai', 'anthropic', 'huggingface', 'bedrock', 'azureai']).optional()
+      .describe('AI provider for generating spec content from the story description and AC'),
+    aiModel: z.string().optional().describe('Model name/path/id for the AI provider'),
+    aiKey: z.string().optional().describe('API key for the AI provider ($ENV_VAR reference supported)'),
+    aiUrl: z.string().optional().describe('Base URL override for the AI provider endpoint'),
+    aiRegion: z.string().optional().describe('AWS region for bedrock provider (default: us-east-1)'),
     configPath: z.string().optional().describe('Path to ado-sync config file'),
     configOverrides: z.array(z.string()).optional().describe('Config overrides'),
   },
-  async ({ storyIds, query, areaPath, format, outputFolder, force, dryRun, configPath, configOverrides }) => {
+  async ({ storyIds, query, areaPath, format, outputFolder, force, dryRun,
+          aiProvider, aiModel, aiKey, aiUrl, aiRegion, configPath, configOverrides }) => {
     const { config, configDir } = resolveConfig(configPath, configOverrides);
+
+    // AI opts: prefer explicit params, fall back to config.sync.ai
+    const cfgAi = config.sync?.ai;
+    const resolvedProvider = aiProvider ?? cfgAi?.provider;
+    const aiOpts = resolvedProvider && resolvedProvider !== 'none'
+      ? {
+          provider: resolvedProvider as import('./ai/generate-spec').AiGenerateProvider,
+          model:   aiModel   ?? cfgAi?.model,
+          apiKey:  aiKey     ?? cfgAi?.apiKey,
+          baseUrl: aiUrl     ?? cfgAi?.baseUrl,
+          region:  aiRegion  ?? cfgAi?.region,
+        }
+      : undefined;
+
     const results = await generateSpecs(config, configDir, {
       storyIds,
       query,
@@ -285,6 +307,7 @@ server.tool(
       outputFolder,
       force,
       dryRun,
+      aiOpts,
     });
 
     if (!results.length) {
@@ -296,7 +319,10 @@ server.tool(
     const lines: string[] = [
       `${dryRun ? '[dry-run] ' : ''}Generated ${created.length} spec file(s), skipped ${skipped.length}.`,
       '',
-      ...created.map(r => `+ [#${r.storyId}] ${r.title}\n  → ${r.filePath}`),
+      ...created.map(r => [
+        `+ [#${r.storyId}] ${r.title}\n  → ${r.filePath}`,
+        ...(r.preview ? [`\n--- preview (first 20 lines) ---\n${r.preview}\n---`] : []),
+      ].join('')),
       ...skipped.map(r => `= [#${r.storyId}] ${r.title} (already exists)`),
     ];
     return { content: [{ type: 'text', text: lines.join('\n') }] };

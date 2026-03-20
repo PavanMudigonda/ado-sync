@@ -77,7 +77,7 @@ function collect(value: string, previous: string[]): string[] {
  * CLI flags always take precedence. Returns undefined when provider is 'none'.
  */
 function buildAiOpts(
-  opts: { aiProvider?: string; aiModel?: string; aiUrl?: string; aiKey?: string; aiContext?: string },
+  opts: { aiProvider?: string; aiModel?: string; aiUrl?: string; aiKey?: string; aiRegion?: string; aiContext?: string },
   config?: SyncConfig,
   configDir?: string
 ): AiSummaryOpts | undefined {
@@ -128,8 +128,9 @@ function buildAiOpts(
   return {
     provider: provider as AiSummaryOpts['provider'],
     model,
-    baseUrl:  opts.aiUrl   ?? cfgAi?.baseUrl,
-    apiKey:   opts.aiKey   ?? cfgAi?.apiKey,
+    baseUrl:  opts.aiUrl    ?? cfgAi?.baseUrl,
+    apiKey:   opts.aiKey    ?? cfgAi?.apiKey,
+    region:   opts.aiRegion ?? cfgAi?.region,
     heuristicFallback: true,
     contextContent,
   };
@@ -221,10 +222,11 @@ program
   .option('--dry-run', 'Show what would change without making any modifications')
   .option('--tags <expression>', 'Only sync scenarios matching this tag expression (e.g. "@smoke and not @wip")')
   .option('--config-override <path=value>', 'Override a config value (repeatable, e.g. --config-override sync.tagPrefix=mytag)', collect, [])
-  .option('--ai-provider <provider>', 'AI provider for test step generation: local (default, node-llama-cpp), heuristic, ollama, openai, anthropic, none (disable)')
-  .option('--ai-model <model>', 'local: path to GGUF file; ollama: model tag; openai/anthropic: model name')
-  .option('--ai-url <url>', 'Base URL for ollama or OpenAI-compatible endpoint')
-  .option('--ai-key <key>', 'API key for openai or anthropic')
+  .option('--ai-provider <provider>', 'AI provider: local (node-llama-cpp), heuristic, ollama, openai, anthropic, huggingface, bedrock, azureai, none (disable)')
+  .option('--ai-model <model>', 'local: GGUF path; ollama: model tag; openai/anthropic/huggingface/bedrock/azureai: model name or id')
+  .option('--ai-url <url>', 'Base URL for ollama, OpenAI-compatible, or Azure OpenAI endpoint')
+  .option('--ai-key <key>', 'API key for openai / anthropic / huggingface / azureai ($ENV_VAR reference supported)')
+  .option('--ai-region <region>', 'AWS region for bedrock provider (default: AWS_REGION env or us-east-1)')
   .option('--ai-context <file>', 'Path to a markdown file with domain context/instructions injected into the AI prompt')
   .action(async (opts) => {
     const globalOpts = program.opts();
@@ -296,10 +298,11 @@ program
   .description('Show diff between local specs and Azure DevOps without making changes')
   .option('--tags <expression>', 'Only check scenarios matching this tag expression')
   .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
-  .option('--ai-provider <provider>', 'AI provider for test step generation: local (default, node-llama-cpp), heuristic, ollama, openai, anthropic, none (disable)')
-  .option('--ai-model <model>', 'local: path to GGUF file; ollama: model tag; openai/anthropic: model name')
-  .option('--ai-url <url>', 'Base URL for ollama or OpenAI-compatible endpoint')
-  .option('--ai-key <key>', 'API key for openai or anthropic')
+  .option('--ai-provider <provider>', 'AI provider: local (node-llama-cpp), heuristic, ollama, openai, anthropic, huggingface, bedrock, azureai, none (disable)')
+  .option('--ai-model <model>', 'local: GGUF path; ollama: model tag; openai/anthropic/huggingface/bedrock/azureai: model name or id')
+  .option('--ai-url <url>', 'Base URL for ollama, OpenAI-compatible, or Azure OpenAI endpoint')
+  .option('--ai-key <key>', 'API key for openai / anthropic / huggingface / azureai ($ENV_VAR reference supported)')
+  .option('--ai-region <region>', 'AWS region for bedrock provider (default: AWS_REGION env or us-east-1)')
   .option('--ai-context <file>', 'Path to a markdown file with domain context/instructions injected into the AI prompt')
   .action(async (opts) => {
     const globalOpts = program.opts();
@@ -345,10 +348,11 @@ program
   .option('--bug-threshold <percent>', 'Failure % above which one env-failure issue is filed instead of per-test (default: 20)')
   .option('--max-issues <n>', 'Hard cap on issues filed per run (default: 50)')
   .option('--analyze-failures', 'Use AI to analyse each failed result and post a root-cause comment on the Azure test result')
-  .option('--ai-provider <provider>', 'AI provider for failure analysis: ollama, openai, or anthropic')
-  .option('--ai-model <model>', 'AI model: ollama tag, openai model name, or anthropic model name')
-  .option('--ai-url <url>', 'Base URL for ollama or OpenAI-compatible endpoint')
-  .option('--ai-key <key>', 'API key for openai or anthropic ($ENV_VAR reference supported)')
+  .option('--ai-provider <provider>', 'AI provider for failure analysis: ollama, openai, anthropic, huggingface, bedrock, azureai')
+  .option('--ai-model <model>', 'Model name, tag, or id for the AI provider')
+  .option('--ai-url <url>', 'Base URL for ollama, OpenAI-compatible, or Azure OpenAI endpoint')
+  .option('--ai-key <key>', 'API key for openai / anthropic / huggingface / azureai ($ENV_VAR reference supported)')
+  .option('--ai-region <region>', 'AWS region for bedrock provider (default: AWS_REGION env or us-east-1)')
   .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
   .action(async (opts) => {
     const globalOpts = program.opts();
@@ -370,9 +374,10 @@ program
       if (wantAnalysis && aiProvider && aiProvider !== 'none' && aiProvider !== 'heuristic' && aiProvider !== 'local') {
         aiOpts = {
           provider: aiProvider as AiSummaryOpts['provider'],
-          model:    opts.aiModel  ?? config.sync?.ai?.model,
-          baseUrl:  opts.aiUrl    ?? config.sync?.ai?.baseUrl,
-          apiKey:   opts.aiKey    ?? config.sync?.ai?.apiKey,
+          model:    opts.aiModel   ?? config.sync?.ai?.model,
+          baseUrl:  opts.aiUrl     ?? config.sync?.ai?.baseUrl,
+          apiKey:   opts.aiKey     ?? config.sync?.ai?.apiKey,
+          region:   opts.aiRegion  ?? config.sync?.ai?.region,
         };
       } else if (wantAnalysis && !aiProvider) {
         process.stderr.write(chalk.yellow('  [warn] --analyze-failures requires --ai-provider (ollama, openai, or anthropic). Skipping analysis.\n'));
@@ -706,6 +711,11 @@ program
   .option('--manifest', 'Generate .ai-workflow-manifest-{id}.json instead of spec files')
   .option('--force', 'Overwrite existing files')
   .option('--dry-run', 'Show what would be created without writing files')
+  .option('--ai-provider <provider>', 'AI provider: local | ollama | openai | anthropic | huggingface | bedrock | azureai')
+  .option('--ai-model <model>', 'Model name/path/id for the AI provider')
+  .option('--ai-key <key>', 'API key for the AI provider (or $ENV_VAR reference)')
+  .option('--ai-url <url>', 'Base URL override for the AI provider endpoint')
+  .option('--ai-region <region>', 'AWS region for bedrock provider (default: AWS_REGION env or us-east-1)')
   .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
   .action(async (opts) => {
     const globalOpts = program.opts();
@@ -768,6 +778,22 @@ program
       if (opts.dryRun) console.log(chalk.yellow('Dry run — no files will be written'));
       console.log('');
 
+      // Build AI opts: CLI flags → config.sync.ai (generate.ts handles the config fallback too,
+      // but constructing via buildAiOpts here gives the CLI consistent env-var resolution)
+      const aiOpts = (opts.aiProvider || config.sync?.ai?.provider)
+        ? (() => {
+            const base = buildAiOpts(opts, config, configDir);
+            if (!base) return undefined;
+            return {
+              provider: base.provider as import('./ai/generate-spec').AiGenerateProvider,
+              model:    base.model,
+              apiKey:   base.apiKey,
+              baseUrl:  base.baseUrl,
+              region:   base.region,
+            };
+          })()
+        : undefined;
+
       const results = await generateSpecs(config, configDir, {
         storyIds,
         query: opts.query,
@@ -776,6 +802,7 @@ program
         outputFolder: opts.outputFolder,
         force: opts.force ?? false,
         dryRun: opts.dryRun ?? false,
+        aiOpts,
       });
 
       if (outputFormat === 'json') {
@@ -787,6 +814,13 @@ program
         const symbol = r.action === 'created' ? chalk.green('+') : chalk.dim('=');
         const relPath = path.relative(process.cwd(), r.filePath);
         console.log(`${symbol} [#${r.storyId}] ${relPath} — ${r.title}`);
+        if (r.preview) {
+          console.log(chalk.dim('  ┌─ preview ─────────────────────────────'));
+          for (const line of r.preview.split('\n')) {
+            console.log(chalk.dim(`  │ ${line}`));
+          }
+          console.log(chalk.dim('  └───────────────────────────────────────'));
+        }
       }
       console.log('');
       const created = results.filter((r) => r.action === 'created').length;
@@ -1287,12 +1321,18 @@ program
         ? `${opts.hours} hour${parseFloat(opts.hours) !== 1 ? 's' : ''}`
         : `${opts.days} day${parseFloat(opts.days) !== 1 ? 's' : ''}`;
 
-      console.log(chalk.bold('ado-sync find-tagged'));
-      console.log(chalk.dim(`Config:   ${configPath}`));
-      console.log(chalk.dim(`Tag:      ${opts.tag}`));
-      console.log(chalk.dim(`Type:     ${opts.workItemType}`));
-      console.log(chalk.dim(`Window:   last ${windowLabel}  (since ${since.toISOString()})`));
-      console.log('');
+      const outputFormat = globalOpts.output;
+      const log = outputFormat === 'json'
+        ? (...args: any[]) => process.stderr.write(args.join(' ') + '\n')
+        : console.log.bind(console);
+
+      log(chalk.bold('ado-sync find-tagged'));
+      log(chalk.dim(`Config:   ${configPath}`));
+      log(chalk.dim(`Tag:      ${opts.tag}`));
+      const typeLabel = opts.workItemType.split(',').map((t: string) => t.trim()).join(', ');
+      log(chalk.dim(`Type:     ${typeLabel}`));
+      log(chalk.dim(`Window:   last ${windowLabel}  (since ${since.toISOString()})`));
+      log('');
 
       const { AzureClient } = await import('./azure/client');
       const { findStoriesByTagAddedSince } = await import('./azure/work-items');
@@ -1307,14 +1347,13 @@ program
         opts.workItemType,
       );
 
-      const outputFormat = globalOpts.output;
       if (outputFormat === 'json') {
         process.stdout.write(JSON.stringify(results, null, 2) + '\n');
         return;
       }
 
       if (results.length === 0) {
-        console.log(chalk.dim(`No ${opts.workItemType} items found where tag "${opts.tag}" was added in the last ${windowLabel}.`));
+        console.log(chalk.dim(`No ${typeLabel} items found where tag "${opts.tag}" was added in the last ${windowLabel}.`));
         return;
       }
 

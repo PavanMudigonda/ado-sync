@@ -35,22 +35,34 @@ import { ParsedStep, ParsedTest } from '../types';
 
 // ─── Public options ───────────────────────────────────────────────────────────
 
-export type AiProvider = 'heuristic' | 'local' | 'ollama' | 'openai' | 'anthropic';
+export type AiProvider =
+  | 'heuristic'
+  | 'local'
+  | 'ollama'
+  | 'openai'
+  | 'anthropic'
+  | 'huggingface'
+  | 'bedrock'
+  | 'azureai';
 
 export interface AiSummaryOpts {
   provider: AiProvider;
   /**
-   * For `local`: absolute path to a GGUF model file, e.g.
-   *   ~/.cache/ado-sync/models/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf
-   * For `ollama`: model tag, e.g. qwen2.5-coder:7b
-   * For `openai`: model name, e.g. gpt-4o-mini
-   * For `anthropic`: model name, e.g. claude-haiku-4-5-20251001
+   * For `local`:       absolute path to a GGUF model file
+   * For `ollama`:      model tag, e.g. qwen2.5-coder:7b
+   * For `openai`:      model name, e.g. gpt-4o-mini
+   * For `anthropic`:   model name, e.g. claude-haiku-4-5-20251001
+   * For `huggingface`: model id, e.g. mistralai/Mistral-7B-Instruct-v0.3
+   * For `bedrock`:     model id, e.g. anthropic.claude-3-haiku-20240307-v1:0
+   * For `azureai`:     deployment name, e.g. gpt-4o
    */
   model?: string;
-  /** Base URL for Ollama (default: http://localhost:11434) or OpenAI-compatible endpoint. */
+  /** Base URL for Ollama (default: http://localhost:11434), OpenAI-compatible endpoint, or Azure OpenAI full endpoint. */
   baseUrl?: string;
-  /** API key for openai / anthropic — or $ENV_VAR reference. */
+  /** API key for openai / anthropic / huggingface / azureai — or $ENV_VAR reference. */
   apiKey?: string;
+  /** AWS region for bedrock (default: AWS_REGION env or us-east-1). */
+  region?: string;
   /** Fall back to heuristic if the LLM call fails. Default: true. */
   heuristicFallback?: boolean;
   /**
@@ -875,6 +887,154 @@ async function anthropicSummary(
   return parseAiResponse(data.content?.[0]?.text ?? '', fallbackTitle);
 }
 
+async function huggingfaceSummary(
+  code: string,
+  fallbackTitle: string,
+  model: string,
+  apiKey: string,
+  contextContent?: string
+): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
+  // Hugging Face OpenAI-compatible /v1 endpoint
+  return openaiSummary(
+    code, fallbackTitle, model, apiKey,
+    'https://api-inference.huggingface.co/v1',
+    contextContent
+  );
+}
+
+// ─── Bedrock helpers (retry + credential pre-flight) ─────────────────────────
+
+/**
+ * Warn once if no AWS credentials appear to be configured.
+ * Checks env vars and ~/.aws/credentials existence — does not validate them.
+ */
+export function warnIfNoBedrockCredentials(): void {
+  const hasEnv = !!(process.env['AWS_ACCESS_KEY_ID'] && process.env['AWS_SECRET_ACCESS_KEY']);
+  const hasProfile = !!(process.env['AWS_PROFILE'] || process.env['AWS_DEFAULT_PROFILE']);
+  if (hasEnv || hasProfile) return;
+
+  // Check for credentials file
+  try {
+    const credFile = require('path').join(require('os').homedir(), '.aws', 'credentials');
+    require('fs').accessSync(credFile);
+    return; // file exists
+  } catch {
+    // not found
+  }
+
+  process.stderr.write(
+    '  [ai] Warning: No AWS credentials detected for bedrock provider.\n' +
+    '  Set AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY, configure AWS_PROFILE,\n' +
+    '  or ensure ~/.aws/credentials exists. The call will fail without credentials.\n'
+  );
+}
+
+/**
+ * Invoke a Bedrock command with retry on ThrottlingException / ServiceUnavailableException.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function bedrockInvokeWithRetry(client: any, command: any, label = 'bedrock', maxRetries = 3, baseDelayMs = 5_000): Promise<any> {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await client.send(command);
+    } catch (err: unknown) {
+      const name = (err as any)?.name ?? '';
+      const isThrottle = name === 'ThrottlingException' || name === 'ServiceUnavailableException' || (err as any)?.$retryable;
+      if (isThrottle && attempt < maxRetries) {
+        const delay = baseDelayMs * Math.pow(2, attempt);
+        process.stderr.write(
+          `  [${label}] bedrock throttled — retrying in ${Math.round(delay / 1000)}s (${attempt + 1}/${maxRetries})\n`
+        );
+        await new Promise((r) => setTimeout(r, delay));
+        attempt++;
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+async function bedrockSummary(
+  code: string,
+  fallbackTitle: string,
+  model: string,
+  region: string,
+  contextContent?: string
+): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
+  warnIfNoBedrockCredentials();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let bedrockModule: any;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval, @typescript-eslint/no-explicit-any
+    const esmImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
+    bedrockModule = await esmImport('@aws-sdk/client-bedrock-runtime');
+  } catch {
+    throw new Error(
+      'AWS Bedrock requires @aws-sdk/client-bedrock-runtime. Install with: npm install @aws-sdk/client-bedrock-runtime'
+    );
+  }
+
+  const { BedrockRuntimeClient, InvokeModelCommand } = bedrockModule;
+  const bedrockClient = new BedrockRuntimeClient({ region });
+  const prompt = buildPrompt(code, contextContent);
+  const isClaudeModel = /anthropic\.claude/.test(model);
+
+  const bodyObj = isClaudeModel
+    ? { anthropic_version: 'bedrock-2023-05-31', max_tokens: 2048, messages: [{ role: 'user', content: prompt }] }
+    : { messages: [{ role: 'user', content: [{ text: prompt }] }], inferenceConfig: { max_new_tokens: 2048 } };
+
+  const response = await bedrockInvokeWithRetry(bedrockClient, new InvokeModelCommand({
+    modelId: model,
+    body: new TextEncoder().encode(JSON.stringify(bodyObj)),
+    contentType: 'application/json',
+    accept: 'application/json',
+  }), 'ai-summary');
+
+  const text = new TextDecoder().decode(response.body);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const data = JSON.parse(text) as any;
+  const raw: string =
+    data.content?.[0]?.text ??
+    data.output?.message?.content?.[0]?.text ??
+    data.generation ?? '';
+  return parseAiResponse(raw, fallbackTitle);
+}
+
+async function azureaiSummary(
+  code: string,
+  fallbackTitle: string,
+  model: string,
+  apiKey: string,
+  baseUrl: string,
+  contextContent?: string
+): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
+  // Azure OpenAI uses api-key header; baseUrl is the full endpoint or resource root
+  let url = baseUrl.replace(/\/$/, '');
+  if (!url.includes('/chat/completions')) {
+    url = `${url}/openai/deployments/${model}/chat/completions?api-version=2024-12-01-preview`;
+  }
+  const res = await fetchWithRetry(
+    url,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'api-key': apiKey },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: buildPrompt(code, contextContent) }],
+        temperature: 0,
+        max_tokens: 2048,
+      }),
+      signal: AbortSignal.timeout(60_000),
+    },
+    'azureai'
+  );
+  if (!res.ok) throw new Error(`Azure AI ${res.status}: ${await res.text()}`);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const data = await res.json() as any;
+  return parseAiResponse(data.choices?.[0]?.message?.content ?? '', fallbackTitle);
+}
+
 function resolveEnvVar(value: string): string {
   if (value.startsWith('$')) return process.env[value.slice(1)] ?? value;
   return value;
@@ -982,6 +1142,63 @@ export async function analyzeFailure(
         raw = ((await res.json()) as any).content?.[0]?.text ?? '';
         break;
       }
+      case 'huggingface': {
+        const res = await fetchWithRetry(
+          'https://api-inference.huggingface.co/v1/chat/completions',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${resolveEnvVar(opts.apiKey ?? '')}` },
+            body: JSON.stringify({ model: opts.model, messages: [{ role: 'user', content: prompt }], max_tokens: 256 }),
+            signal: AbortSignal.timeout(30_000),
+          },
+          'huggingface'
+        );
+        if (!res.ok) throw new Error(`huggingface ${res.status}`);
+        raw = ((await res.json()) as any).choices?.[0]?.message?.content ?? '';
+        break;
+      }
+      case 'bedrock': {
+        warnIfNoBedrockCredentials();
+        // eslint-disable-next-line @typescript-eslint/no-implied-eval, @typescript-eslint/no-explicit-any
+        const esmImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
+        const { BedrockRuntimeClient, InvokeModelCommand } = await esmImport('@aws-sdk/client-bedrock-runtime')
+          .catch(() => { throw new Error('bedrock requires @aws-sdk/client-bedrock-runtime'); });
+        const bedrockClient = new BedrockRuntimeClient({ region: opts.region ?? process.env['AWS_REGION'] ?? 'us-east-1' });
+        const modelId = opts.model ?? 'anthropic.claude-3-haiku-20240307-v1:0';
+        const isClaudeModel = /anthropic\.claude/.test(modelId);
+        const bodyObj = isClaudeModel
+          ? { anthropic_version: 'bedrock-2023-05-31', max_tokens: 512, messages: [{ role: 'user', content: prompt }] }
+          : { messages: [{ role: 'user', content: [{ text: prompt }] }], inferenceConfig: { max_new_tokens: 512 } };
+        const response = await bedrockInvokeWithRetry(bedrockClient, new InvokeModelCommand({
+          modelId,
+          body: new TextEncoder().encode(JSON.stringify(bodyObj)),
+          contentType: 'application/json',
+          accept: 'application/json',
+        }), 'ai-failure');
+        const data = JSON.parse(new TextDecoder().decode(response.body)) as any;
+        raw = data.content?.[0]?.text ?? data.output?.message?.content?.[0]?.text ?? data.generation ?? '';
+        break;
+      }
+      case 'azureai': {
+        if (!opts.baseUrl) break;
+        let url = opts.baseUrl.replace(/\/$/, '');
+        if (!url.includes('/chat/completions')) {
+          url = `${url}/openai/deployments/${opts.model ?? 'gpt-4o'}/chat/completions?api-version=2024-12-01-preview`;
+        }
+        const res = await fetchWithRetry(
+          url,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'api-key': resolveEnvVar(opts.apiKey ?? '') },
+            body: JSON.stringify({ messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: 256 }),
+            signal: AbortSignal.timeout(30_000),
+          },
+          'azureai'
+        );
+        if (!res.ok) throw new Error(`azureai ${res.status}`);
+        raw = ((await res.json()) as any).choices?.[0]?.message?.content ?? '';
+        break;
+      }
       default:
         return null;
     }
@@ -1053,9 +1270,33 @@ export async function summarizeTest(
       case 'anthropic':
         return await anthropicSummary(
           body, fallbackTitle,
-          opts.model ?? 'claude-haiku-4-5-20251001', // upgrade to claude-sonnet-4-6 for better quality
+          opts.model ?? 'claude-haiku-4-5-20251001',
           resolveEnvVar(opts.apiKey ?? ''),
           opts.baseUrl ?? 'https://api.anthropic.com/v1',
+          ctx
+        );
+      case 'huggingface':
+        if (!opts.model) throw new Error('huggingface provider requires --ai-model <model-id>');
+        return await huggingfaceSummary(
+          body, fallbackTitle,
+          opts.model,
+          resolveEnvVar(opts.apiKey ?? ''),
+          ctx
+        );
+      case 'bedrock':
+        return await bedrockSummary(
+          body, fallbackTitle,
+          opts.model ?? 'anthropic.claude-3-haiku-20240307-v1:0',
+          opts.region ?? process.env['AWS_REGION'] ?? 'us-east-1',
+          ctx
+        );
+      case 'azureai':
+        if (!opts.baseUrl) throw new Error('azureai provider requires --ai-url <azure-endpoint>');
+        return await azureaiSummary(
+          body, fallbackTitle,
+          opts.model ?? 'gpt-4o',
+          resolveEnvVar(opts.apiKey ?? ''),
+          opts.baseUrl,
           ctx
         );
     }
@@ -1067,6 +1308,4 @@ export async function summarizeTest(
     }
     throw err;
   }
-
-  return heuristicSummary(body, fallbackTitle);
 }
