@@ -159,6 +159,14 @@ Pull Azure DevOps Test Case changes into local spec files.
 ado-sync pull
 ado-sync pull --dry-run
 ado-sync pull --tags "@smoke"
+
+# AI step generation — same providers as push, used when pull creates new local stubs
+ado-sync pull --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
+ado-sync pull --ai-provider openai    --ai-key $OPENAI_API_KEY --ai-model gpt-4o
+ado-sync pull --ai-provider ollama    --ai-model qwen2.5-coder:7b
+ado-sync pull --ai-provider huggingface --ai-model mistralai/Mistral-7B-Instruct-v0.3 --ai-key $HF_TOKEN
+ado-sync pull --ai-provider bedrock   --ai-model anthropic.claude-3-haiku-20240307-v1:0 --ai-region us-east-1
+ado-sync pull --ai-provider azureai   --ai-url https://myresource.openai.azure.com --ai-model gpt-4o --ai-key $AZURE_OPENAI_KEY
 ```
 
 ---
@@ -171,6 +179,13 @@ Show what would change on the next push without making any modifications.
 ado-sync status
 ado-sync status --tags "@smoke"
 ado-sync status --output json    # machine-readable
+
+# AI step generation — used when computing diff for code-based test types
+ado-sync status --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
+ado-sync status --ai-provider openai    --ai-key $OPENAI_API_KEY
+ado-sync status --ai-provider ollama    --ai-model qwen2.5-coder:7b
+ado-sync status --ai-provider bedrock   --ai-model anthropic.claude-3-haiku-20240307-v1:0 --ai-region us-east-1
+ado-sync status --ai-provider azureai   --ai-url https://myresource.openai.azure.com --ai-model gpt-4o --ai-key $AZURE_OPENAI_KEY
 ```
 
 ---
@@ -283,6 +298,31 @@ ado-sync publish-test-results \
   --analyze-failures \
   --ai-provider ollama \
   --ai-model qwen2.5-coder:7b
+
+# Hugging Face Inference API
+ado-sync publish-test-results \
+  --testResult results/playwright.json \
+  --analyze-failures \
+  --ai-provider huggingface \
+  --ai-model mistralai/Mistral-7B-Instruct-v0.3 \
+  --ai-key $HF_TOKEN
+
+# AWS Bedrock (uses default AWS credential chain)
+ado-sync publish-test-results \
+  --testResult results/playwright.json \
+  --analyze-failures \
+  --ai-provider bedrock \
+  --ai-model anthropic.claude-3-haiku-20240307-v1:0 \
+  --ai-region us-east-1
+
+# Azure OpenAI Service
+ado-sync publish-test-results \
+  --testResult results/playwright.json \
+  --analyze-failures \
+  --ai-provider azureai \
+  --ai-url https://myresource.openai.azure.com \
+  --ai-model gpt-4o \
+  --ai-key $AZURE_OPENAI_KEY
 ```
 
 See [publish-test-results.md](publish-test-results.md) for full reference including config-based setup.
