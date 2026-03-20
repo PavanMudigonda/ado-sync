@@ -33,7 +33,7 @@ jobs:
         run: npm ci
 
       - name: Type check
-        run: npx tsc --noEmit
+        run: node --max-old-space-size=8192 node_modules/typescript/bin/tsc --noEmit
 
       - name: Build
         run: npm run build
