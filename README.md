@@ -85,4 +85,43 @@ Minimum config:
 | VS Code Extension | [docs/vscode-extension.md](docs/vscode-extension.md) |
 | Troubleshooting | [docs/troubleshooting.md](docs/troubleshooting.md) |
 
+---
+
+## AI providers
+
+ado-sync supports multiple AI providers for test-step summarisation (`push`/`pull`/`status`), spec generation (`generate`), and failure analysis (`publish-test-results`). All provider SDKs are **optional** — install only what you need.
+
+| Provider | Commands | SDK (install separately) | Auth |
+|---|---|---|---|
+| `heuristic` | push / pull / status | none — built-in | none |
+| `local` | push / pull / status | `node-llama-cpp` *(included)* | GGUF model file path |
+| `ollama` | all AI commands | `npm i ollama` | local Ollama server |
+| `openai` | all AI commands | `npm i openai` | `$OPENAI_API_KEY` |
+| `anthropic` | all AI commands | `npm i @anthropic-ai/sdk` | `$ANTHROPIC_API_KEY` |
+| `huggingface` | all AI commands | `npm i openai` | `$HF_TOKEN` |
+| `bedrock` | all AI commands | `npm i @aws-sdk/client-bedrock-runtime` | AWS credential chain |
+| `azureai` | all AI commands | `npm i openai` | `$AZURE_OPENAI_KEY` + `--ai-url` |
+| `github` | all AI commands | `npm i openai` | `$GITHUB_TOKEN` (auto-detected) |
+| `azureinference` | all AI commands | `npm i @azure-rest/ai-inference @azure/core-auth` | `$AZURE_AI_KEY` + `--ai-url` |
+
+```bash
+# GitHub Models — free tier available, no billing setup needed
+ado-sync push --ai-provider github --ai-model gpt-4o
+
+# Anthropic
+ado-sync push --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
+
+# AWS Bedrock
+ado-sync push --ai-provider bedrock --ai-model anthropic.claude-3-haiku-20240307-v1:0 --ai-region us-east-1
+
+# Azure AI Inference (AI Foundry)
+ado-sync generate --story-ids 1234 --ai-provider azureinference \
+  --ai-url https://myendpoint.inference.azure.com --ai-model gpt-4o --ai-key $AZURE_AI_KEY
+```
+
+Set once in `ado-sync.json` to apply to all commands:
+```json
+{ "sync": { "ai": { "provider": "github", "model": "gpt-4o" } } }
+```
+
 > **LLM / AI crawlers:** [`llms.txt`](llms.txt) contains a single-file summary of the entire project — config schema, CLI flags, ID writeback formats, and the full doc index.

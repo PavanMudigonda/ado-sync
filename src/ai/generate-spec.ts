@@ -26,22 +26,26 @@ export type AiGenerateProvider =
   | 'anthropic'
   | 'huggingface'
   | 'bedrock'
-  | 'azureai';
+  | 'azureai'
+  | 'github'
+  | 'azureinference';
 
 export interface AiGenerateOpts {
   provider: AiGenerateProvider;
   /**
    * Model identifier:
-   *   local:       path to .gguf file
-   *   ollama:      model tag (e.g. qwen2.5-coder:7b)
-   *   openai:      model name (e.g. gpt-4o)
-   *   anthropic:   model name (e.g. claude-sonnet-4-6)
-   *   huggingface: model id (e.g. mistralai/Mistral-7B-Instruct-v0.3)
-   *   bedrock:     model id (e.g. anthropic.claude-3-haiku-20240307-v1:0)
-   *   azureai:     deployment name (e.g. gpt-4o)
+   *   local:           path to .gguf file
+   *   ollama:          model tag (e.g. qwen2.5-coder:7b)
+   *   openai:          model name (e.g. gpt-4o)
+   *   anthropic:       model name (e.g. claude-sonnet-4-6)
+   *   huggingface:     model id (e.g. mistralai/Mistral-7B-Instruct-v0.3)
+   *   bedrock:         model id (e.g. anthropic.claude-3-haiku-20240307-v1:0)
+   *   azureai:         deployment name (e.g. gpt-4o)
+   *   github:          GitHub Models model name (e.g. gpt-4o, Meta-Llama-3.1-70B-Instruct)
+   *   azureinference:  model name deployed on Azure AI Inference endpoint
    */
   model?: string;
-  /** Base URL override (ollama, openai-compatible, azureai full endpoint). */
+  /** Base URL override (ollama, openai-compatible, azureai/azureinference full endpoint). */
   baseUrl?: string;
   /** API key — or $ENV_VAR reference. */
   apiKey?: string;
@@ -139,35 +143,10 @@ function buildPrompt(story: AdoStory, format: GenerateSpecFormat): string {
     .replace('{AC}', story.acceptanceCriteria?.trim() || '(not provided)');
 }
 
-// ─── Shared fetch helper ──────────────────────────────────────────────────────
+// ─── Shared helpers ───────────────────────────────────────────────────────────
 
-async function fetchWithRetry(
-  url: string,
-  init: RequestInit,
-  provider: string,
-  maxRetries = 3,
-  baseDelayMs = 5_000
-): Promise<Response> {
-  let attempt = 0;
-  while (true) {
-    const res = await fetch(url, init);
-    if (res.status === 503 || res.status === 429) {
-      if (attempt >= maxRetries) return res;
-      const retryAfter = res.headers.get('retry-after');
-      const delayMs = retryAfter
-        ? parseInt(retryAfter, 10) * 1_000
-        : baseDelayMs * Math.pow(2, attempt);
-      const reason = res.status === 503 ? 'model loading' : 'rate limited';
-      process.stderr.write(
-        `  [ai-generate] ${provider} ${reason} — retrying in ${Math.round(delayMs / 1000)}s (${attempt + 1}/${maxRetries})\n`
-      );
-      await new Promise((r) => setTimeout(r, delayMs));
-      attempt++;
-      continue;
-    }
-    return res;
-  }
-}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const esmImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
 
 function resolveEnvVar(value: string): string {
   if (value.startsWith('$')) return process.env[value.slice(1)] ?? value;
@@ -212,82 +191,71 @@ async function localProvider(prompt: string, modelPath: string): Promise<string>
 }
 
 async function ollamaProvider(prompt: string, model: string, baseUrl: string): Promise<string> {
-  const res = await fetchWithRetry(
-    `${baseUrl}/api/generate`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, prompt, stream: false }),
-      signal: AbortSignal.timeout(120_000),
-    },
-    'ollama'
-  );
-  if (!res.ok) throw new Error(`Ollama ${res.status}: ${await res.text()}`);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return ((await res.json()) as any).response ?? '';
+  let Ollama: any;
+  try {
+    ({ Ollama } = await esmImport('ollama'));
+  } catch {
+    throw new Error("'ollama' provider requires the ollama package. Install it with: npm install ollama");
+  }
+  const client = new Ollama({ host: baseUrl });
+  const response = await client.chat({
+    model,
+    messages: [{ role: 'user', content: prompt }],
+  });
+  return response.message?.content ?? '';
 }
 
 async function openaiProvider(
   prompt: string,
   model: string,
   apiKey: string,
-  baseUrl: string,
-  extraHeaders?: Record<string, string>
+  baseUrl?: string
 ): Promise<string> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...extraHeaders,
-  };
-  if (!extraHeaders?.['api-key']) {
-    headers['Authorization'] = `Bearer ${apiKey}`;
-  }
-  const res = await fetchWithRetry(
-    `${baseUrl.replace(/\/$/, '')}/chat/completions`,
-    {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        model,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.3,
-        max_tokens: 4096,
-      }),
-      signal: AbortSignal.timeout(120_000),
-    },
-    'openai-compatible'
-  );
-  if (!res.ok) throw new Error(`openai-compatible ${res.status}: ${await res.text()}`);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return ((await res.json()) as any).choices?.[0]?.message?.content ?? '';
+  let OpenAI: any;
+  try {
+    ({ OpenAI } = await esmImport('openai'));
+  } catch {
+    throw new Error("'openai' provider requires the openai package. Install it with: npm install openai");
+  }
+  const client = new OpenAI({
+    apiKey,
+    ...(baseUrl ? { baseURL: baseUrl.replace(/\/$/, '') } : {}),
+  });
+  const msg = await client.chat.completions.create({
+    model,
+    messages: [{ role: 'user', content: prompt }],
+    temperature: 0.3,
+    max_tokens: 4096,
+  });
+  return msg.choices[0]?.message?.content ?? '';
 }
 
 async function anthropicProvider(
   prompt: string,
   model: string,
   apiKey: string,
-  baseUrl: string
+  baseUrl?: string
 ): Promise<string> {
-  const res = await fetchWithRetry(
-    `${baseUrl.replace(/\/$/, '')}/messages`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 4096,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-      signal: AbortSignal.timeout(120_000),
-    },
-    'anthropic'
-  );
-  if (!res.ok) throw new Error(`anthropic ${res.status}: ${await res.text()}`);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return ((await res.json()) as any).content?.[0]?.text ?? '';
+  let Anthropic: any;
+  try {
+    ({ default: Anthropic } = await esmImport('@anthropic-ai/sdk'));
+  } catch {
+    throw new Error("'anthropic' provider requires @anthropic-ai/sdk. Install it with: npm install @anthropic-ai/sdk");
+  }
+  const client = new Anthropic({
+    apiKey,
+    ...(baseUrl ? { baseURL: baseUrl.replace(/\/$/, '') } : {}),
+  });
+  const msg = await client.messages.create({
+    model,
+    max_tokens: 4096,
+    messages: [{ role: 'user', content: prompt }],
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (msg.content[0] as any)?.text ?? '';
 }
 
 async function huggingfaceProvider(
@@ -295,9 +263,50 @@ async function huggingfaceProvider(
   model: string,
   apiKey: string
 ): Promise<string> {
-  // Use the OpenAI-compatible endpoint
-  const baseUrl = 'https://api-inference.huggingface.co/v1';
-  return openaiProvider(prompt, model, apiKey, baseUrl);
+  // Hugging Face exposes an OpenAI-compatible /v1 endpoint — use the openai SDK with a custom baseURL
+  return openaiProvider(prompt, model, apiKey, 'https://api-inference.huggingface.co/v1');
+}
+
+async function githubProvider(
+  prompt: string,
+  model: string,
+  apiKey: string
+): Promise<string> {
+  // GitHub Models is OpenAI-compatible — use the openai SDK with the GitHub Models endpoint
+  return openaiProvider(prompt, model, apiKey, 'https://models.inference.ai.azure.com');
+}
+
+async function azureinferenceProvider(
+  prompt: string,
+  model: string,
+  apiKey: string,
+  endpoint: string
+): Promise<string> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let ModelClient: any, AzureKeyCredential: any;
+  try {
+    ({ default: ModelClient } = await esmImport('@azure-rest/ai-inference'));
+    ({ AzureKeyCredential } = await esmImport('@azure/core-auth'));
+  } catch {
+    throw new Error(
+      "'azureinference' provider requires @azure-rest/ai-inference and @azure/core-auth. " +
+      'Install with: npm install @azure-rest/ai-inference @azure/core-auth'
+    );
+  }
+  const client = ModelClient(endpoint.replace(/\/$/, ''), new AzureKeyCredential(apiKey));
+  const response = await client.path('/chat/completions').post({
+    body: {
+      model,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.3,
+      max_tokens: 4096,
+    },
+  });
+  if (response.status !== '200') {
+    throw new Error(`Azure AI Inference ${response.status}: ${JSON.stringify(response.body)}`);
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (response.body as any).choices?.[0]?.message?.content ?? '';
 }
 
 // ─── Bedrock credential pre-flight ───────────────────────────────────────────
@@ -421,35 +430,26 @@ async function azureaiProvider(
   apiKey: string,
   baseUrl: string
 ): Promise<string> {
-  // Azure OpenAI uses api-key header instead of Authorization: Bearer
-  // baseUrl should be the full endpoint:
-  // https://{resource}.openai.azure.com/openai/deployments/{deployment}/chat/completions?api-version=2024-12-01-preview
-  // OR just https://{resource}.openai.azure.com — we'll append the path if needed
-  let url = baseUrl.replace(/\/$/, '');
-  if (!url.includes('/chat/completions')) {
-    url = `${url}/openai/deployments/${model}/chat/completions?api-version=2024-12-01-preview`;
-  }
-
-  const res = await fetchWithRetry(
-    url,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'api-key': apiKey,
-      },
-      body: JSON.stringify({
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.3,
-        max_tokens: 4096,
-      }),
-      signal: AbortSignal.timeout(120_000),
-    },
-    'azureai'
-  );
-  if (!res.ok) throw new Error(`Azure AI ${res.status}: ${await res.text()}`);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return ((await res.json()) as any).choices?.[0]?.message?.content ?? '';
+  let AzureOpenAI: any;
+  try {
+    ({ AzureOpenAI } = await esmImport('openai'));
+  } catch {
+    throw new Error("'azureai' provider requires the openai package. Install it with: npm install openai");
+  }
+  const client = new AzureOpenAI({
+    apiKey,
+    endpoint: baseUrl.replace(/\/$/, ''),
+    apiVersion: '2024-12-01-preview',
+    deployment: model,
+  });
+  const msg = await client.chat.completions.create({
+    model,
+    messages: [{ role: 'user', content: prompt }],
+    temperature: 0.3,
+    max_tokens: 4096,
+  });
+  return msg.choices[0]?.message?.content ?? '';
 }
 
 // ─── Main entry point ─────────────────────────────────────────────────────────
@@ -514,6 +514,22 @@ export async function generateSpecFromStory(
       case 'azureai': {
         if (!opts.baseUrl) throw new Error('azureai provider requires --ai-url <azure-endpoint>');
         return azureaiProvider(
+          prompt,
+          opts.model ?? 'gpt-4o',
+          resolveEnvVar(opts.apiKey ?? ''),
+          opts.baseUrl
+        );
+      }
+      case 'github': {
+        return githubProvider(
+          prompt,
+          opts.model ?? 'gpt-4o',
+          resolveEnvVar(opts.apiKey ?? process.env['GITHUB_TOKEN'] ?? '')
+        );
+      }
+      case 'azureinference': {
+        if (!opts.baseUrl) throw new Error('azureinference provider requires --ai-url <endpoint>');
+        return azureinferenceProvider(
           prompt,
           opts.model ?? 'gpt-4o',
           resolveEnvVar(opts.apiKey ?? ''),

@@ -435,7 +435,7 @@ export interface SyncConfig {
        * 'anthropic': Anthropic API.
        * 'none': disable AI summary entirely.
        */
-      provider?: 'heuristic' | 'local' | 'ollama' | 'openai' | 'anthropic' | 'huggingface' | 'bedrock' | 'azureai' | 'none';
+      provider?: 'heuristic' | 'local' | 'ollama' | 'openai' | 'anthropic' | 'huggingface' | 'bedrock' | 'azureai' | 'github' | 'azureinference' | 'none';
       /**
        * For 'local':       absolute path to a GGUF model file.
        * For 'ollama':      model tag, e.g. 'qwen2.5-coder:7b'.

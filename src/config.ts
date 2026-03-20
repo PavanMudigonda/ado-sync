@@ -205,7 +205,7 @@ function validateConfig(cfg: SyncConfig, filePath: string): void {
   }
 
   // sync.ai.provider valid values
-  const validAiProviders = ['heuristic', 'local', 'ollama', 'openai', 'anthropic', 'huggingface', 'bedrock', 'azureai', 'none'];
+  const validAiProviders = ['heuristic', 'local', 'ollama', 'openai', 'anthropic', 'huggingface', 'bedrock', 'azureai', 'github', 'azureinference', 'none'];
   if (cfg.sync?.ai?.provider && !validAiProviders.includes(cfg.sync.ai.provider)) {
     err(`sync.ai.provider must be one of: ${validAiProviders.join(', ')} (got "${cfg.sync.ai.provider}")`);
   }
