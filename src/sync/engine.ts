@@ -961,8 +961,9 @@ function stripHtml(html: string): string {
     .replace(/<\/p>/gi, '\n')
     .replace(/<[^>]+>/g, '')
     .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
+    // Do not decode &lt; or &gt; to avoid reintroducing HTML tag delimiters such as <script>.
+    // .replace(/&lt;/g, '<')
+    // .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&nbsp;/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
