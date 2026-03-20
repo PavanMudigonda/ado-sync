@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-nocheck — MCP SDK uses deeply recursive types that exceed TS2589 instantiation depth limit
 
 /**
  * ado-sync MCP Server
