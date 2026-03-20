@@ -154,7 +154,7 @@ Expected response includes config validity, Azure connection status, and test pl
 | `pull_specs` | Pull Azure DevOps changes into local files |
 | `status` | Show diff between local and Azure without making changes |
 | `diff` | Show field-level diff (richer than status) |
-| `generate_specs` | Generate local spec files from ADO User Stories |
+| `generate_specs` | Generate local spec files from ADO User Stories (AI-powered or template) |
 | `get_work_items` | Fetch ADO User Stories / work items |
 | `publish_test_results` | Publish TRX / JUnit / Playwright JSON / CTRF results; optionally file issues for failures |
 | `create_issue` | File a single GitHub Issue or ADO Bug for a test failure (for healer agents) |
@@ -191,9 +191,14 @@ All tools accept these optional base parameters:
   "format": "gherkin",
   "outputFolder": "specs/generated",
   "dryRun": false,
-  "force": false
+  "force": false,
+  "aiProvider": "anthropic",
+  "aiModel": "claude-sonnet-4-6",
+  "aiKey": "$ANTHROPIC_API_KEY"
 }
 ```
+
+AI provider options: `local`, `ollama`, `openai`, `anthropic`, `huggingface`, `bedrock`, `azureai`. Falls back to `sync.ai` config when not supplied. When `dryRun: true` and an AI provider is set, the first 20 lines of generated content are included in the tool response as a preview.
 
 ### `publish_test_results`
 
