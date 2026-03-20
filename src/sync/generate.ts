@@ -9,13 +9,16 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+import { AiGenerateOpts, generateSpecFromStory } from '../ai/generate-spec';
 import { AzureClient } from '../azure/client';
-import { AdoStory, getWorkItemsByAreaPath, getWorkItemsByIds, getWorkItemsByQuery } from '../azure/work-items';
+import { AdoStory, fetchLinkedTestCaseIds, getWorkItemsByAreaPath, getWorkItemsByIds, getWorkItemsByQuery } from '../azure/work-items';
 import { SyncConfig } from '../types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type GenerateFormat = 'gherkin' | 'markdown';
+
+export { AiGenerateOpts };
 
 export interface GenerateOpts {
   storyIds?: number[];
@@ -25,6 +28,14 @@ export interface GenerateOpts {
   outputFolder?: string;
   force?: boolean;
   dryRun?: boolean;
+  /** When provided, AI generates the spec content instead of the template. */
+  aiOpts?: AiGenerateOpts;
+  /**
+   * When true (default), inject @tc:<id> tags into generated files for stories
+   * that already have linked Test Cases in Azure DevOps. Prevents the file from
+   * appearing as a new untracked test on the next `status` run.
+   */
+  writebackTcTag?: boolean;
   onProgress?: (done: number, total: number, story: AdoStory) => void;
 }
 
@@ -33,6 +44,8 @@ export interface GenerateResult {
   filePath: string;
   storyId: number;
   title: string;
+  /** First 20 lines of generated content — populated on dry-run when AI is active. */
+  preview?: string;
 }
 
 // ─── Filename helpers ─────────────────────────────────────────────────────────
@@ -50,6 +63,50 @@ function specFilename(story: AdoStory, format: GenerateFormat): string {
   const slug = toKebabCase(story.title) || `story-${story.id}`;
   const ext = format === 'gherkin' ? '.feature' : '.md';
   return `${story.id}-${slug}${ext}`;
+}
+
+// ─── @tc: tag injection ───────────────────────────────────────────────────────
+
+/**
+ * Inject @tc:<id> tags into spec content for each scenario found.
+ * Replaces AI placeholder @tc:0000 tags first, then inserts for remaining scenarios.
+ * For Gherkin: inserts "  @tc:XXXX" before each "  Scenario" / "  Scenario Outline" line.
+ * For Markdown: appends " @tc:XXXX" to each "## Scenario:" or "### Test:" heading.
+ */
+function injectTcTags(
+  content: string,
+  format: GenerateFormat,
+  tcIds: number[]
+): string {
+  if (!tcIds.length) return content;
+
+  if (format === 'gherkin') {
+    // First, strip AI placeholder @tc:0000 lines
+    let result = content.replace(/^[ \t]*@tc:0+\s*\n/gm, '');
+
+    let tcIndex = 0;
+    // Insert @tc: tag before each Scenario / Scenario Outline line
+    result = result.replace(/^([ \t]*)(Scenario(?: Outline)?:)/gm, (_match, indent, keyword) => {
+      if (tcIndex < tcIds.length) {
+        return `${indent}@tc:${tcIds[tcIndex++]}\n${indent}${keyword}`;
+      }
+      return `${indent}${keyword}`;
+    });
+    return result;
+  } else {
+    // Markdown: append @tc: to scenario/test headings
+    // Strip AI placeholder @tc:0000 from headings first
+    let result = content.replace(/(\s*@tc:0+)(\s*)$/gm, '$2');
+
+    let tcIndex = 0;
+    result = result.replace(/^(#{2,3}\s+(?:Scenario|Test):.*?)(\s*)$/gm, (_match, heading, tail) => {
+      if (tcIndex < tcIds.length) {
+        return `${heading} @tc:${tcIds[tcIndex++]}${tail}`;
+      }
+      return `${heading}${tail}`;
+    });
+    return result;
+  }
 }
 
 // ─── Template builders ────────────────────────────────────────────────────────
@@ -142,6 +199,19 @@ export async function generateSpecs(
   configDir: string,
   opts: GenerateOpts = {}
 ): Promise<GenerateResult[]> {
+  // Resolve AI opts: explicit opts take precedence, fall back to config.sync.ai
+  const cfgAi = config.sync?.ai;
+  let aiOpts = opts.aiOpts;
+  if (!aiOpts && cfgAi?.provider && cfgAi.provider !== 'none' && cfgAi.provider !== 'heuristic') {
+    aiOpts = {
+      provider: cfgAi.provider as AiGenerateOpts['provider'],
+      model:    cfgAi.model,
+      apiKey:   cfgAi.apiKey,
+      baseUrl:  cfgAi.baseUrl,
+      region:   cfgAi.region,
+    };
+  }
+
   const client = await AzureClient.create(config);
 
   // Resolve format: option → config local.type coerced → markdown
@@ -173,6 +243,17 @@ export async function generateSpecs(
     return [];
   }
 
+  // Fetch linked TC IDs for writeback (default: true)
+  const writebackTcTag = opts.writebackTcTag ?? true;
+  let linkedTcMap = new Map<number, number[]>();
+  if (writebackTcTag) {
+    try {
+      linkedTcMap = await fetchLinkedTestCaseIds(client, stories.map((s) => s.id));
+    } catch {
+      // Non-fatal — proceed without TC tag writeback
+    }
+  }
+
   if (!opts.dryRun) {
     fs.mkdirSync(outputFolder, { recursive: true });
   }
@@ -193,12 +274,32 @@ export async function generateSpecs(
       continue;
     }
 
-    if (!opts.dryRun) {
-      const content = buildContent(story, resolvedFormat);
+    // Generate content (AI or template)
+    let content = '';
+    if (aiOpts) {
+      content = await generateSpecFromStory(story, resolvedFormat, aiOpts);
+    }
+    if (!content) {
+      content = buildContent(story, resolvedFormat);
+    }
+
+    // Inject @tc: tags for already-linked test cases
+    const linkedTcIds = linkedTcMap.get(story.id) ?? [];
+    if (linkedTcIds.length) {
+      content = injectTcTags(content, resolvedFormat, linkedTcIds);
+    }
+
+    let preview: string | undefined;
+    if (opts.dryRun) {
+      // On dry-run with AI active, capture first 20 lines as preview
+      if (aiOpts) {
+        preview = content.split('\n').slice(0, 20).join('\n');
+      }
+    } else {
       fs.writeFileSync(filePath, content, 'utf8');
     }
 
-    results.push({ action: 'created', filePath, storyId: story.id, title: story.title });
+    results.push({ action: 'created', filePath, storyId: story.id, title: story.title, preview });
     done++;
     opts.onProgress?.(done, stories.length, story);
   }

@@ -96,6 +96,40 @@ export async function getWorkItemsByIds(
 }
 
 /**
+ * Fetch the IDs of Test Cases already linked (TestedBy relation) to the given story IDs.
+ * Returns a Map of storyId → TC ID array. Stories with no linked TCs are absent from the map.
+ * Uses WorkItemExpand.Relations (=1) to include relations in a single batched call.
+ */
+export async function fetchLinkedTestCaseIds(
+  client: AzureClient,
+  storyIds: number[]
+): Promise<Map<number, number[]>> {
+  if (!storyIds.length) return new Map();
+  const witApi = await client.getWitApi();
+  const result = new Map<number, number[]>();
+
+  const BATCH = 200;
+  for (let i = 0; i < storyIds.length; i += BATCH) {
+    const batch = storyIds.slice(i, i + BATCH);
+    // WorkItemExpand.Relations = 1
+    const items = await witApi.getWorkItems(batch, undefined, undefined, 1 as any);
+    for (const wi of items ?? []) {
+      if (!wi) continue;
+      const relations: any[] = wi.relations ?? [];
+      const tcIds = relations
+        .filter((r) => typeof r.rel === 'string' && r.rel.includes('TestedBy'))
+        .map((r) => {
+          const m = (r.url ?? '').match(/\/(\d+)$/);
+          return m ? parseInt(m[1], 10) : NaN;
+        })
+        .filter((id) => !isNaN(id));
+      if (tcIds.length && wi.id != null) result.set(wi.id, tcIds);
+    }
+  }
+  return result;
+}
+
+/**
  * Fetch work items using a WIQL query string.
  * The query should be a valid WIQL SELECT statement, e.g.:
  *   "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND [System.WorkItemType] = 'User Story'"
@@ -363,24 +397,33 @@ export async function findStoriesByTagAddedSince(
   tag: string,
   since: Date,
   orgUrl: string,
-  workItemType = 'User Story',
+  workItemType: string | string[] = 'User Story',
 ): Promise<TagAddedResult[]> {
   const witApi = await client.getWitApi();
 
+  // Normalise to array, trim whitespace
+  const types = (Array.isArray(workItemType) ? workItemType : workItemType.split(','))
+    .map((t) => t.trim())
+    .filter(Boolean);
+
   // Escape single quotes for WIQL
   const safeProject = project.replace(/'/g, "''");
-  const safeType    = workItemType.replace(/'/g, "''");
   const safeTag     = tag.replace(/'/g, "''");
   // WIQL only supports date precision (no time component) — truncate to YYYY-MM-DD.
   // We still filter by exact time when scanning revisions below.
   const sinceDate = since.toISOString().slice(0, 10);
+
+  // Build type filter: single type uses =, multiple uses IN (...)
+  const typeFilter = types.length === 1
+    ? `[System.WorkItemType] = '${types[0].replace(/'/g, "''")}'`
+    : `[System.WorkItemType] IN (${types.map((t) => `'${t.replace(/'/g, "''")}'`).join(', ')})`;
 
   // Pre-filter: only work items that have the tag AND were changed recently.
   // This avoids fetching revisions for every item in the project.
   const wiql =
     `SELECT [System.Id] FROM WorkItems ` +
     `WHERE [System.TeamProject] = '${safeProject}' ` +
-    `AND [System.WorkItemType] = '${safeType}' ` +
+    `AND ${typeFilter} ` +
     `AND [System.Tags] CONTAINS '${safeTag}' ` +
     `AND [System.ChangedDate] >= '${sinceDate}' ` +
     `ORDER BY [System.ChangedDate] DESC`;

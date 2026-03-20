@@ -41,7 +41,7 @@ Minimum config:
 | `pull` | Azure Test Cases → local files |
 | `status` | Show pending changes without modifying anything |
 | `diff` | Field-level drift between local and Azure |
-| `generate` | Scaffold spec files from ADO User Stories |
+| `generate` | Scaffold spec files from ADO User Stories (AI-powered or template) |
 | `publish-test-results` | Publish TRX / JUnit / Playwright / Cucumber results to a Test Run |
 | `story-context` | Show AC, suggested tags, and linked TCs for a User Story |
 | `coverage` | Spec link rate and story coverage report |

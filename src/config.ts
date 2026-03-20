@@ -204,6 +204,23 @@ function validateConfig(cfg: SyncConfig, filePath: string): void {
     });
   }
 
+  // sync.ai.provider valid values
+  const validAiProviders = ['heuristic', 'local', 'ollama', 'openai', 'anthropic', 'huggingface', 'bedrock', 'azureai', 'none'];
+  if (cfg.sync?.ai?.provider && !validAiProviders.includes(cfg.sync.ai.provider)) {
+    err(`sync.ai.provider must be one of: ${validAiProviders.join(', ')} (got "${cfg.sync.ai.provider}")`);
+  }
+  if (cfg.sync?.ai?.provider === 'azureai' && !cfg.sync.ai.baseUrl) {
+    process.stderr.write(
+      `  Warning (${filePath}): sync.ai.provider is "azureai" but sync.ai.baseUrl is not set. ` +
+      `Provide the Azure OpenAI endpoint URL.\n`
+    );
+  }
+  if (cfg.sync?.ai?.provider === 'local' && !cfg.sync.ai.model) {
+    process.stderr.write(
+      `  Warning (${filePath}): sync.ai.provider is "local" but sync.ai.model (GGUF path) is not set.\n`
+    );
+  }
+
   // conflictAction valid values
   const validConflict = ['overwrite', 'skip', 'fail'];
   if (cfg.sync?.conflictAction && !validConflict.includes(cfg.sync.conflictAction)) {

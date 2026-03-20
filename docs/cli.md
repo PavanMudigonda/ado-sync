@@ -81,6 +81,9 @@ ado-sync push --ai-provider local --ai-model ~/.cache/models/qwen2.5-coder-1.5b-
 ado-sync push --ai-provider ollama --ai-model qwen2.5-coder:7b
 ado-sync push --ai-provider openai  --ai-key $OPENAI_API_KEY
 ado-sync push --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
+ado-sync push --ai-provider huggingface --ai-model mistralai/Mistral-7B-Instruct-v0.3 --ai-key $HF_TOKEN
+ado-sync push --ai-provider bedrock --ai-model anthropic.claude-3-haiku-20240307-v1:0 --ai-region us-east-1
+ado-sync push --ai-provider azureai --ai-url https://myresource.openai.azure.com --ai-model gpt-4o --ai-key $AZURE_OPENAI_KEY
 ado-sync push --ai-provider none                # disable AI entirely
 ado-sync push --ai-context ./docs/ai-context.md # inject domain context
 ```
@@ -105,7 +108,10 @@ For code-based types (`java`, `csharp`, `python`, `javascript`, `playwright`, `c
 | `ollama` | Good–Excellent | `ollama pull qwen2.5-coder:7b` |
 | `openai` | Excellent | `--ai-key $OPENAI_API_KEY` |
 | `anthropic` | Excellent | `--ai-key $ANTHROPIC_API_KEY` |
-| `openai` + `--ai-url` | Excellent | Any OpenAI-compatible proxy (LiteLLM, Azure OpenAI, vLLM) |
+| `huggingface` | Good–Excellent | `--ai-model <model-id> --ai-key $HF_TOKEN` |
+| `bedrock` | Excellent | AWS credentials + optional `--ai-region` |
+| `azureai` | Excellent | `--ai-url <endpoint> --ai-key $AZURE_OPENAI_KEY` |
+| `openai` + `--ai-url` | Excellent | Any OpenAI-compatible proxy (LiteLLM, vLLM) |
 
 #### Local LLM — model download
 
@@ -206,7 +212,44 @@ ado-sync generate --story-ids 1234 --format markdown     # output .md files (def
 ado-sync generate --story-ids 1234 --output-folder specs/generated
 ado-sync generate --story-ids 1234 --force               # overwrite existing files
 ado-sync generate --story-ids 1234 --dry-run             # preview without writing
+
+# AI-powered generation — fills in real steps from the story description + AC
+ado-sync generate --story-ids 1234 --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
+ado-sync generate --story-ids 1234 --ai-provider openai --ai-key $OPENAI_API_KEY --ai-model gpt-4o
+ado-sync generate --story-ids 1234 --ai-provider ollama --ai-model qwen2.5-coder:7b
+ado-sync generate --story-ids 1234 --ai-provider huggingface --ai-model mistralai/Mistral-7B-Instruct-v0.3 --ai-key $HF_TOKEN
+ado-sync generate --story-ids 1234 --ai-provider bedrock --ai-model anthropic.claude-3-haiku-20240307-v1:0 --ai-region us-east-1
+ado-sync generate --story-ids 1234 --ai-provider azureai --ai-url https://myresource.openai.azure.com --ai-model gpt-4o --ai-key $AZURE_OPENAI_KEY
+ado-sync generate --story-ids 1234 --ai-provider local --ai-model ~/.cache/models/qwen2.5-coder-1.5b.gguf
 ```
+
+### AI generate flags
+
+| Flag | Description |
+|------|-------------|
+| `--ai-provider` | Provider: `local`, `ollama`, `openai`, `anthropic`, `huggingface`, `bedrock`, `azureai` |
+| `--ai-model` | Model name, path, or deployment ID |
+| `--ai-key` | API key (or `$ENV_VAR` reference) |
+| `--ai-url` | Base URL override (Ollama, Azure OpenAI full endpoint, OpenAI-compatible) |
+| `--ai-region` | AWS region for `bedrock` (default: `AWS_REGION` env or `us-east-1`) |
+
+Without `--ai-provider`, `generate` uses the template scaffold (no AI required). With it, the AI reads the story's title, description, and acceptance criteria and produces realistic Given/When/Then steps.
+
+For `bedrock`, AWS credentials are picked up from the standard chain (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` env vars, `~/.aws/credentials`, or IAM role). Install the SDK if needed: `npm install @aws-sdk/client-bedrock-runtime`.
+
+AI settings also fall back to `sync.ai` in `ado-sync.json`, so you can configure a provider once and all commands (`push`, `generate`, `publish-test-results`) will use it automatically.
+
+#### Dry-run with AI preview
+
+When `--dry-run` and `--ai-provider` are both set, the AI is called but no file is written. The first 20 lines of the generated content are printed to the terminal so you can review quality before committing:
+
+```bash
+ado-sync generate --story-ids 1234 --dry-run --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
+```
+
+#### Automatic `@tc:` tag writeback
+
+If the ADO story already has a linked Test Case (from a previous `push` run), `generate` automatically injects the `@tc:<id>` tag into the new file. This prevents the file from appearing as an untracked new test on the next `status` run.
 
 ---
 

@@ -435,17 +435,23 @@ export interface SyncConfig {
        * 'anthropic': Anthropic API.
        * 'none': disable AI summary entirely.
        */
-      provider?: 'heuristic' | 'local' | 'ollama' | 'openai' | 'anthropic' | 'none';
+      provider?: 'heuristic' | 'local' | 'ollama' | 'openai' | 'anthropic' | 'huggingface' | 'bedrock' | 'azureai' | 'none';
       /**
-       * For 'local': absolute path to a GGUF model file.
-       * For 'ollama': model tag, e.g. 'qwen2.5-coder:7b'.
-       * For 'openai'/'anthropic': model name, e.g. 'gpt-4o-mini' or 'claude-sonnet-4-6'.
+       * For 'local':       absolute path to a GGUF model file.
+       * For 'ollama':      model tag, e.g. 'qwen2.5-coder:7b'.
+       * For 'openai':      model name, e.g. 'gpt-4o-mini'.
+       * For 'anthropic':   model name, e.g. 'claude-sonnet-4-6'.
+       * For 'huggingface': model id, e.g. 'mistralai/Mistral-7B-Instruct-v0.3'.
+       * For 'bedrock':     model id, e.g. 'anthropic.claude-3-haiku-20240307-v1:0'.
+       * For 'azureai':     deployment name, e.g. 'gpt-4o'.
        */
       model?: string;
-      /** Base URL for 'ollama' or an OpenAI-compatible endpoint. e.g. 'http://localhost:4000' */
+      /** Base URL for 'ollama', an OpenAI-compatible endpoint, or Azure OpenAI resource root. */
       baseUrl?: string;
-      /** API key for 'openai' or 'anthropic'. Supports $ENV_VAR references. */
+      /** API key for 'openai' / 'anthropic' / 'huggingface' / 'azureai'. Supports $ENV_VAR references. */
       apiKey?: string;
+      /** AWS region for 'bedrock' provider. Defaults to AWS_REGION env or 'us-east-1'. */
+      region?: string;
       /**
        * Path to a markdown file containing additional domain context or instructions
        * for the AI (e.g. glossary, naming conventions, step style guidelines).
