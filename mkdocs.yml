@@ -1,5 +1,8 @@
 site_name: ADO Sync Documentation
 site_description: Documentation for syncing Azure DevOps test results.
+repo_name: PavanMudigonda/ado-sync
+repo_url: https://github.com/PavanMudigonda/ado-sync
+
 theme:
   name: material
   palette:
