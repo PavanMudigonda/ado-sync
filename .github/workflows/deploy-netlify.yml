@@ -22,7 +22,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
-          python-version: 'latest'
+          python-version: '3.x'
           cache: pip
           cache-dependency-path: requirements-docs.txt
 
