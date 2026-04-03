@@ -635,6 +635,28 @@ function formatTitle(title: string, test: ParsedTest, formatConfig: FormatConfig
   return prefix + title;
 }
 
+/**
+ * Build the Azure-facing title and steps for comparison/update logic.
+ * This mirrors the transformation used by createTestCase/updateTestCase so
+ * diff detection stays aligned with what is actually written to Azure.
+ */
+export function buildAzureSyncContent(
+  test: ParsedTest,
+  formatConfig: FormatConfig | undefined
+): { title: string; steps: AzureStep[] } {
+  const isParametrized = !!test.outlineParameters?.headers.length;
+  const steps = applyFormatToSteps(test.steps, formatConfig).map((s) => ({
+    action: isParametrized ? gherkinParamsToAzure(s.action) : s.action,
+    expected: s.expected,
+  }));
+  applyShowParameterListStep(steps, test.outlineParameters, formatConfig);
+
+  return {
+    title: formatTitle(test.title, test, formatConfig),
+    steps,
+  };
+}
+
 // ─── Attachment helpers ──────────────────────────────────────────────────────
 
 /**
@@ -977,17 +999,7 @@ export async function createTestCase(
   const wit = await client.getWitApi();
   const syncCfg = config.sync ?? {};
   const titleField = syncCfg.titleField ?? 'System.Title';
-  const formatConfig = syncCfg.format;
-
-  const isParametrized = !!test.outlineParameters?.headers.length;
-  const steps: AzureStep[] = applyFormatToSteps(test.steps, formatConfig).map((s) => ({
-    action: isParametrized ? gherkinParamsToAzure(s.action) : s.action,
-    expected: s.expected,
-  }));
-  applyShowParameterListStep(steps, test.outlineParameters, formatConfig);
-
-  // Apply format prefixTitle
-  const title = formatTitle(test.title, test, formatConfig);
+  const { title, steps } = buildAzureSyncContent(test, syncCfg.format);
 
   const patchDoc: any[] = [
     { op: 'add', path: `/fields/${titleField}`, value: title },
@@ -1074,23 +1086,17 @@ export async function updateTestCase(
   const wit = await client.getWitApi();
   const syncCfg = config.sync ?? {};
   const titleField = syncCfg.titleField ?? 'System.Title';
-  const formatConfig = syncCfg.format;
-
-  const isParametrized = !!test.outlineParameters?.headers.length;
-  const steps: AzureStep[] = applyFormatToSteps(test.steps, formatConfig).map((s) => ({
-    action: isParametrized ? gherkinParamsToAzure(s.action) : s.action,
-    expected: s.expected,
-  }));
-  applyShowParameterListStep(steps, test.outlineParameters, formatConfig);
-
-  // Apply format prefixTitle
-  const title = formatTitle(test.title, test, formatConfig);
+  const { title, steps } = buildAzureSyncContent(test, syncCfg.format);
 
   // Process tags with transformations
   const processedLocalTags = processTagsForPush(test.tags, syncCfg.tagPrefix ?? 'tc', config.customizations);
 
-  // Fetch existing Azure tags and merge
-  const wi = await withRetry(() => wit.getWorkItem(id, ['System.Tags']));
+  // Fetch existing Azure tags and parameter fields so updates can merge/clear correctly.
+  const wi = await withRetry(() => wit.getWorkItem(id, [
+    'System.Tags',
+    'Microsoft.VSTS.TCM.Parameters',
+    'Microsoft.VSTS.TCM.LocalDataSource',
+  ]));
   const existingAzureTags = tagsFromString((wi?.fields?.['System.Tags'] as string | undefined) ?? '');
 
   // Filter ignored tags from removal — they should be preserved in Azure
@@ -1130,6 +1136,13 @@ export async function updateTestCase(
     const dataXml = buildParameterDataXml(headers, rows);
     if (dataXml) {
       patchDoc.push({ op: 'replace', path: '/fields/Microsoft.VSTS.TCM.LocalDataSource', value: dataXml });
+    }
+  } else {
+    if (wi?.fields?.['Microsoft.VSTS.TCM.Parameters'] !== undefined) {
+      patchDoc.push({ op: 'remove', path: '/fields/Microsoft.VSTS.TCM.Parameters' });
+    }
+    if (wi?.fields?.['Microsoft.VSTS.TCM.LocalDataSource'] !== undefined) {
+      patchDoc.push({ op: 'remove', path: '/fields/Microsoft.VSTS.TCM.LocalDataSource' });
     }
   }
 
