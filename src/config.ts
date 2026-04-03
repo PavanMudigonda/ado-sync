@@ -117,6 +117,12 @@ export function loadConfig(configPath: string): SyncConfig {
 
   validateConfig(cfg, configPath);
 
+  // Multi-plan configs may omit top-level testPlan entirely. Normalize one so
+  // downstream helpers can safely inherit optional suite settings from it.
+  if (!cfg.testPlan && cfg.testPlans?.length) {
+    cfg.testPlan = { id: cfg.testPlans[0].id } as SyncConfig['testPlan'];
+  }
+
   // Default values
   cfg.sync = cfg.sync ?? {};
   cfg.sync.tagPrefix = cfg.sync.tagPrefix ?? 'tc';

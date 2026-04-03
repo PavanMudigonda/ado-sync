@@ -307,6 +307,7 @@ const NUMBERED_STEP_RE  = /^\d+\.\s+(.+)$/;
 const CHECK_RE           = /^[Cc]heck:\s+(.+)$/;
 const META_RE            = /^(?:test\s+case|user\s+story)[\s:]/i;
 const DESCRIPTION_RE     = /^[Dd]escription:\s+(.+)$/;
+const AI_MARKER_RE       = /^ado-sync:ai-summary$/i;
 
 function parseSummary(
   jsdocLines: string[],
@@ -317,7 +318,7 @@ function parseSummary(
   const steps: ParsedStep[] = [];
 
   for (const line of jsdocLines) {
-    if (!line || META_RE.test(line)) continue;
+    if (!line || META_RE.test(line) || AI_MARKER_RE.test(line)) continue;
 
     const numMatch = NUMBERED_STEP_RE.exec(line);
     if (numMatch) {

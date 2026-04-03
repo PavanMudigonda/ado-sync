@@ -904,9 +904,20 @@ export function writebackDocComment(
     while (openIdx >= 0 && !lines[openIdx].trim().startsWith('/**')) openIdx--;
 
     if (openIdx >= 0) {
-      // Remove the old JSDoc block (inclusive)
-      lines.splice(openIdx, closeIdx - openIdx + 1);
-      insertAt = openIdx; // insert the new block at the same position
+      const blockLines = lines
+        .slice(openIdx, closeIdx + 1)
+        .map((line) =>
+          line
+            .replace(/^\s*\/\*\*\s?/, '')
+            .replace(/\s*\*\/\s*$/, '')
+            .replace(/^\s*\*\s?/, '')
+            .trim()
+        );
+      // Only replace ado-sync-managed blocks; leave user-authored JSDoc intact.
+      if (blockLines.some((line) => line === 'ado-sync:ai-summary')) {
+        lines.splice(openIdx, closeIdx - openIdx + 1);
+        insertAt = openIdx; // insert the new block at the same position
+      }
     }
   }
 
@@ -917,6 +928,7 @@ export function writebackDocComment(
 
   const docLines: string[] = [];
   docLines.push(`${indent}/**`);
+  docLines.push(`${indent} * ado-sync:ai-summary`);
   docLines.push(`${indent} * ${title}`);
   if (description) {
     docLines.push(`${indent} * Description: ${description}`);

@@ -13,6 +13,7 @@ import {
   addTestCaseToConditionSuites,
   addTestCaseToRootSuite,
   addTestCaseToSuite,
+  buildAzureSyncContent,
   createTestCase,
   getOrCreateNamedSuite,
   getOrCreateSuiteForFile,
@@ -84,17 +85,88 @@ async function discoverFiles(
 
 // ─── Local file parsing ───────────────────────────────────────────────────────
 
+interface ParseFailure {
+  filePath: string;
+  message: string;
+}
+
+interface ParseLocalFilesResult {
+  tests: ParsedTest[];
+  failures: ParseFailure[];
+}
+
+export function failOnParseErrors(operation: string, failures: ParseFailure[]): void {
+  if (!failures.length) return;
+  const details = failures
+    .map(({ filePath, message }) => `  - ${filePath}: ${message}`)
+    .join('\n');
+  throw new Error(
+    `Aborting ${operation}: ${failures.length} file(s) could not be parsed.\n` +
+    `Fix the parse errors and rerun to avoid partial sync decisions.\n${details}`
+  );
+}
+
+function supportsPullWriteback(localType: SyncConfig['local']['type']): boolean {
+  return localType === 'gherkin' || localType === 'reqnroll' || localType === 'markdown' || localType === 'csv';
+}
+
+export function buildPushDiff(
+  test: ParsedTest,
+  remote: AzureTestCase,
+  config: SyncConfig,
+  cached?: SyncCache[number]
+): { changedFields: string[]; diffDetail: import('../types').DiffDetail[] } {
+  const tagPrefix = config.sync?.tagPrefix ?? 'tc';
+  const desiredAzure = buildAzureSyncContent(test, config.sync?.format);
+  const localStepsText = desiredAzure.steps.map((s) => `${s.action}|${s.expected ?? ''}`).join('\n');
+  const remoteStepsText = remote.steps.map((s) => `${s.action}|${s.expected ?? ''}`).join('\n');
+  const titleChanged = remote.title !== desiredAzure.title;
+  const stepsChanged = localStepsText !== remoteStepsText;
+
+  const localTags = new Set(test.tags.filter((t) => !t.startsWith(tagPrefix + ':')));
+  const remoteTags = new Set(remote.tags);
+  const tagsChanged = [...localTags].some((t) => !remoteTags.has(t));
+
+  const localDescHash = hashString(test.description);
+  const cachedDescHash = cached?.descriptionHash ?? '';
+  const descriptionChanged = localDescHash !== cachedDescHash;
+
+  const remoteDescHash = hashString(remote.description);
+  const cachedRemoteDescHash = cached?.remoteDescriptionHash ?? '';
+  const remoteDescriptionChanged = cachedRemoteDescHash !== '' && remoteDescHash !== cachedRemoteDescHash;
+
+  const changedFields: string[] = [];
+  if (titleChanged) changedFields.push('title');
+  if (stepsChanged) changedFields.push('steps');
+  if (tagsChanged) changedFields.push('tags');
+  if (descriptionChanged || remoteDescriptionChanged) changedFields.push('description');
+
+  const diffDetail: import('../types').DiffDetail[] = [];
+  if (titleChanged) diffDetail.push({ field: 'title', local: desiredAzure.title, remote: remote.title });
+  if (stepsChanged) diffDetail.push({ field: 'steps', local: localStepsText, remote: remoteStepsText });
+  if (tagsChanged) {
+    const addedTags = [...localTags].filter((t) => !remoteTags.has(t));
+    diffDetail.push({ field: 'tags', local: addedTags.join(', '), remote: remote.tags.join(', ') });
+  }
+  if (descriptionChanged || remoteDescriptionChanged) {
+    diffDetail.push({ field: 'description', local: test.description ?? '', remote: remote.description ?? '' });
+  }
+
+  return { changedFields, diffDetail };
+}
+
 async function parseLocalFiles(
   filePaths: string[],
   config: SyncConfig,
   tagsFilter?: string
-): Promise<ParsedTest[]> {
+): Promise<ParseLocalFilesResult> {
   const tagPrefix = config.sync?.tagPrefix ?? 'tc';
   const linkConfigs = config.sync?.links;
   const autoLinkStories = config.sync?.autoLinkStories ?? false;
   const attachmentsConfig = config.sync?.attachments;
   const localCondition = config.local.condition;
   const results: ParsedTest[] = [];
+  const failures: ParseFailure[] = [];
 
   for (const fp of filePaths) {
     try {
@@ -201,10 +273,11 @@ async function parseLocalFiles(
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`  [warn] Failed to parse ${fp}: ${msg}`);
+      failures.push({ filePath: fp, message: msg });
     }
   }
 
-  return results;
+  return { tests: results, failures };
 }
 
 // ─── Shared options ───────────────────────────────────────────────────────────
@@ -303,12 +376,16 @@ export async function push(
   if (config.testPlans?.length) {
     // Collect all tests across plans and run AI in one pass
     const planTests: Array<{ entryConfig: SyncConfig; tests: ParsedTest[] }> = [];
+    const parseFailures: ParseFailure[] = [];
     for (const entry of config.testPlans) {
       const entryConfig = configForPlanEntry(config, entry);
       const files = await discoverFiles(entryConfig.local.include, entryConfig.local.exclude, configDir);
-      const tests = await parseLocalFiles(files, entryConfig, opts.tags);
+      const parsed = await parseLocalFiles(files, entryConfig, opts.tags);
+      parseFailures.push(...parsed.failures);
+      const tests = parsed.tests;
       planTests.push({ entryConfig, tests });
     }
+    failOnParseErrors('push', parseFailures);
     if (opts.aiSummary) {
       const CODE_TYPES = new Set(['javascript', 'playwright', 'puppeteer', 'cypress', 'testcafe', 'detox', 'espresso', 'xcuitest', 'flutter', 'java', 'csharp', 'python']);
       const allTargets = planTests.flatMap(({ entryConfig, tests }) =>
@@ -347,11 +424,15 @@ async function pushSingle(
   configDir: string,
   opts: SyncOpts
 ): Promise<SyncResult[]> {
-  const files = opts._preloadedTests
-    ? []
-    : await discoverFiles(config.local.include, config.local.exclude, configDir);
-  const tests = opts._preloadedTests
-    ?? await parseLocalFiles(files, config, opts.tags);
+  let resolvedTests = opts._preloadedTests ?? [];
+  let parseFailures: ParseFailure[] = [];
+  if (!opts._preloadedTests) {
+    const files = await discoverFiles(config.local.include, config.local.exclude, configDir);
+    const parsed = await parseLocalFiles(files, config, opts.tags);
+    resolvedTests = parsed.tests;
+    parseFailures = parsed.failures;
+  }
+  failOnParseErrors('push', parseFailures);
 
   // AI auto-summary: for code-based local types, default to the local node-llama-cpp
   // provider (with heuristic fallback) when no explicit aiSummary opts are provided.
@@ -363,9 +444,9 @@ async function pushSingle(
     : opts.aiSummary ?? (CODE_TYPES.has(config.local.type) ? { provider: 'local', heuristicFallback: true } : undefined);
 
   if (effectiveAiOpts) {
-    const aiTargets = tests.filter(t => t.steps.length === 0 || !t.description);
+    const aiTargets = resolvedTests.filter(t => t.steps.length === 0 || !t.description);
     let aiDone = 0;
-    for (const test of tests) {
+    for (const test of resolvedTests) {
       const needsSteps = test.steps.length === 0;
       const needsDescription = !test.description;
       if (needsSteps || needsDescription) {
@@ -458,7 +539,7 @@ async function pushSingle(
   const markAutomated = config.sync?.markAutomated ?? false;
   const recoveredIds = new Set<string>(); // "filePath:line" keys
   let preloadedRemoteTcs: Awaited<ReturnType<typeof getTestCasesInSuite>> | undefined;
-  const unlinkedWithAtName = tests.filter(t => !t.azureId && t.automatedTestName);
+  const unlinkedWithAtName = resolvedTests.filter(t => !t.azureId && t.automatedTestName);
   if (markAutomated && unlinkedWithAtName.length > 0) {
     try {
       preloadedRemoteTcs = await getTestCasesInSuite(client, config);
@@ -481,7 +562,7 @@ async function pushSingle(
   // For suites with many linked tests, fetching each TC individually is slow.
   // Pre-fetch all linked IDs concurrently (up to 8 in-flight at once) and store
   // them in a Map so the sync loop can look them up without extra round-trips.
-  const linkedTests = tests.filter((t) => t.azureId !== undefined);
+  const linkedTests = resolvedTests.filter((t) => t.azureId !== undefined);
   const remoteTcCache = new Map<number, AzureTestCase | null>();
 
   if (linkedTests.length > 0) {
@@ -506,10 +587,10 @@ async function pushSingle(
   let done = 0;
   const reportProgress = (result: SyncResult) => {
     results.push(result);
-    opts.onProgress?.(++done, tests.length, result);
+    opts.onProgress?.(++done, resolvedTests.length, result);
   };
 
-  for (const test of tests) {
+  for (const test of resolvedTests) {
     if (test.azureId) {
       try {
         const cached = cache[test.azureId];
@@ -541,50 +622,7 @@ async function pushSingle(
         // For Scenario Outlines, local steps use <param> but Azure stores @param@.
         // Normalise local to @param@ before comparing so outlines don't report
         // stepsChanged on every push after the first successful sync.
-        const isOutline = !!test.outlineParameters?.headers.length;
-        const localStepsText = test.steps
-          .map((s) => {
-            const raw = `${s.keyword} ${s.text}`;
-            return isOutline ? raw.replace(/<([^>]+)>/g, '@$1@') : raw;
-          })
-          .join('\n');
-        const remoteStepsText = remote.steps.map((s) => s.action).join('\n');
-        const titleChanged = remote.title !== test.title;
-        const stepsChanged = localStepsText !== remoteStepsText;
-        // For tags: push is additive (merges local into Azure), so only flag a change
-        // when the local file has tags that are NOT yet present in Azure.
-        const localTags = new Set(test.tags.filter((t) => !t.startsWith(tagPrefix + ':')));
-        const remoteTags = new Set(remote.tags);
-        const tagsChanged = [...localTags].some((t) => !remoteTags.has(t));
-        // Description: compare local hash against what we last pushed (cache), not what
-        // Azure returns (which may have been reformatted by Azure's rich-text editor).
-        const localDescHash = hashString(test.description);
-        const cachedDescHash = cached?.descriptionHash ?? '';
-        const descriptionChanged = localDescHash !== cachedDescHash;
-
-        // E: also detect when the remote description changed since we last synced
-        const remoteDescHash = hashString(remote.description);
-        const cachedRemoteDescHash = cached?.remoteDescriptionHash ?? '';
-        const remoteDescriptionChanged = cachedRemoteDescHash !== '' && remoteDescHash !== cachedRemoteDescHash;
-
-        // Collect which fields changed for richer reporting (D)
-        const changedFields: string[] = [];
-        if (titleChanged) changedFields.push('title');
-        if (stepsChanged) changedFields.push('steps');
-        if (tagsChanged) changedFields.push('tags');
-        if (descriptionChanged || remoteDescriptionChanged) changedFields.push('description');
-
-        // Build per-field diff details for structured JSON output
-        const diffDetail: import('../types').DiffDetail[] = [];
-        if (titleChanged) diffDetail.push({ field: 'title', local: test.title, remote: remote.title });
-        if (stepsChanged) diffDetail.push({ field: 'steps', local: localStepsText, remote: remoteStepsText });
-        if (tagsChanged) {
-          const addedTags = [...localTags].filter((t) => !remoteTags.has(t));
-          diffDetail.push({ field: 'tags', local: addedTags.join(', '), remote: remote.tags.join(', ') });
-        }
-        if (descriptionChanged || remoteDescriptionChanged) {
-          diffDetail.push({ field: 'description', local: test.description ?? '', remote: remote.description ?? '' });
-        }
+        const { changedFields, diffDetail } = buildPushDiff(test, remote, config, cached);
 
         if (changedFields.length === 0) {
           // Update cache entry even on skip (changedDate may differ due to other fields)
@@ -630,7 +668,8 @@ async function pushSingle(
             await addTestCaseToRootSuite(client, config, test.azureId);
           }
           await addTestCaseToConditionSuites(client, config, test.azureId, test, conditionSuiteCache);
-          updateCacheEntry(cache, test, remote);
+          const updated = await getTestCase(client, test.azureId, titleField);
+          if (updated) updateCacheEntry(cache, test, updated);
         }
         reportProgress({ action: 'updated', filePath: test.filePath, title: test.title, azureId: test.azureId, changedFields, diffDetail });
       } catch (err: unknown) {
@@ -674,7 +713,7 @@ async function pushSingle(
   // For all other framework types this is a no-op.
   if (!opts.dryRun && !disableLocal && config.local.type === 'playwright') {
     const alreadyQueued = new Set(pendingWritebacks.map((wb) => `${wb.test.filePath}:${wb.test.line}`));
-    for (const test of tests) {
+    for (const test of resolvedTests) {
       if (test.azureId && !alreadyQueued.has(`${test.filePath}:${test.line}`)) {
         pendingWritebacks.push({ test, newId: test.azureId });
       }
@@ -686,7 +725,7 @@ async function pushSingle(
   // (no new TC was created). Queue them so the source annotation is restored.
   if (!opts.dryRun && !disableLocal && recoveredIds.size > 0) {
     const alreadyQueued = new Set(pendingWritebacks.map((wb) => `${wb.test.filePath}:${wb.test.line}`));
-    for (const test of tests) {
+    for (const test of resolvedTests) {
       const key = `${test.filePath}:${test.line}`;
       if (test.azureId && recoveredIds.has(key) && !alreadyQueued.has(key)) {
         pendingWritebacks.push({ test, newId: test.azureId });
@@ -718,7 +757,7 @@ async function pushSingle(
       // matching, otherwise fetch now. This avoids a redundant round-trip.
       const remoteTcs = preloadedRemoteTcs ?? await getTestCasesInSuite(client, config);
       const localIds = new Set([
-        ...(tests.map((t) => t.azureId).filter(Boolean) as number[]),
+        ...(resolvedTests.map((t) => t.azureId).filter(Boolean) as number[]),
         ...createdIds,
       ]);
       for (const remote of remoteTcs) {
@@ -772,7 +811,9 @@ async function pullSingle(
   opts: SyncOpts
 ): Promise<SyncResult[]> {
   const files = await discoverFiles(config.local.include, config.local.exclude, configDir);
-  const tests = await parseLocalFiles(files, config, opts.tags);
+  const parsed = await parseLocalFiles(files, config, opts.tags);
+  failOnParseErrors('pull', parsed.failures);
+  const tests = parsed.tests;
   const client = await AzureClient.create(config);
   const titleField = config.sync?.titleField ?? 'System.Title';
   const tagPrefix = config.sync?.tagPrefix ?? 'tc';
@@ -787,6 +828,8 @@ async function pullSingle(
     results.push(result);
     opts.onProgress?.(++done, linked.length, result);
   };
+
+  const canWriteToLocal = supportsPullWriteback(config.local.type);
 
   for (const test of linked) {
     try {
@@ -804,9 +847,10 @@ async function pullSingle(
         continue;
       }
 
-      const titleChanged = remote.title !== test.title;
-      const remoteStepsText = remote.steps.map((s) => s.action + '|' + s.expected).join('\n');
-      const localStepsText = test.steps.map((s) => s.keyword + ' ' + s.text + '|' + (s.expected ?? '')).join('\n');
+      const desiredAzure = buildAzureSyncContent(test, config.sync?.format);
+      const titleChanged = remote.title !== desiredAzure.title;
+      const remoteStepsText = remote.steps.map((s) => `${s.action}|${s.expected ?? ''}`).join('\n');
+      const localStepsText = desiredAzure.steps.map((s) => `${s.action}|${s.expected ?? ''}`).join('\n');
       const stepsChanged = remoteStepsText !== localStepsText;
       const descriptionChanged = (remote.description ?? '') !== (test.description ?? '');
 
@@ -816,17 +860,46 @@ async function pullSingle(
       }
 
       if (!opts.dryRun) {
-        if (!disableLocal) {
-          applyRemoteToLocal(
-            test,
-            remote.title,
-            remote.steps.map((s) => ({ keyword: 'Step', text: s.action, expected: s.expected })),
-            remote.description,
-            config.local.type,
-            tagPrefix
-          );
+        if (disableLocal) {
+          reportProgress({
+            action: 'skipped',
+            filePath: test.filePath,
+            title: remote.title,
+            azureId: test.azureId,
+            detail: [
+              titleChanged && 'title',
+              stepsChanged && 'steps',
+              descriptionChanged && 'description',
+            ].filter(Boolean).join(', ') + ' changed (local changes skipped)',
+          });
+          continue;
         }
-        updateCacheEntry(cache, test, remote);
+
+        if (!canWriteToLocal) {
+          reportProgress({
+            action: 'error',
+            filePath: test.filePath,
+            title: test.title,
+            azureId: test.azureId,
+            detail: `Pull is not supported for local.type "${config.local.type}".`,
+          });
+          continue;
+        }
+
+        applyRemoteToLocal(
+          test,
+          remote.title,
+          remote.steps.map((s) => ({ keyword: 'Step', text: s.action, expected: s.expected })),
+          remote.description,
+          config.local.type,
+          tagPrefix
+        );
+        updateCacheEntry(cache, {
+          ...test,
+          title: remote.title,
+          description: remote.description,
+          steps: remote.steps.map((s) => ({ keyword: 'Step', text: s.action, expected: s.expected })),
+        }, remote);
       }
 
       reportProgress({
@@ -1196,7 +1269,9 @@ export async function detectStaleTestCases(
   opts: { tags?: string } = {}
 ): Promise<StaleTestCase[]> {
   const files = await discoverFiles(config.local.include, config.local.exclude, configDir);
-  const tests = await parseLocalFiles(files, config, opts.tags);
+  const parsed = await parseLocalFiles(files, config, opts.tags);
+  failOnParseErrors('stale test case detection', parsed.failures);
+  const tests = parsed.tests;
   const localIds = new Set(tests.map((t) => t.azureId).filter(Boolean) as number[]);
 
   const client = await AzureClient.create(config);
@@ -1253,7 +1328,9 @@ export async function coverageReport(
   opts: { tags?: string } = {}
 ): Promise<CoverageReport> {
   const files = await discoverFiles(config.local.include, config.local.exclude, configDir);
-  const tests = await parseLocalFiles(files, config, opts.tags);
+  const parsed = await parseLocalFiles(files, config, opts.tags);
+  failOnParseErrors('coverage report', parsed.failures);
+  const tests = parsed.tests;
 
   const linked   = tests.filter((t) => t.azureId !== undefined);
   const unlinked = tests.filter((t) => t.azureId === undefined);

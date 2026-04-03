@@ -16,6 +16,7 @@
     "lint": "eslint src --ext .ts --quiet",
     "lint:fix": "eslint src --ext .ts --fix --quiet",
     "format": "prettier --write \"src/**/*.ts\"",
+    "test": "npm run build && node --test dist/__tests__/regressions.test.js",
     "prepublishOnly": "npm run clean && npm run build"
   },
   "keywords": [
