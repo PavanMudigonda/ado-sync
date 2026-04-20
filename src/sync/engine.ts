@@ -51,6 +51,11 @@ function matchesTags(test: ParsedTest, expression: string): boolean {
   return node.evaluate(tagsWithAt);
 }
 
+// ─── Code-type detection ──────────────────────────────────────────────────────
+
+/** Local types whose test bodies are executable code and may benefit from AI summarisation. */
+const CODE_TYPES = new Set(['javascript', 'playwright', 'puppeteer', 'cypress', 'testcafe', 'detox', 'espresso', 'xcuitest', 'flutter', 'java', 'csharp', 'python']);
+
 // ─── File discovery ───────────────────────────────────────────────────────────
 
 async function discoverFiles(
@@ -387,7 +392,6 @@ export async function push(
     }
     failOnParseErrors('push', parseFailures);
     if (opts.aiSummary) {
-      const CODE_TYPES = new Set(['javascript', 'playwright', 'puppeteer', 'cypress', 'testcafe', 'detox', 'espresso', 'xcuitest', 'flutter', 'java', 'csharp', 'python']);
       const allTargets = planTests.flatMap(({ entryConfig, tests }) =>
         CODE_TYPES.has(entryConfig.local.type) ? tests.filter(t => t.steps.length === 0 || !t.description) : []
       );
@@ -438,7 +442,6 @@ async function pushSingle(
   // provider (with heuristic fallback) when no explicit aiSummary opts are provided.
   // If no GGUF model path is set, the local provider transparently falls back to
   // heuristic mode so the push always succeeds even without a model installed.
-  const CODE_TYPES = new Set(['javascript', 'playwright', 'puppeteer', 'cypress', 'testcafe', 'detox', 'espresso', 'xcuitest', 'flutter', 'java', 'csharp', 'python']);
   const effectiveAiOpts: AiSummaryOpts | undefined =
     opts._preloadedTests ? undefined  // AI already applied in multi-plan pre-pass
     : opts.aiSummary ?? (CODE_TYPES.has(config.local.type) ? { provider: 'local', heuristicFallback: true } : undefined);
@@ -590,17 +593,98 @@ async function pushSingle(
     opts.onProgress?.(++done, resolvedTests.length, result);
   };
 
-  for (const test of resolvedTests) {
-    if (test.azureId) {
-      try {
-        const cached = cache[test.azureId];
-        // Use pre-fetched TC from cache; fall back to live fetch on miss
-        const remote = remoteTcCache.has(test.azureId)
-          ? remoteTcCache.get(test.azureId)!
-          : await getTestCase(client, test.azureId, titleField);
+  const PUSH_CONCURRENCY = 4; // Or 8, but we don't want to overwhelm ADO with concurrent creates/updates
+  const pushQueue = [...resolvedTests];
+  const pushWorkers = Array.from({ length: Math.min(PUSH_CONCURRENCY, pushQueue.length) }, async () => {
+    while (pushQueue.length > 0) {
+      const test = pushQueue.shift()!;
+      if (test.azureId) {
+        try {
+          const cached = cache[test.azureId];
+          // Use pre-fetched TC from cache; fall back to live fetch on miss
+          const remote = remoteTcCache.has(test.azureId)
+            ? remoteTcCache.get(test.azureId)!
+            : await getTestCase(client, test.azureId, titleField);
 
-        if (!remote) {
-          // TC was deleted from Azure — re-create it and write back the new ID.
+          if (!remote) {
+            // TC was deleted from Azure — re-create it and write back the new ID.
+            let newId: number | undefined;
+            if (!opts.dryRun) {
+              const suiteIdOverride = byFolder
+                ? await getOrCreateSuiteForFile(client, config, test.filePath, configDir, suiteCache)
+                : await resolveTargetSuiteFromRouting(client, config, test, suiteCache);
+              newId = await createTestCase(client, test, config, suiteIdOverride, configDir);
+              createdIds.add(newId);
+              if (!disableLocal) {
+                pendingWritebacks.push({ test, newId });
+              }
+              await addTestCaseToConditionSuites(client, config, newId, test, conditionSuiteCache);
+              const created = await getTestCase(client, newId, titleField);
+              if (created) updateCacheEntry(cache, test, created);
+            }
+            reportProgress({ action: 'created', filePath: test.filePath, title: test.title, azureId: newId });
+            continue;
+          }
+
+          // For Scenario Outlines, local steps use <param> but Azure stores @param@.
+          // Normalise local to @param@ before comparing so outlines don't report
+          // stepsChanged on every push after the first successful sync.
+          const { changedFields, diffDetail } = buildPushDiff(test, remote, config, cached);
+
+          if (changedFields.length === 0) {
+            // Update cache entry even on skip (changedDate may differ due to other fields)
+            updateCacheEntry(cache, test, remote);
+            reportProgress({ action: 'skipped', filePath: test.filePath, title: test.title, azureId: test.azureId });
+            continue;
+          }
+
+          // Conflict detection: remote was changed since last push AND local also differs
+          if (cached && remote.changedDate && remote.changedDate !== cached.changedDate) {
+            const relFile = path.relative(configDir, test.filePath);
+            const conflict: SyncResult = {
+              action: 'conflict',
+              filePath: test.filePath,
+              title: test.title,
+              azureId: test.azureId,
+              changedFields,
+              diffDetail,
+              detail: `${relFile}:${test.line} — changed fields: ${changedFields.join(', ')}`,
+            };
+            if (conflictAction === 'skip') {
+              reportProgress(conflict);
+              continue;
+            }
+            if (conflictAction === 'fail') {
+              conflicts.push(conflict);
+              done++;
+              continue;
+            }
+            // 'overwrite' — fall through to update
+          }
+
+          if (!opts.dryRun) {
+            await updateTestCase(client, test.azureId, test, config, configDir);
+            // Ensure the TC is in the configured suite (it may not be if the suite was
+            // changed in config, or if the TC was imported with an ID but never pushed before).
+            const updateSuiteId = byFolder
+              ? await getOrCreateSuiteForFile(client, config, test.filePath, configDir, suiteCache)
+              : await resolveTargetSuiteFromRouting(client, config, test, suiteCache) ?? config.testPlan.suiteId;
+            if (updateSuiteId) {
+              await addTestCaseToSuite(client, config, test.azureId, updateSuiteId);
+            } else {
+              await addTestCaseToRootSuite(client, config, test.azureId);
+            }
+            await addTestCaseToConditionSuites(client, config, test.azureId, test, conditionSuiteCache);
+            const updated = await getTestCase(client, test.azureId, titleField);
+            if (updated) updateCacheEntry(cache, test, updated);
+          }
+          reportProgress({ action: 'updated', filePath: test.filePath, title: test.title, azureId: test.azureId, changedFields, diffDetail });
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          reportProgress({ action: 'error', filePath: test.filePath, title: test.title, azureId: test.azureId, detail: msg });
+        }
+      } else {
+        try {
           let newId: number | undefined;
           if (!opts.dryRun) {
             const suiteIdOverride = byFolder
@@ -612,94 +696,19 @@ async function pushSingle(
               pendingWritebacks.push({ test, newId });
             }
             await addTestCaseToConditionSuites(client, config, newId, test, conditionSuiteCache);
+            // Fetch back to get changedDate for cache
             const created = await getTestCase(client, newId, titleField);
             if (created) updateCacheEntry(cache, test, created);
           }
           reportProgress({ action: 'created', filePath: test.filePath, title: test.title, azureId: newId });
-          continue;
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          reportProgress({ action: 'error', filePath: test.filePath, title: test.title, detail: msg });
         }
-
-        // For Scenario Outlines, local steps use <param> but Azure stores @param@.
-        // Normalise local to @param@ before comparing so outlines don't report
-        // stepsChanged on every push after the first successful sync.
-        const { changedFields, diffDetail } = buildPushDiff(test, remote, config, cached);
-
-        if (changedFields.length === 0) {
-          // Update cache entry even on skip (changedDate may differ due to other fields)
-          updateCacheEntry(cache, test, remote);
-          reportProgress({ action: 'skipped', filePath: test.filePath, title: test.title, azureId: test.azureId });
-          continue;
-        }
-
-        // Conflict detection: remote was changed since last push AND local also differs
-        if (cached && remote.changedDate && remote.changedDate !== cached.changedDate) {
-          const relFile = path.relative(configDir, test.filePath);
-          const conflict: SyncResult = {
-            action: 'conflict',
-            filePath: test.filePath,
-            title: test.title,
-            azureId: test.azureId,
-            changedFields,
-            diffDetail,
-            detail: `${relFile}:${test.line} — changed fields: ${changedFields.join(', ')}`,
-          };
-          if (conflictAction === 'skip') {
-            reportProgress(conflict);
-            continue;
-          }
-          if (conflictAction === 'fail') {
-            conflicts.push(conflict);
-            done++;
-            continue;
-          }
-          // 'overwrite' — fall through to update
-        }
-
-        if (!opts.dryRun) {
-          await updateTestCase(client, test.azureId, test, config, configDir);
-          // Ensure the TC is in the configured suite (it may not be if the suite was
-          // changed in config, or if the TC was imported with an ID but never pushed before).
-          const updateSuiteId = byFolder
-            ? await getOrCreateSuiteForFile(client, config, test.filePath, configDir, suiteCache)
-            : await resolveTargetSuiteFromRouting(client, config, test, suiteCache) ?? config.testPlan.suiteId;
-          if (updateSuiteId) {
-            await addTestCaseToSuite(client, config, test.azureId, updateSuiteId);
-          } else {
-            await addTestCaseToRootSuite(client, config, test.azureId);
-          }
-          await addTestCaseToConditionSuites(client, config, test.azureId, test, conditionSuiteCache);
-          const updated = await getTestCase(client, test.azureId, titleField);
-          if (updated) updateCacheEntry(cache, test, updated);
-        }
-        reportProgress({ action: 'updated', filePath: test.filePath, title: test.title, azureId: test.azureId, changedFields, diffDetail });
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        reportProgress({ action: 'error', filePath: test.filePath, title: test.title, azureId: test.azureId, detail: msg });
-      }
-    } else {
-      try {
-        let newId: number | undefined;
-        if (!opts.dryRun) {
-          const suiteIdOverride = byFolder
-            ? await getOrCreateSuiteForFile(client, config, test.filePath, configDir, suiteCache)
-            : await resolveTargetSuiteFromRouting(client, config, test, suiteCache);
-          newId = await createTestCase(client, test, config, suiteIdOverride, configDir);
-          createdIds.add(newId);
-          if (!disableLocal) {
-            pendingWritebacks.push({ test, newId });
-          }
-          await addTestCaseToConditionSuites(client, config, newId, test, conditionSuiteCache);
-          // Fetch back to get changedDate for cache
-          const created = await getTestCase(client, newId, titleField);
-          if (created) updateCacheEntry(cache, test, created);
-        }
-        reportProgress({ action: 'created', filePath: test.filePath, title: test.title, azureId: newId });
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        reportProgress({ action: 'error', filePath: test.filePath, title: test.title, detail: msg });
       }
     }
-  }
+  });
+  await Promise.all(pushWorkers);
 
   if (conflicts.length) {
     const lines = conflicts.map((c) => {

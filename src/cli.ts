@@ -394,7 +394,7 @@ program
         issueOverrides: {
           ...(opts.issueProvider  && { provider:   opts.issueProvider }),
           ...(opts.githubRepo     && { repo:        opts.githubRepo }),
-          ...(opts.githubToken    && { token:       opts.githubToken }),
+          ...(opts.githubToken    && { token:       opts.githubToken.startsWith('$') ? (process.env[opts.githubToken.slice(1)] ?? opts.githubToken) : opts.githubToken }),
           ...(opts.bugThreshold   && { threshold:   parseInt(opts.bugThreshold) }),
           ...(opts.maxIssues      && { maxIssues:   parseInt(opts.maxIssues) }),
         },

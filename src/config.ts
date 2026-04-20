@@ -362,7 +362,7 @@ const CONFIG_TEMPLATE_OBJECT = {
       provider: 'heuristic',
       // provider: 'anthropic', model: 'claude-sonnet-4-6', apiKey: '$ANTHROPIC_API_KEY'
       // provider: 'openai',    model: 'gpt-4o-mini',       apiKey: '$OPENAI_API_KEY'
-      // provider: 'ollama',    model: 'qwen2.5-coder:7b',  baseUrl: 'http://localhost:11434'
+      // provider: 'ollama',    model: 'gemma-4-e4b-it',  baseUrl: 'http://localhost:11434'
       // contextFile: './docs/ai-context.md'  — markdown file with domain context injected into the AI prompt
       analyzeFailures: false,
     },
