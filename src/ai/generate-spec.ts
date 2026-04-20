@@ -175,6 +175,11 @@ async function getLlamaSession(modelPath: string): Promise<LlamaSession> {
     const model = await llama.loadModel({ modelPath });
     return { LlamaChatSession, model };
   })();
+  
+  promise.catch(() => {
+    llamaCache.delete(modelPath);
+  });
+
   llamaCache.set(modelPath, promise);
   return promise;
 }

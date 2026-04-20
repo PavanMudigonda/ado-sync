@@ -425,7 +425,14 @@ function parseJUnit(content: string, tagPrefix: string, treatInconclusiveAs?: st
 // ─── Cucumber JSON parser ─────────────────────────────────────────────────────
 
 function parseCucumberJson(content: string, tagPrefix: string, treatInconclusiveAs?: string): ParsedResult[] {
-  const features = JSON.parse(content);
+  let features: any[];
+  try {
+    features = JSON.parse(content);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`  [warn] Failed to parse Cucumber JSON: ${msg}`);
+    return [];
+  }
   const results: ParsedResult[] = [];
 
   for (const feature of features) {
@@ -511,7 +518,14 @@ function parseCucumberJson(content: string, tagPrefix: string, treatInconclusive
 //   }
 
 function parsePlaywrightJson(content: string, tagPrefix: string, treatInconclusiveAs?: string, resultFileDir = ''): ParsedResult[] {
-  const report = JSON.parse(content);
+  let report: any;
+  try {
+    report = JSON.parse(content);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`  [warn] Failed to parse Playwright JSON: ${msg}`);
+    return [];
+  }
   const results: ParsedResult[] = [];
 
   function walkSuites(suites: any[], titlePath: string[]): void {
@@ -824,7 +838,14 @@ function parseGoTestJson(content: string, tagPrefix: string, treatInconclusiveAs
 //   }
 
 function parseMochawesome(content: string, tagPrefix: string, treatInconclusiveAs?: string): ParsedResult[] {
-  const report = JSON.parse(content);
+  let report: any;
+  try {
+    report = JSON.parse(content);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`  [warn] Failed to parse Mochawesome JSON: ${msg}`);
+    return [];
+  }
   const results: ParsedResult[] = [];
   const idRe = new RegExp(`@${tagPrefix}:(\\d+)`);
 
@@ -906,7 +927,14 @@ function parseMochawesome(content: string, tagPrefix: string, treatInconclusiveA
 //   }
 
 function parseRspecJson(content: string, tagPrefix: string, treatInconclusiveAs?: string): ParsedResult[] {
-  const report = JSON.parse(content);
+  let report: any;
+  try {
+    report = JSON.parse(content);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`  [warn] Failed to parse RSpec JSON: ${msg}`);
+    return [];
+  }
   const results: ParsedResult[] = [];
   const idRe = new RegExp(`@${tagPrefix}:(\\d+)`);
 
@@ -1036,7 +1064,14 @@ function parseRustTestJson(content: string, tagPrefix: string, treatInconclusive
 //   2. name   — fallback: match @tc:12345 in the test name string
 
 function parseCtrfJson(content: string, tagPrefix: string, treatInconclusiveAs?: string, resultFileDir = ''): ParsedResult[] {
-  const report = JSON.parse(content);
+  let report: any;
+  try {
+    report = JSON.parse(content);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`  [warn] Failed to parse CTRF JSON: ${msg}`);
+    return [];
+  }
   const ctrfResults = report?.results;
   if (!ctrfResults) return [];
 
@@ -1131,19 +1166,24 @@ function detectFormat(filePath: string, content: string): string {
   }
 
   if (ext === '.json') {
+    let parsed: any;
     try {
-      const parsed = JSON.parse(content);
-      // Playwright JSON has a top-level "suites" array (not an array itself)
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.suites)) return 'playwrightJson';
-      // Mochawesome JSON has a top-level "results" array with suites inside
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.results) &&
-          parsed.results.length > 0 && (Array.isArray(parsed.results[0].suites) || Array.isArray(parsed.results[0].tests))) return 'mochawesome';
-      // RSpec JSON has top-level "examples" array and "summary" object
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.examples) && parsed.summary) return 'rspecJson';
-      // CTRF JSON has top-level "results" object with a "tests" array
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&
-          parsed.results && typeof parsed.results === 'object' && Array.isArray(parsed.results.tests)) return 'ctrfJson';
-    } catch { /* fall through */ }
+      parsed = JSON.parse(content);
+    } catch {
+      return 'cucumberJson';
+    }
+    
+    // Playwright JSON has a top-level "suites" array (not an array itself)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.suites)) return 'playwrightJson';
+    // Mochawesome JSON has a top-level "results" array with suites inside
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.results) &&
+        parsed.results.length > 0 && (Array.isArray(parsed.results[0].suites) || Array.isArray(parsed.results[0].tests))) return 'mochawesome';
+    // RSpec JSON has top-level "examples" array and "summary" object
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.examples) && parsed.summary) return 'rspecJson';
+    // CTRF JSON has top-level "results" object with a "tests" array
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&
+        parsed.results && typeof parsed.results === 'object' && Array.isArray(parsed.results.tests)) return 'ctrfJson';
+    
     return 'cucumberJson';
   }
 

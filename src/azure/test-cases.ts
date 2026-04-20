@@ -57,15 +57,33 @@ async function withRetry<T>(
     } catch (err: unknown) {
       lastErr = err;
       const status: number = (err as any).statusCode ?? (err as any).status ?? 0;
-      const isTransient = status === 429 || status === 503;
+      const code: string = (err as any).code;
+
+      // Handle transparently dropped network connections, socket timeouts, etc, as well as 429/503/504
+      const isTransient =
+        status === 429 ||
+        status === 503 ||
+        status === 504 ||
+        code === 'ECONNRESET' ||
+        code === 'ETIMEDOUT' ||
+        code === 'ENOTFOUND' ||
+        code === 'ENETDOWN';
+
       if (!isTransient || attempt === retries) throw err;
 
-      // Respect Retry-After header if present (value is in seconds)
+      // Respect Retry-After header if present (value is in seconds or HTTP date)
       const retryAfterHeader: string | undefined =
         (err as any).response?.headers?.['retry-after'] ?? (err as any).headers?.['retry-after'];
       let delayMs: number;
       if (retryAfterHeader) {
-        delayMs = parseFloat(retryAfterHeader) * 1000;
+        const parsed = parseFloat(retryAfterHeader);
+        if (!isNaN(parsed)) {
+          delayMs = parsed * 1000;
+        } else {
+          // It might be an HTTP date
+          delayMs = new Date(retryAfterHeader).getTime() - Date.now();
+          if (delayMs < 0) delayMs = 0;
+        }
       } else {
         // Exponential backoff with ±10% jitter
         const base = baseDelayMs * Math.pow(2, attempt);
@@ -711,8 +729,14 @@ async function syncAttachments(
         continue;
       }
 
-      const content = fs.readFileSync(filePath);
-      const stream = Buffer.from(content);
+      const stat = fs.statSync(filePath);
+      const MAX_SIZE = 100 * 1024 * 1024; // 100MB limit to prevent OOM
+      if (stat.size > MAX_SIZE) {
+        console.warn(`  [warn] Attachment ${fileName} is too large (${stat.size} bytes), skipping.`);
+        continue;
+      }
+
+      const stream = fs.createReadStream(filePath);
 
       try {
         const attachment = await wit.createAttachment({} as any, stream as any, fileName);
