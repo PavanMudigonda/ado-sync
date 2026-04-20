@@ -13,7 +13,7 @@
  *                dependencies, works fully offline.
  *
  *   ollama     — local LLM via Ollama REST API (http://localhost:11434).
- *                Model suggestion: qwen2.5-coder:7b.
+ *                Model suggestion: gemma-4-e4b-it.
  *
  *   openai     — OpenAI Chat Completions API (requires API key).
  *
@@ -22,7 +22,7 @@
  * Usage (engine.ts / CLI):
  *   const { title, description, steps } = await summarizeTest(test, localType, {
  *     provider: 'local',
- *     model: '/path/to/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf',
+ *     model: '/path/to/gemma-4-e4b-it-Q4_K_M.gguf',
  *   });
  *   test.title = title;
  *   test.description = description;
@@ -51,10 +51,10 @@ export interface AiSummaryOpts {
   provider: AiProvider;
   /**
    * For `local`:       absolute path to a GGUF model file
-   * For `ollama`:      model tag, e.g. qwen2.5-coder:7b
+   * For `ollama`:      model tag, e.g. gemma-4-e4b-it
    * For `openai`:      model name, e.g. gpt-4o-mini
    * For `anthropic`:   model name, e.g. claude-haiku-4-5-20251001
-   * For `huggingface`: model id, e.g. mistralai/Mistral-7B-Instruct-v0.3
+   * For `huggingface`: model id, e.g. google/gemma-4-e4b-it
    * For `bedrock`:     model id, e.g. anthropic.claude-3-haiku-20240307-v1:0
    * For `azureai`:     deployment name, e.g. gpt-4o
    */
@@ -1120,7 +1120,7 @@ export async function analyzeFailure(
         try { ({ Ollama: OllamaFA } = await esmImport('ollama')); } catch { throw new Error("ollama package not installed"); }
         const ollamaClient = new OllamaFA({ host: opts.baseUrl ?? 'http://localhost:11434' });
         const ollamaResp = await ollamaClient.chat({
-          model: opts.model ?? 'qwen2.5-coder:7b',
+          model: opts.model ?? 'gemma-4-e4b-it',
           messages: [{ role: 'user', content: prompt }],
         });
         raw = ollamaResp.message?.content ?? '';
@@ -1308,7 +1308,7 @@ export async function summarizeTest(
       case 'ollama':
         return await ollamaSummary(
           body, fallbackTitle,
-          opts.model ?? 'qwen2.5-coder:7b',
+          opts.model ?? 'gemma-4-e4b-it',
           opts.baseUrl ?? 'http://localhost:11434',
           ctx
         );

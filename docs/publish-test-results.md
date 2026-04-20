@@ -44,7 +44,7 @@ ado-sync publish-test-results \
 | `--max-issues <n>` | Hard cap on issues filed per run. Default: `50`. |
 | `--analyze-failures` | Use AI to analyse each failed test and post a root-cause + suggestion comment on the Azure test result. |
 | `--ai-provider <provider>` | AI provider for failure analysis: `ollama`, `openai`, or `anthropic`. |
-| `--ai-model <model>` | Model name (e.g. `gpt-4o-mini`, `claude-haiku-4-5-20251001`, `qwen2.5-coder:7b`). |
+| `--ai-model <model>` | Model name (e.g. `gpt-4o-mini`, `claude-haiku-4-5-20251001`, `gemma-4-e4b-it`). |
 | `--ai-url <url>` | Base URL for Ollama or an OpenAI-compatible endpoint. |
 | `--ai-key <key>` | API key. Supports `$ENV_VAR` references. |
 | `--config-override` | Override config values (repeatable, same as other commands). |
@@ -83,7 +83,7 @@ ado-sync publish-test-results \
   --testResult results/junit.xml \
   --analyze-failures \
   --ai-provider ollama \
-  --ai-model qwen2.5-coder:7b
+  --ai-model gemma-4-e4b-it
 ```
 
 ### Config-based (no CLI flags needed)
@@ -109,7 +109,7 @@ With this in place, every `publish-test-results` run automatically analyses fail
 |----------|-----------|-------|
 | OpenAI | `openai` | Default model: `gpt-4o-mini`. Works with any OpenAI-compatible endpoint via `--ai-url`. |
 | Anthropic | `anthropic` | Default model: `claude-haiku-4-5-20251001`. Fast and cost-effective. |
-| Ollama | `ollama` | Default model: `qwen2.5-coder:7b`. Runs locally — no cloud cost or data egress. |
+| Ollama | `ollama` | Default model: `gemma-4-e4b-it`. Runs locally — no cloud cost or data egress. |
 
 > `heuristic` and `local` (node-llama-cpp) providers are not supported for failure analysis — they are suited for step generation, not conversational reasoning.
 

@@ -35,13 +35,13 @@ export interface AiGenerateOpts {
   /**
    * Model identifier:
    *   local:           path to .gguf file
-   *   ollama:          model tag (e.g. qwen2.5-coder:7b)
+   *   ollama:          model tag (e.g. gemma-4-e4b-it)
    *   openai:          model name (e.g. gpt-4o)
    *   anthropic:       model name (e.g. claude-sonnet-4-6)
-   *   huggingface:     model id (e.g. mistralai/Mistral-7B-Instruct-v0.3)
+   *   huggingface:     model id (e.g. google/gemma-4-e4b-it)
    *   bedrock:         model id (e.g. anthropic.claude-3-haiku-20240307-v1:0)
    *   azureai:         deployment name (e.g. gpt-4o)
-   *   github:          GitHub Models model name (e.g. gpt-4o, Meta-Llama-3.1-70B-Instruct)
+   *   github:          GitHub Models model name (e.g. gpt-4o, gemma-4-e4b-it)
    *   azureinference:  model name deployed on Azure AI Inference endpoint
    */
   model?: string;
@@ -481,7 +481,7 @@ export async function generateSpecFromStory(
       case 'ollama': {
         return ollamaProvider(
           prompt,
-          opts.model ?? 'qwen2.5-coder:7b',
+          opts.model ?? 'gemma-4-e4b-it',
           opts.baseUrl ?? 'http://localhost:11434'
         );
       }
