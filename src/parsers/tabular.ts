@@ -64,7 +64,7 @@ export interface TabularRow {
 export function parseTabularRows(
   rows: TabularRow[],
   filePath: string,
-  _tagPrefix: string,
+  _tagPrefix: string | string[],
   linkConfigs: LinkConfig[] | undefined
 ): ParsedTest[] {
   const pathTags = extractPathTags(filePath);

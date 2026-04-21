@@ -8,6 +8,7 @@ import { glob } from 'glob';
 import * as path from 'path';
 
 import { AiSummaryOpts, summarizeTest } from '../ai/summarizer';
+import { stripHtml } from '../html';
 import { AzureClient } from '../azure/client';
 import {
   addTestCaseToConditionSuites,
@@ -22,6 +23,7 @@ import {
   tagTestCaseAsRemoved,
   updateTestCase,
 } from '../azure/test-cases';
+import { getMarkerTagPrefixes, getPreferredMarkerTagPrefix, isMarkerTag } from '../id-markers';
 import { parseCsharpFile } from '../parsers/csharp';
 import { applyRemoteToCsv, parseCsvFile } from '../parsers/csv';
 import { parseDartFile } from '../parsers/dart';
@@ -121,14 +123,14 @@ export function buildPushDiff(
   config: SyncConfig,
   cached?: SyncCache[number]
 ): { changedFields: string[]; diffDetail: import('../types').DiffDetail[] } {
-  const tagPrefix = config.sync?.tagPrefix ?? 'tc';
+  const markerTagPrefixes = getMarkerTagPrefixes(config);
   const desiredAzure = buildAzureSyncContent(test, config.sync?.format);
   const localStepsText = desiredAzure.steps.map((s) => `${s.action}|${s.expected ?? ''}`).join('\n');
   const remoteStepsText = remote.steps.map((s) => `${s.action}|${s.expected ?? ''}`).join('\n');
   const titleChanged = remote.title !== desiredAzure.title;
   const stepsChanged = localStepsText !== remoteStepsText;
 
-  const localTags = new Set(test.tags.filter((t) => !t.startsWith(tagPrefix + ':')));
+  const localTags = new Set(test.tags.filter((t) => !isMarkerTag(t, markerTagPrefixes)));
   const remoteTags = new Set(remote.tags);
   const tagsChanged = [...localTags].some((t) => !remoteTags.has(t));
 
@@ -165,7 +167,7 @@ async function parseLocalFiles(
   config: SyncConfig,
   tagsFilter?: string
 ): Promise<ParseLocalFilesResult> {
-  const tagPrefix = config.sync?.tagPrefix ?? 'tc';
+  const tagPrefix = getMarkerTagPrefixes(config);
   const linkConfigs = config.sync?.links;
   const autoLinkStories = config.sync?.autoLinkStories ?? false;
   const attachmentsConfig = config.sync?.attachments;
@@ -515,7 +517,7 @@ async function pushSingle(
     }
   }
 
-  const tagPrefix = config.sync?.tagPrefix ?? 'tc';
+  const tagPrefix = getPreferredMarkerTagPrefix(config);
   const titleField = config.sync?.titleField ?? 'System.Title';
   const conflictAction = config.sync?.conflictAction ?? 'overwrite';
   const disableLocal = config.sync?.disableLocalChanges ?? false;
@@ -593,7 +595,12 @@ async function pushSingle(
     opts.onProgress?.(++done, resolvedTests.length, result);
   };
 
-  const PUSH_CONCURRENCY = 4; // Or 8, but we don't want to overwhelm ADO with concurrent creates/updates
+  // Concurrency invariant: workers share pushQueue, results, pendingWritebacks,
+  // suiteCache, and conditionSuiteCache via plain Array/Map mutations. This is
+  // safe because Node.js is single-threaded — array.shift() and map.set() execute
+  // atomically within a tick. Suspension only occurs at `await` boundaries, so
+  // no two workers mutate shared state simultaneously.
+  const PUSH_CONCURRENCY = 4;
   const pushQueue = [...resolvedTests];
   const pushWorkers = Array.from({ length: Math.min(PUSH_CONCURRENCY, pushQueue.length) }, async () => {
     while (pushQueue.length > 0) {
@@ -759,8 +766,10 @@ async function pushSingle(
     }
   }
 
-  // Removed TC detection: find suite TCs not referenced by any local test
-  if (!opts.dryRun || true /* show removed in dry-run too */) {
+  // Removed TC detection is only safe on full-scope runs.
+  // Tag-filtered or condition-filtered pushes intentionally operate on a subset.
+  const shouldDetectRemoved = !opts.tags && !config.local.condition;
+  if (shouldDetectRemoved) {
     try {
       // Reuse the pre-loaded remote TCs if we already fetched them for automatedTestName
       // matching, otherwise fetch now. This avoids a redundant round-trip.
@@ -825,7 +834,7 @@ async function pullSingle(
   const tests = parsed.tests;
   const client = await AzureClient.create(config);
   const titleField = config.sync?.titleField ?? 'System.Title';
-  const tagPrefix = config.sync?.tagPrefix ?? 'tc';
+  const tagPrefix = getPreferredMarkerTagPrefix(config);
   const disableLocal = config.sync?.disableLocalChanges ?? false;
   const results: SyncResult[] = [];
   const cache = loadCache(configDir);
@@ -930,30 +939,39 @@ async function pullSingle(
 
   // Pull-create: generate new local files for Azure TCs that have no local counterpart
   if (config.sync?.pull?.enableCreatingNewLocalTestCases && !disableLocal) {
-    try {
-      const remoteTcs = await getTestCasesInSuite(client, config);
-      const linkedIds = new Set(linked.map((t) => t.azureId));
-      const unlinked = remoteTcs.filter((tc) => !linkedIds.has(tc.id));
+    if (!supportsPullWriteback(config.local.type)) {
+      results.push({
+        action: 'error',
+        filePath: '',
+        title: '',
+        detail: `Pull-create is not supported for local.type "${config.local.type}".`,
+      });
+    } else {
+      try {
+        const remoteTcs = await getTestCasesInSuite(client, config);
+        const linkedIds = new Set(linked.map((t) => t.azureId));
+        const unlinked = remoteTcs.filter((tc) => !linkedIds.has(tc.id));
 
-      for (const tc of unlinked) {
-        try {
-          const newFilePath = createLocalFileFromRemote(tc, config, configDir, tagPrefix, !opts.dryRun);
-          if (!opts.dryRun) {
-            updateCacheEntry(cache, { filePath: newFilePath, title: tc.title, description: tc.description, steps: tc.steps.map((s) => ({ keyword: 'Step', text: s.action, expected: s.expected })), tags: tc.tags, line: 1, azureId: tc.id }, tc);
+        for (const tc of unlinked) {
+          try {
+            const newFilePath = createLocalFileFromRemote(tc, config, configDir, tagPrefix, !opts.dryRun);
+            if (!opts.dryRun) {
+              updateCacheEntry(cache, { filePath: newFilePath, title: tc.title, description: tc.description, steps: tc.steps.map((s) => ({ keyword: 'Step', text: s.action, expected: s.expected })), tags: tc.tags, line: 1, azureId: tc.id }, tc);
+            }
+            results.push({
+              action: 'created',
+              filePath: newFilePath,
+              title: tc.title,
+              azureId: tc.id,
+              detail: 'new local file from Azure TC',
+            });
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            results.push({ action: 'error', filePath: '', title: tc.title, azureId: tc.id, detail: `pull-create: ${msg}` });
           }
-          results.push({
-            action: 'created',
-            filePath: newFilePath,
-            title: tc.title,
-            azureId: tc.id,
-            detail: 'new local file from Azure TC',
-          });
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          results.push({ action: 'error', filePath: '', title: tc.title, azureId: tc.id, detail: `pull-create: ${msg}` });
         }
-      }
-    } catch { /* best-effort */ }
+      } catch { /* best-effort */ }
+    }
   }
 
   if (!opts.dryRun) {
@@ -1006,9 +1024,10 @@ function applyRemoteToLocal(
     applyRemoteToMarkdown(test, newTitle, newSteps, newDescription, tagPrefix);
   } else if (localType === 'csv') {
     applyRemoteToCsv(test.filePath, test.title, newTitle, newSteps);
+  } else if (localType === 'excel') {
+    throw new Error('Pull is not supported for local.type "excel" (in-place xlsx editing is not implemented).');
   }
-  // excel: pull not yet supported (in-place XML surgery for xlsx is complex)
-  // csharp / java / python / javascript: pull not supported (code files are managed locally)
+  // csharp / java / python / javascript / etc.: pull not supported (code files are managed locally)
 }
 
 function applyRemoteToGherkin(test: ParsedTest, newTitle: string, newSteps: ParsedStep[]): void {
@@ -1036,28 +1055,7 @@ function applyRemoteToGherkin(test: ParsedTest, newTitle: string, newSteps: Pars
   fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
 }
 
-/** Strip HTML tags from Azure rich-text description. */
-function stripHtml(html: string): string {
-  let result = html;
-  let previous: string;
-  do {
-    previous = result;
-    result = result
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<\/p>/gi, '\n')
-      .replace(/<[^>]+>/g, '');
-  } while (result !== previous);
-
-  return result
-    // Do not decode &lt; or &gt; to avoid reintroducing HTML tag delimiters such as <script>.
-    // .replace(/&lt;/g, '<')
-    // .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
+// stripHtml is imported from ../html (shared, XSS-safe — does not decode &lt;/&gt;)
 
 function applyRemoteToMarkdown(
   test: ParsedTest,

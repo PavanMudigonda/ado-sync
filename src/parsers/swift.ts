@@ -34,6 +34,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+import { buildMarkerTagPrefixPattern, normalizeMarkerTagPrefixes } from '../id-markers';
 import { LinkConfig, ParsedStep, ParsedTest } from '../types';
 import { extractLinkRefs, extractPathTags } from './shared';
 
@@ -126,12 +127,13 @@ interface CommentMetadata {
 function extractCommentMetadataAbove(
   lines: string[],
   methodLineIdx: number,
-  tagPrefix: string
+  tagPrefix: string | string[]
 ): CommentMetadata {
   const tags: string[] = [];
   let azureId: number | undefined;
+  const markerTagPrefixes = normalizeMarkerTagPrefixes(tagPrefix);
 
-  const idRe       = new RegExp(`//\\s*@${tagPrefix}:(\\d+)`);
+  const idRe       = new RegExp(`//\\s*@(?!tags?:)(?:${buildMarkerTagPrefixPattern(markerTagPrefixes)}):(\\d+)`);
   const tagsListRe = /\/\/\s*@tags?\s*:\s*(.+)/i;
   const singleTagRe = /\/\/\s*@(\w+)\s*$/;
 
@@ -154,7 +156,7 @@ function extractCommentMetadataAbove(
     }
 
     const singleTag = trimmed.match(singleTagRe);
-    if (singleTag && singleTag[1] !== tagPrefix) {
+    if (singleTag && !markerTagPrefixes.includes(singleTag[1])) {
       tags.push(singleTag[1]);
       continue;
     }
@@ -220,7 +222,7 @@ function parseSummary(
 
 export function parseSwiftFile(
   filePath: string,
-  tagPrefix: string,
+  tagPrefix: string | string[],
   linkConfigs?: LinkConfig[]
 ): ParsedTest[] {
   const source = fs.readFileSync(filePath, 'utf8');

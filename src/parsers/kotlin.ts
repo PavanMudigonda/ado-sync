@@ -19,6 +19,7 @@
 
 import * as fs from 'fs';
 
+import { buildMarkerTagPrefixPattern, normalizeMarkerTagPrefixes } from '../id-markers';
 import { LinkConfig, ParsedStep, ParsedTest } from '../types';
 import { extractLinkRefs, extractPathTags } from './shared';
 
@@ -63,15 +64,16 @@ interface KotlinAnnotationBlock {
 function extractAnnotationBlockAbove(
   lines: string[],
   testAttrLineIdx: number,
-  tagPrefix: string
+  tagPrefix: string | string[]
 ): KotlinAnnotationBlock {
   const docLines: string[] = [];
   let azureId: number | undefined;
   const tags: string[] = [];
+  const markerTagPrefixes = normalizeMarkerTagPrefixes(tagPrefix);
 
-  const tagAnnotationRe = new RegExp(`^@Tag\\(\\s*["']${tagPrefix}:(\\d+)["']\\s*\\)$`);
+  const tagAnnotationRe = new RegExp(`^@Tag\\(\\s*["'](?:${buildMarkerTagPrefixPattern(markerTagPrefixes)}):(\\d+)["']\\s*\\)$`);
   const anyTagRe        = /^@Tag\(\s*["']([\w:]+)["']\s*\)/;
-  const commentIdRe     = new RegExp(`//\\s*@${tagPrefix}:(\\d+)`);
+  const commentIdRe     = new RegExp(`//\\s*@(?!tags?:)(?:${buildMarkerTagPrefixPattern(markerTagPrefixes)}):(\\d+)`);
 
   // Scan backward from @Test line
   let inKDoc = false;
@@ -110,7 +112,7 @@ function extractAnnotationBlockAbove(
 
     // @Tag("smoke") — other tags
     const anyTagMatch = trimmed.match(anyTagRe);
-    if (anyTagMatch && !anyTagMatch[1].startsWith(`${tagPrefix}:`)) {
+    if (anyTagMatch && !markerTagPrefixes.some((prefix) => anyTagMatch[1].startsWith(`${prefix}:`))) {
       tags.push(anyTagMatch[1]);
       continue;
     }
@@ -143,12 +145,13 @@ function extractAnnotationBlockAbove(
 function extractTagsBelow(
   lines: string[],
   testAttrLineIdx: number,
-  tagPrefix: string
+  tagPrefix: string | string[]
 ): { azureId?: number; tags: string[] } {
   let azureId: number | undefined;
   const tags: string[] = [];
+  const markerTagPrefixes = normalizeMarkerTagPrefixes(tagPrefix);
 
-  const tagAnnotationRe = new RegExp(`^@Tag\\(\\s*["']${tagPrefix}:(\\d+)["']\\s*\\)$`);
+  const tagAnnotationRe = new RegExp(`^@Tag\\(\\s*["'](?:${buildMarkerTagPrefixPattern(markerTagPrefixes)}):(\\d+)["']\\s*\\)$`);
   const anyTagRe        = /^@Tag\(\s*["']([\w:]+)["']\s*\)/;
 
   for (let i = testAttrLineIdx + 1; i < lines.length && i <= testAttrLineIdx + 10; i++) {
@@ -163,7 +166,7 @@ function extractTagsBelow(
     }
 
     const anyTagMatch = trimmed.match(anyTagRe);
-    if (anyTagMatch && !anyTagMatch[1].startsWith(`${tagPrefix}:`)) {
+    if (anyTagMatch && !markerTagPrefixes.some((prefix) => anyTagMatch[1].startsWith(`${prefix}:`))) {
       tags.push(anyTagMatch[1]);
     }
   }
@@ -221,7 +224,7 @@ function parseSummary(
 
 export function parseKotlinFile(
   filePath: string,
-  tagPrefix: string,
+  tagPrefix: string | string[],
   linkConfigs?: LinkConfig[]
 ): ParsedTest[] {
   const source = fs.readFileSync(filePath, 'utf8');

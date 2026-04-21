@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "CommonJS",
-    "lib": ["ESNext", "DOM"],
+    "lib": ["ESNext"],
     "declaration": true,
     "declarationDir": "./dist",
     "sourceMap": true,

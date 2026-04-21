@@ -186,7 +186,7 @@ async function findFirstSheetPath(zip: JSZip): Promise<string | null> {
 
 export async function parseExcelFile(
   filePath: string,
-  tagPrefix: string,
+  tagPrefix: string | string[],
   linkConfigs?: LinkConfig[]
 ): Promise<ParsedTest[]> {
   const buffer = fs.readFileSync(filePath);

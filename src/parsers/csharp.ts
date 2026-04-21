@@ -29,6 +29,7 @@
 
 import * as fs from 'fs';
 
+import { normalizeMarkerTagPrefixes } from '../id-markers';
 import { LinkConfig, ParsedStep, ParsedTest } from '../types';
 import { extractLinkRefs, extractPathTags } from './shared';
 
@@ -156,7 +157,7 @@ interface MethodAttributes {
 function extractAttributesAndMethod(
   lines: string[],
   testMethodLineIdx: number,
-  tagPrefix: string,
+  _tagPrefix: string | string[],
   constants: Map<string, string>
 ): MethodAttributes {
   const categories: string[] = [];
@@ -226,7 +227,7 @@ function extractAttributesAndMethod(
 
 export function parseCsharpFile(
   filePath: string,
-  tagPrefix: string,
+  tagPrefix: string | string[],
   linkConfigs?: LinkConfig[]
 ): ParsedTest[] {
   const source = fs.readFileSync(filePath, 'utf8');
@@ -235,6 +236,7 @@ export function parseCsharpFile(
   const namespace = extractNamespace(lines);
   const className = extractClassName(lines);
   const constants = resolveStringConstants(lines);
+  const markerTagPrefixes = normalizeMarkerTagPrefixes(tagPrefix);
   const pathTags = extractPathTags(filePath);
 
   const results: ParsedTest[] = [];
@@ -260,7 +262,7 @@ export function parseCsharpFile(
 
     const { title, steps, titleIsHeuristic } = parseSummary(summaryLines, methodName);
 
-    const tcIdStr = properties.get(tagPrefix);
+    const tcIdStr = markerTagPrefixes.map((prefix) => properties.get(prefix)).find((value) => value !== undefined);
     const azureId = tcIdStr ? parseInt(tcIdStr, 10) : undefined;
 
     const tags = [...new Set([...pathTags, ...categories])];
