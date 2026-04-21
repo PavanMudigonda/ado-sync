@@ -593,7 +593,7 @@ function parsePlaywrightJson(content: string, tagPrefix: string, treatInconclusi
                 : undefined;
               const data = absPath ? safeReadFile(absPath) : (att.body ? Buffer.from(att.body, 'base64') : undefined);
               if (data) {
-                pwAttachments.push({ fileName: `${attName}${ext || ''}`, data, attachmentType: mimeToAttachmentType(contentType) || extToAttachmentType(ext) });
+                pwAttachments.push({ fileName: `${attName}${ext || ''}`, data, attachmentType: contentType ? mimeToAttachmentType(contentType) : extToAttachmentType(ext) });
               }
             }
           }
@@ -1120,7 +1120,7 @@ function parseCtrfJson(content: string, tagPrefix: string, treatInconclusiveAs?:
         ctrfAttachments.push({
           fileName,
           data,
-          attachmentType: mimeToAttachmentType(contentType) || extToAttachmentType(ext),
+          attachmentType: contentType ? mimeToAttachmentType(contentType) : extToAttachmentType(ext),
         });
       }
     }

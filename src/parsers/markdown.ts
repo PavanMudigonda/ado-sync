@@ -212,10 +212,13 @@ function parseScenarioBlock(
   }
 
   // Description: trim trailing blank lines
-  const description = descLines
-    .join('\n')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .trim() || undefined;
+  let tempDesc = descLines.join('\n');
+  let prevDesc: string;
+  do {
+    prevDesc = tempDesc;
+    tempDesc = tempDesc.replace(/<!--[\s\S]*?-->/g, '');
+  } while (tempDesc !== prevDesc);
+  const description = tempDesc.trim() || undefined;
 
   return {
     filePath,

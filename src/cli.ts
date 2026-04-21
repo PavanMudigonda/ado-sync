@@ -145,19 +145,25 @@ program
   .action(async (output: string | undefined, opts) => {
     const outFile = output ?? 'ado-sync.json';
     const outPath = path.resolve(outFile);
-    if (fs.existsSync(outPath)) {
-      console.error(chalk.red(`File already exists: ${outPath}`));
-      process.exit(1);
-    }
     const ext = path.extname(outFile).toLowerCase();
     const isYaml = ext === '.yml' || ext === '.yaml';
 
-    // K: interactive wizard when stdin is a TTY and --no-interactive is not set
-    if (opts.interactive && process.stdin.isTTY) {
-      const answers = await runInitWizard(isYaml);
-      fs.writeFileSync(outPath, answers, 'utf8');
-    } else {
-      fs.writeFileSync(outPath, isYaml ? CONFIG_TEMPLATE_YAML : CONFIG_TEMPLATE_JSON, 'utf8');
+    try {
+      const fd = fs.openSync(outPath, 'wx');
+      // K: interactive wizard when stdin is a TTY and --no-interactive is not set
+      if (opts.interactive && process.stdin.isTTY) {
+        const answers = await runInitWizard(isYaml);
+        fs.writeFileSync(fd, answers, 'utf8');
+      } else {
+        fs.writeFileSync(fd, isYaml ? CONFIG_TEMPLATE_YAML : CONFIG_TEMPLATE_JSON, 'utf8');
+      }
+      fs.closeSync(fd);
+    } catch (err: any) {
+      if (err.code === 'EEXIST') {
+        console.error(chalk.red(`File already exists: ${outPath}`));
+        process.exit(1);
+      }
+      throw err;
     }
 
     console.log(chalk.green(`Created ${outPath}`));

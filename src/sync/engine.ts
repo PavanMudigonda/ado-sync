@@ -1038,16 +1038,23 @@ function applyRemoteToGherkin(test: ParsedTest, newTitle: string, newSteps: Pars
 
 /** Strip HTML tags from Azure rich-text description. */
 function stripHtml(html: string): string {
-  return html
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&amp;/g, '&')
+  let result = html;
+  let previous: string;
+  do {
+    previous = result;
+    result = result
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/p>/gi, '\n')
+      .replace(/<[^>]+>/g, '');
+  } while (result !== previous);
+
+  return result
     // Do not decode &lt; or &gt; to avoid reintroducing HTML tag delimiters such as <script>.
     // .replace(/&lt;/g, '<')
     // .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }

@@ -192,7 +192,7 @@ export function parsePhpFile(
     const allTags = [...new Set([...pathTags, ...docTags])];
     const { title, steps, titleIsHeuristic } = parseSummary(docLines, methodName);
 
-    const nsFormatted = ns.replace(/\\/g, '\\');
+    const nsFormatted = ns;
     const automatedTestName = [nsFormatted, cls, methodName].filter(Boolean).join('::');
 
     results.push({

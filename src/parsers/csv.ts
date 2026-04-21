@@ -21,14 +21,15 @@ import { parseTabularRows, TabularRow } from './tabular';
 /** Parse a single CSV line, handling quoted fields and escaped quotes (""). */
 function parseCsvLine(line: string): string[] {
   const fields: string[] = [];
+  if (line.length === 0) return [''];
   let i = 0;
-  while (i <= line.length) {
+  while (i < line.length) {
     if (line[i] === '"') {
       // Quoted field
       let field = '';
       i++;
       while (i < line.length) {
-        if (line[i] === '"' && line[i + 1] === '"') {
+        if (i + 1 < line.length && line[i] === '"' && line[i + 1] === '"') {
           field += '"';
           i += 2;
         } else if (line[i] === '"') {
@@ -39,16 +40,24 @@ function parseCsvLine(line: string): string[] {
         }
       }
       fields.push(field);
-      if (line[i] === ',') i++;
+      if (i < line.length && line[i] === ',') i++;
+      
+      if (i === line.length && line[i - 1] === ',') {
+        fields.push('');
+      }
     } else {
       // Unquoted field
       const end = line.indexOf(',', i);
       if (end === -1) {
         fields.push(line.slice(i));
+        i = line.length;
         break;
       }
       fields.push(line.slice(i, end));
       i = end + 1;
+      if (i === line.length) {
+        fields.push('');
+      }
     }
   }
   return fields;
