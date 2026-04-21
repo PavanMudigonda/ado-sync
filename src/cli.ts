@@ -346,6 +346,9 @@ program
   .option('--attachmentsFolder <path>', 'Folder with screenshots/videos/logs to attach to test results')
   .option('--runName <name>', 'Name for the test run in Azure DevOps')
   .option('--buildId <id>', 'Build ID to associate with the test run')
+  .option('--testConfiguration <nameOrId>', 'Azure test configuration name or numeric ID for the published run')
+  .option('--testSuite <nameOrId>', 'Azure test suite name or numeric ID for planned run publication')
+  .option('--testPlan <nameOrId>', 'Azure test plan name or numeric ID used with --testSuite')
   .option('--dry-run', 'Parse results and show summary without publishing')
   .option('--create-issues-on-failure', 'File GitHub Issues or ADO Bugs for each failed test')
   .option('--issue-provider <provider>', 'Issue provider: github (default) or ado')
@@ -365,7 +368,19 @@ program
     try {
       const configPath = resolveConfigPath(globalOpts.config);
       const config = loadConfig(configPath);
-      if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
+      const cliPublishOverrides = [
+        ...(opts.testConfiguration ? [/^\d+$/.test(opts.testConfiguration)
+          ? `publishTestResults.testConfiguration.id=${opts.testConfiguration}`
+          : `publishTestResults.testConfiguration.name=${opts.testConfiguration}`] : []),
+        ...(opts.testSuite ? [/^\d+$/.test(opts.testSuite)
+          ? `publishTestResults.testSuite.id=${opts.testSuite}`
+          : `publishTestResults.testSuite.name=${opts.testSuite}`] : []),
+        ...(opts.testPlan ? [/^\d+$/.test(opts.testPlan)
+          ? `publishTestResults.testSuite.testPlan=${opts.testPlan}`
+          : `publishTestResults.testSuite.testPlan=${opts.testPlan}`] : []),
+      ];
+      const configOverrides = [...(opts.configOverride ?? []), ...cliPublishOverrides];
+      if (configOverrides.length) applyOverrides(config, configOverrides);
       const configDir = path.dirname(configPath);
 
       console.log(chalk.bold('ado-sync publish-test-results'));

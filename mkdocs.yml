@@ -15,6 +15,7 @@ nav:
   - Welcome: index.md
   - CLI: cli.md
   - Configuration: configuration.md
+  - Capability Roadmap: capability-roadmap.md
   - Agent Setup: agent-setup.md
   - MCP Server: mcp-server.md
   - Work Item Links: work-item-links.md

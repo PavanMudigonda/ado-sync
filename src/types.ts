@@ -236,7 +236,7 @@ export interface PublishTestResultsConfig {
   testSuite?: {
     name?: string;
     id?: number;
-    testPlan?: string;
+    testPlan?: string | number;
   };
   testRunSettings?: {
     name?: string;

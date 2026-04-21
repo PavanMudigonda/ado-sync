@@ -75,6 +75,7 @@ Minimum config:
 |-------|------|
 | CLI reference | [docs/cli.md](docs/cli.md) |
 | Configuration reference | [docs/configuration.md](docs/configuration.md) |
+| Capability roadmap | [docs/capability-roadmap.md](docs/capability-roadmap.md) |
 | Spec file formats | [docs/spec-formats.md](docs/spec-formats.md) |
 | Workflow examples (per framework + CI) | [docs/workflows.md](docs/workflows.md) |
 | Work item links | [docs/work-item-links.md](docs/work-item-links.md) |
@@ -103,6 +104,69 @@ ado-sync supports multiple AI providers for test-step summarisation (`push`/`pul
 | `azureai` | all AI commands | `npm i openai` | `$AZURE_OPENAI_KEY` + `--ai-url` |
 | `github` | all AI commands | `npm i openai` | `$GITHUB_TOKEN` (auto-detected) |
 | `azureinference` | all AI commands | `npm i @azure-rest/ai-inference @azure/core-auth` | `$AZURE_AI_KEY` + `--ai-url` |
+
+### Local LLM options
+
+If you want to run ado-sync without sending prompts to a hosted model, there are three practical local setups:
+
+| Option | Best for | How it works | Commands |
+|---|---|---|---|
+| `heuristic` | Zero setup, fastest start | No model at all; built-in rules only | `push`, `pull`, `status` |
+| `local` | Single-machine offline use | Runs a GGUF model directly in-process via `node-llama-cpp` | `push`, `pull`, `status`, `generate` |
+| `ollama` | Easier local model management | Talks to a local Ollama server over HTTP | `push`, `pull`, `status`, `generate`, `publish-test-results` failure analysis |
+
+`llama.cpp`-style setups work in two ways:
+
+- Use `local` when you want to run a GGUF model directly inside ado-sync through `node-llama-cpp`.
+- Use `openai --ai-url ...` when you already run the `llama.cpp` server in OpenAI-compatible mode and want ado-sync to call it over HTTP.
+
+You can also point the `openai` provider at other local OpenAI-compatible servers such as LM Studio, vLLM, or LocalAI by setting `--ai-url`, but that is an advanced setup rather than the default local path.
+
+### Which local option to choose
+
+- Use `heuristic` if you only want lightweight summaries and do not want to download a model.
+- Use `local` if you want fully offline inference with a `.gguf` file and no background server. This is the closest built-in path to native `llama.cpp` model usage.
+- Use `ollama` if you prefer model pull/run management through Ollama and want the same local provider available to more commands.
+- Use `openai --ai-url ...` if you already run `llama.cpp` server mode or another compatible local endpoint and want ado-sync to treat it like an OpenAI-style API.
+
+### Local examples
+
+```bash
+# 1. No-model fallback: fastest setup, lowest quality
+ado-sync push --ai-provider heuristic
+
+# 2. Fully local GGUF model in-process
+ado-sync push --ai-provider local \
+  --ai-model ~/.cache/ado-sync/models/gemma-4-e4b-it-Q4_K_M.gguf
+
+# 3. Ollama running on the same machine
+ollama pull gemma-4-e4b-it
+ado-sync push --ai-provider ollama --ai-model gemma-4-e4b-it
+
+# 4. Local OpenAI-compatible endpoint (LM Studio / vLLM / LocalAI)
+ado-sync generate --story-ids 1234 \
+  --ai-provider openai \
+  --ai-url http://localhost:1234/v1 \
+  --ai-model local-model-name \
+  --ai-key dummy
+
+# 5. llama.cpp server in OpenAI-compatible mode
+./server -m ~/.cache/ado-sync/models/gemma-4-e4b-it-Q4_K_M.gguf --port 8080
+ado-sync push \
+  --ai-provider openai \
+  --ai-url http://localhost:8080/v1 \
+  --ai-model gemma-4-e4b-it-Q4_K_M \
+  --ai-key dummy
+```
+
+### Notes for local use
+
+- `local` requires `--ai-model` to point to a `.gguf` file.
+- `local` uses `node-llama-cpp`, so it works with GGUF models from the wider `llama.cpp` ecosystem.
+- `ollama` defaults to `http://localhost:11434` unless you override `--ai-url`.
+- If you run `llama.cpp` as an HTTP server, use the `openai` provider plus `--ai-url`; ado-sync does not call the `llama.cpp` CLI binary directly.
+- `publish-test-results --analyze-failures` supports `ollama`, `openai`, and `anthropic`; it does not use the in-process `local` provider.
+- For deeper setup guidance and larger local model examples, see [docs/advanced.md](docs/advanced.md) and [docs/cli.md](docs/cli.md).
 
 ```bash
 # GitHub Models — free tier available, no billing setup needed
