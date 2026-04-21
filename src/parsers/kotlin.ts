@@ -93,7 +93,6 @@ function extractAnnotationBlockAbove(
     if (inKDoc) {
       // KDoc start: /**
       if (trimmed.startsWith('/**') || trimmed === '/*') {
-        inKDoc = false;
         break;
       }
       // KDoc line: strip leading * and whitespace
