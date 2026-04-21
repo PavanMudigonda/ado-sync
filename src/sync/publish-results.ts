@@ -1274,6 +1274,267 @@ export interface PublishResult {
   issuesSummary?: CreateIssuesResult;
 }
 
+function pageItems<T>(page: any): T[] {
+  if (!page) return [];
+  if (Array.isArray(page)) return page as T[];
+  if (Array.isArray(page.value)) return page.value as T[];
+  return [];
+}
+
+function pageContinuationToken(page: any): string | undefined {
+  if (!page || Array.isArray(page)) return undefined;
+  return page.continuationToken ?? page['x-ms-continuationtoken'] ?? undefined;
+}
+
+function parseNumericId(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isInteger(value) && value > 0) return value;
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) return Number.parseInt(value.trim(), 10);
+  return undefined;
+}
+
+function collapseRetriedResults(
+  results: ParsedResult[],
+  flakyPolicy: NonNullable<SyncConfig['publishTestResults']>['flakyTestOutcome'] = 'lastAttemptOutcome',
+): ParsedResult[] {
+  if (results.length < 2) return results;
+
+  const groups = new Map<string, ParsedResult[]>();
+  for (const result of results) {
+    const key = result.testCaseId !== undefined ? `tc:${result.testCaseId}` : `name:${result.testName}`;
+    const group = groups.get(key) ?? [];
+    group.push(result);
+    groups.set(key, group);
+  }
+
+  const outcomeRank = (outcome: string): number => {
+    if (outcome === 'Failed') return 4;
+    if (outcome === 'Inconclusive') return 3;
+    if (outcome === 'NotExecuted') return 2;
+    if (outcome === 'Passed') return 1;
+    return 0;
+  };
+
+  const merged: ParsedResult[] = [];
+  for (const group of groups.values()) {
+    if (group.length === 1) {
+      merged.push(group[0]);
+      continue;
+    }
+
+    let selected = group[group.length - 1];
+    if (flakyPolicy === 'firstAttemptOutcome') {
+      selected = group[0];
+    } else if (flakyPolicy === 'worstOutcome') {
+      selected = [...group].sort((left, right) => outcomeRank(right.outcome) - outcomeRank(left.outcome))[0] ?? selected;
+    }
+
+    const attachments = group.flatMap((entry) => entry.attachments ?? []);
+    merged.push({
+      ...selected,
+      attachments: attachments.length ? attachments : undefined,
+    });
+  }
+
+  return merged;
+}
+
+async function resolveTestConfigurationId(
+  client: AzureClient,
+  config: SyncConfig,
+  testConfiguration?: NonNullable<SyncConfig['publishTestResults']>['testConfiguration'],
+): Promise<number | undefined> {
+  const explicitId = parseNumericId(testConfiguration?.id);
+  if (explicitId) return explicitId;
+
+  const configName = testConfiguration?.name?.trim();
+  if (!configName) return undefined;
+
+  const api = await client.getTestPlanApi();
+  let continuationToken: string | undefined;
+
+  do {
+    const page: any = await api.getTestConfigurations(config.project, continuationToken);
+    const matches = pageItems<any>(page).filter((entry) => entry?.name === configName);
+    if (matches.length > 1) {
+      throw new Error(`Multiple Azure test configurations named "${configName}" were found. Use publishTestResults.testConfiguration.id instead.`);
+    }
+    if (matches.length === 1) {
+      const resolvedId = parseNumericId(matches[0]?.id);
+      if (resolvedId) return resolvedId;
+    }
+    continuationToken = pageContinuationToken(page);
+  } while (continuationToken);
+
+  throw new Error(`Azure test configuration "${configName}" was not found in project "${config.project}".`);
+}
+
+async function resolveTargetPlanId(
+  client: AzureClient,
+  config: SyncConfig,
+  requestedPlan?: string | number,
+): Promise<number> {
+  const explicitId = parseNumericId(requestedPlan);
+  if (explicitId) return explicitId;
+  if (!requestedPlan) return config.testPlan.id;
+
+  const api = await client.getTestPlanApi();
+  let continuationToken: string | undefined;
+  const targetName = String(requestedPlan).trim();
+  const matches: any[] = [];
+
+  do {
+    const page: any = await api.getTestPlans(config.project, undefined, continuationToken, true, false);
+    matches.push(...pageItems<any>(page).filter((entry) => entry?.name === targetName));
+    continuationToken = pageContinuationToken(page);
+  } while (continuationToken);
+
+  if (matches.length > 1) {
+    throw new Error(`Multiple Azure test plans named "${targetName}" were found. Use publishTestResults.testSuite.testPlan with a numeric ID instead.`);
+  }
+  const resolvedId = parseNumericId(matches[0]?.id);
+  if (!resolvedId) {
+    throw new Error(`Azure test plan "${targetName}" was not found in project "${config.project}".`);
+  }
+  return resolvedId;
+}
+
+async function resolveTargetSuiteId(
+  client: AzureClient,
+  config: SyncConfig,
+  planId: number,
+  testSuite: NonNullable<NonNullable<SyncConfig['publishTestResults']>['testSuite']>,
+): Promise<number> {
+  const explicitId = parseNumericId(testSuite?.id);
+  if (explicitId) return explicitId;
+
+  const suiteName = testSuite?.name?.trim();
+  if (!suiteName) {
+    throw new Error('publishTestResults.testSuite requires either an id or a name.');
+  }
+
+  const api = await client.getTestPlanApi();
+  let continuationToken: string | undefined;
+  const matches: any[] = [];
+
+  do {
+    const page: any = await api.getTestSuitesForPlan(config.project, planId, undefined, continuationToken, true);
+    matches.push(...pageItems<any>(page).filter((entry) => entry?.name === suiteName));
+    continuationToken = pageContinuationToken(page);
+  } while (continuationToken);
+
+  if (matches.length > 1) {
+    throw new Error(`Multiple Azure test suites named "${suiteName}" were found in plan ${planId}. Use publishTestResults.testSuite.id instead.`);
+  }
+
+  const resolvedId = parseNumericId(matches[0]?.id);
+  if (!resolvedId) {
+    throw new Error(`Azure test suite "${suiteName}" was not found in plan ${planId}.`);
+  }
+  return resolvedId;
+}
+
+interface PlannedResultBinding {
+  planId: number;
+  suiteId: number;
+  pointId: number;
+  testCaseRevision: number;
+  configurationId?: number;
+}
+
+interface PlannedRunContext {
+  planId: number;
+  suiteId: number;
+  pointIds: number[];
+  bindings: Map<number, PlannedResultBinding>;
+}
+
+async function resolvePlannedRunContext(
+  client: AzureClient,
+  config: SyncConfig,
+  testSuite: NonNullable<NonNullable<SyncConfig['publishTestResults']>['testSuite']>,
+  results: ParsedResult[],
+  configurationId?: number,
+): Promise<PlannedRunContext> {
+  const missingCaseId = results.find((entry) => entry.testCaseId === undefined);
+  if (missingCaseId) {
+    throw new Error(
+      `publishTestResults.testSuite requires every result to resolve to a test case ID. Missing mapping for "${missingCaseId.testName}".`
+    );
+  }
+
+  const planId = await resolveTargetPlanId(client, config, testSuite.testPlan);
+  const suiteId = await resolveTargetSuiteId(client, config, planId, testSuite);
+  const planApi = await client.getTestPlanApi();
+  const witApi = await client.getWitApi();
+  const uniqueCaseIds = [...new Set(results.map((entry) => entry.testCaseId!))];
+  const revisionCache = new Map<number, number>();
+  const bindings = new Map<number, PlannedResultBinding>();
+
+  for (const testCaseId of uniqueCaseIds) {
+    const page: any = await planApi.getPointsList(
+      config.project,
+      planId,
+      suiteId,
+      undefined,
+      String(testCaseId),
+      undefined,
+      false,
+      true,
+      true,
+    );
+
+    let points = pageItems<any>(page).filter((entry) => parseNumericId(entry?.testCaseReference?.id) === testCaseId);
+    if (configurationId) {
+      points = points.filter((entry) => parseNumericId(entry?.configuration?.id) === configurationId);
+    }
+
+    if (points.length === 0) {
+      const configSuffix = configurationId ? ` for configuration ${configurationId}` : '';
+      throw new Error(`No test point found for test case ${testCaseId} in plan ${planId}, suite ${suiteId}${configSuffix}.`);
+    }
+
+    if (!configurationId) {
+      const distinctConfigurations = [...new Set(points.map((entry) => parseNumericId(entry?.configuration?.id)).filter((value): value is number => value !== undefined))];
+      if (distinctConfigurations.length > 1) {
+        throw new Error(
+          `Test case ${testCaseId} has multiple test points in plan ${planId}, suite ${suiteId}. Set publishTestResults.testConfiguration.id or .name to disambiguate.`
+        );
+      }
+    }
+
+    const selectedPoint = points[0];
+    const pointId = parseNumericId(selectedPoint?.id);
+    if (!pointId) {
+      throw new Error(`Could not resolve a valid test point ID for test case ${testCaseId} in suite ${suiteId}.`);
+    }
+
+    let testCaseRevision = revisionCache.get(testCaseId);
+    if (!testCaseRevision) {
+      const workItem: any = await witApi.getWorkItem(testCaseId);
+      testCaseRevision = parseNumericId(workItem?.rev);
+      if (!testCaseRevision) {
+        throw new Error(`Could not resolve revision for test case ${testCaseId}.`);
+      }
+      revisionCache.set(testCaseId, testCaseRevision);
+    }
+
+    bindings.set(testCaseId, {
+      planId,
+      suiteId,
+      pointId,
+      testCaseRevision,
+      configurationId: parseNumericId(selectedPoint?.configuration?.id) ?? configurationId,
+    });
+  }
+
+  return {
+    planId,
+    suiteId,
+    pointIds: [...new Set([...bindings.values()].map((binding) => binding.pointId))],
+    bindings,
+  };
+}
+
 export async function publishTestResults(
   config: SyncConfig,
   configDir: string,
@@ -1396,9 +1657,11 @@ export async function publishTestResults(
     throw new Error('No test results found in the specified files.');
   }
 
-  const passed = allResults.filter((r) => r.outcome === 'Passed').length;
-  const failed = allResults.filter((r) => r.outcome === 'Failed').length;
-  const other  = allResults.length - passed - failed;
+  const effectiveResults = collapseRetriedResults(allResults, pubConfig?.flakyTestOutcome ?? 'lastAttemptOutcome');
+
+  const passed = effectiveResults.filter((r) => r.outcome === 'Passed').length;
+  const failed = effectiveResults.filter((r) => r.outcome === 'Failed').length;
+  const other  = effectiveResults.length - passed - failed;
 
   if (opts.dryRun) {
     // Still run issue creation logic in dry-run so the caller gets a preview
@@ -1408,35 +1671,47 @@ export async function publishTestResults(
         : undefined;
     const issuesSummary = issueConfig && failed > 0
       ? await createIssuesFromResults(
-          allResults, config, issueConfig,
-          { totalResults: allResults.length },
+          effectiveResults, config, issueConfig,
+          { totalResults: effectiveResults.length },
           /* dryRun */ true,
         )
       : undefined;
-    return { runId: 0, runUrl: '', totalResults: allResults.length, passed, failed, other, issuesSummary };
+    return { runId: 0, runUrl: '', totalResults: effectiveResults.length, passed, failed, other, issuesSummary };
   }
 
   const client = await AzureClient.create(config);
   const testApi = await client.getTestApi();
+  const resolvedConfigurationId = await resolveTestConfigurationId(client, config, pubConfig?.testConfiguration);
+  const plannedRunContext = pubConfig?.testSuite
+    ? await resolvePlannedRunContext(client, config, pubConfig.testSuite, effectiveResults, resolvedConfigurationId)
+    : undefined;
 
   const runSettings = pubConfig?.testRunSettings;
   const runName = opts.runName ?? runSettings?.name ?? `ado-sync ${new Date().toISOString()}`;
 
-  // Do NOT pass `plan` here — attaching to a test plan makes ADO treat the run
-  // as "planned", which requires testPointId + testCaseRevision on every result.
-  // Automated CI runs post results independently; test cases are linked by id alone.
   const runModel: any = {
     name: runName,
     automated: runSettings?.runType === 'Manual' ? false : true,
-    configurationIds: pubConfig?.testConfiguration?.id ? [pubConfig.testConfiguration.id] : [],
+    configurationIds: resolvedConfigurationId ? [resolvedConfigurationId] : [],
   };
+  if (plannedRunContext) {
+    runModel.plan = { id: String(plannedRunContext.planId) };
+    runModel.pointIds = plannedRunContext.pointIds;
+    if (!runModel.configurationIds.length) {
+      runModel.configurationIds = [...new Set(
+        [...plannedRunContext.bindings.values()]
+          .map((binding) => binding.configurationId)
+          .filter((value): value is number => value !== undefined)
+      )];
+    }
+  }
   if (runSettings?.comment) runModel.comment = runSettings.comment;
   if (opts.buildId) runModel.build = { id: String(opts.buildId) };
 
   const run = await testApi.createTestRun(runModel, config.project);
   const runId = run.id!;
 
-  const testCaseResults = allResults.map((r) => {
+  const testCaseResults = effectiveResults.map((r) => {
     const result: any = {
       automatedTestName: r.testName,
       testCaseTitle: r.testName,
@@ -1450,6 +1725,19 @@ export async function publishTestResults(
     // This is more reliable than AutomatedTestName matching and works even when
     // the FQMN has changed since the TC was last pushed.
     if (r.testCaseId)   result.testCase = { id: String(r.testCaseId) };
+    if (resolvedConfigurationId) result.configuration = { id: String(resolvedConfigurationId) };
+    if (r.testCaseId && plannedRunContext) {
+      const binding = plannedRunContext.bindings.get(r.testCaseId);
+      if (!binding) {
+        throw new Error(`Missing planned-run binding for test case ${r.testCaseId}.`);
+      }
+      result.testPlan = { id: String(binding.planId) };
+      result.testPoint = { id: String(binding.pointId) };
+      result.testCaseRevision = binding.testCaseRevision;
+      if (binding.configurationId) {
+        result.configuration = { id: String(binding.configurationId) };
+      }
+    }
     if (pubConfig?.testResultSettings?.comment) result.comment = pubConfig.testResultSettings.comment;
     return result;
   });
@@ -1478,14 +1766,14 @@ export async function publishTestResults(
   if (attFolder && fs.existsSync(attFolder)) {
     const include     = attCfg?.include ?? '**/*.{png,jpg,jpeg,gif,webp,mp4,webm,avi,mov,log,txt,html,zip}';
     const matchByName = attCfg?.matchByTestName ?? true;
-    const { resultAttachments, runAttachments } = await scanAttachmentFolder(attFolder, include, allResults, matchByName);
+    const { resultAttachments, runAttachments } = await scanAttachmentFolder(attFolder, include, effectiveResults, matchByName);
     folderResultAtts = resultAttachments;
     folderRunAtts    = runAttachments;
   }
 
   // Upload per-result attachments (embedded + folder-matched)
-  for (let i = 0; i < allResults.length; i++) {
-    const resultEntry = allResults[i];
+  for (let i = 0; i < effectiveResults.length; i++) {
+    const resultEntry = effectiveResults[i];
     const addedResult = addedResults?.[i];
     if (!addedResult?.id) continue;
 
@@ -1528,8 +1816,8 @@ export async function publishTestResults(
         : undefined;
 
   if (effectiveAiOpts) {
-    for (let i = 0; i < allResults.length; i++) {
-      const resultEntry = allResults[i];
+    for (let i = 0; i < effectiveResults.length; i++) {
+      const resultEntry = effectiveResults[i];
       if (resultEntry.outcome !== 'Failed') continue;
       const addedResult = addedResults?.[i];
       if (!addedResult?.id) continue;
@@ -1567,13 +1855,13 @@ export async function publishTestResults(
 
   if (issueConfig && failed > 0) {
     issuesSummary = await createIssuesFromResults(
-      allResults,
+      effectiveResults,
       config,
       issueConfig,
-      { runId, runUrl, buildId: opts.buildId, totalResults: allResults.length },
+      { runId, runUrl, buildId: opts.buildId, totalResults: effectiveResults.length },
       opts.dryRun,
     );
   }
 
-  return { runId, runUrl, totalResults: allResults.length, passed, failed, other, issuesSummary };
+  return { runId, runUrl, totalResults: effectiveResults.length, passed, failed, other, issuesSummary };
 }
