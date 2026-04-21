@@ -37,6 +37,7 @@ import {
   SuiteCondition,
   SyncConfig,
 } from '../types';
+import { isMarkerTag } from '../id-markers';
 import { AzureClient } from './client';
 
 // ─── Retry wrapper (F) ────────────────────────────────────────────────────────
@@ -351,10 +352,10 @@ function isIgnoredTag(tag: string, ignorePatterns: string[]): boolean {
  */
 export function processTagsForPush(
   tags: string[],
-  tagPrefix: string,
+  tagPrefix: string | string[],
   customizations?: CustomizationsConfig
 ): string[] {
-  let processed = tags.filter((t) => !t.startsWith(tagPrefix + ':'));
+  let processed = tags.filter((t) => !isMarkerTag(t, tagPrefix));
 
   // Apply tag text map transformation
   if (customizations?.tagTextMapTransformation?.enabled && customizations.tagTextMapTransformation.textMap) {

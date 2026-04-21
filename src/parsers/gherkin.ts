@@ -39,6 +39,7 @@ import {
 } from '@cucumber/messages';
 import * as fs from 'fs';
 
+import { isMarkerTag, normalizeMarkerTagPrefixes } from '../id-markers';
 import { LinkConfig, ParsedStep, ParsedTest } from '../types';
 import { extractAttachmentRefs, extractLinkRefs, extractPathTags, getAttachmentPrefixes } from './shared';
 
@@ -51,7 +52,6 @@ const STEP_TYPE_KEYWORD: Record<string, string> = {
   Context: 'Given',
   Action:  'When',
   Outcome: 'Then',
-  Unknown: 'Step',
 };
 
 // ─── Syntax-coloured description builder ─────────────────────────────────────
@@ -110,11 +110,11 @@ function stepToHtmlLines(step: Step, indent: string): string[] {
   }
 
   if (step.docString) {
-    lines.push(`${indent}&nbsp;&nbsp;<span style="color:${C_GREY}">\`\`\`</span>`);
+    lines.push(`${indent}&nbsp;&nbsp;<span style="color:${C_GREY}">"""</span>`);
     for (const line of step.docString.content.split('\n')) {
-      lines.push(`${indent}&nbsp;&nbsp;${esc(line)}`);
+      lines.push(`${indent}&nbsp;&nbsp;<span style="color:${C_GREY}">${esc(line)}</span>`);
     }
-    lines.push(`${indent}&nbsp;&nbsp;<span style="color:${C_GREY}">\`\`\`</span>`);
+    lines.push(`${indent}&nbsp;&nbsp;<span style="color:${C_GREY}">"""</span>`);
   }
 
   return lines;
@@ -129,7 +129,7 @@ function buildGherkinDescription(
   feature: NonNullable<GherkinDocument['feature']>,
   bgSteps: Step[],
   scenario: Scenario,
-  tagPrefix: string,
+  tagPrefix: string | string[],
 ): string {
   const indent = '&nbsp;&nbsp;&nbsp;&nbsp;';
   const parts: string[] = [];
@@ -152,7 +152,7 @@ function buildGherkinDescription(
   // ── Scenario tags (exclude the tc: ID tag) ────────────────────────────────
   const scenarioTags = scenario.tags
     .map((t) => stripAt(t.name))
-    .filter((t) => !t.startsWith(tagPrefix + ':'));
+    .filter((t) => !isMarkerTag(t, tagPrefix));
 
   parts.push('');
   if (scenarioTags.length) {
@@ -195,12 +195,14 @@ function stripAt(name: string): string {
 }
 
 /** Extract Azure Test Case ID from a list of tag names. e.g. ['tc:123', 'smoke'] → 123 */
-export function extractAzureId(tags: string[], tagPrefix: string): number | undefined {
-  const prefix = tagPrefix + ':';
+export function extractAzureId(tags: string[], tagPrefix: string | string[]): number | undefined {
+  const markerTagPrefixes = normalizeMarkerTagPrefixes(tagPrefix);
   for (const tag of tags) {
-    if (tag.startsWith(prefix)) {
-      const n = parseInt(tag.slice(prefix.length), 10);
-      if (!isNaN(n)) return n;
+    for (const prefix of markerTagPrefixes) {
+      if (tag.startsWith(`${prefix}:`)) {
+        const n = parseInt(tag.slice(prefix.length + 1), 10);
+        if (!isNaN(n)) return n;
+      }
     }
   }
   return undefined;
@@ -268,7 +270,7 @@ function scenarioOutlineToParsedTest(
   scenario: Scenario,
   filePath: string,
   pathTags: string[],
-  tagPrefix: string,
+  tagPrefix: string | string[],
   linkConfigs: LinkConfig[] | undefined,
   feature: NonNullable<GherkinDocument['feature']>,
   bgSteps: Step[],
@@ -324,7 +326,7 @@ function scenarioOutlineToParsedTest(
 
 export function parseGherkinFile(
   filePath: string,
-  tagPrefix: string,
+  tagPrefix: string | string[],
   linkConfigs?: LinkConfig[],
   attachmentsConfig?: { enabled: boolean; tagPrefixes?: string[] }
 ): ParsedTest[] {

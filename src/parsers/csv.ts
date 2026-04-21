@@ -77,7 +77,7 @@ function parseCsv(source: string): string[][] {
 
 export function parseCsvFile(
   filePath: string,
-  tagPrefix: string,
+  tagPrefix: string | string[],
   linkConfigs?: LinkConfig[]
 ): ParsedTest[] {
   const source = fs.readFileSync(filePath, 'utf8');

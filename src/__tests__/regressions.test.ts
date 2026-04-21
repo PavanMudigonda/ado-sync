@@ -5,9 +5,11 @@ import * as path from 'node:path';
 import test from 'node:test';
 
 import { AzureClient } from '../azure/client';
+import { getPreferredMarkerTagPrefix } from '../id-markers';
+import { parseGherkinFile } from '../parsers/gherkin';
 import { updateTestCase } from '../azure/test-cases';
 import { parseJavaScriptFile } from '../parsers/javascript';
-import { buildPushDiff, failOnParseErrors } from '../sync/engine';
+import { buildPushDiff, failOnParseErrors, pull, push } from '../sync/engine';
 import { publishTestResults } from '../sync/publish-results';
 import { writebackDocComment } from '../sync/writeback';
 import { AzureTestCase, ParsedStep, ParsedTest, SyncConfig } from '../types';
@@ -64,6 +66,37 @@ test('failOnParseErrors aborts with file details', () => {
         msg.includes('unexpected token');
     }
   );
+});
+
+test('parseGherkinFile preserves doc-string block structure in description HTML', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ado-sync-gherkin-docstring-'));
+  const filePath = path.join(tempDir, 'sample.feature');
+  fs.writeFileSync(filePath, [
+    'Feature: Login',
+    '',
+    '  Scenario: shows api payload',
+    '    Given a payload',
+    '      """',
+    '      {',
+    '        "status": "ok"',
+    '      }',
+    '      """',
+    '',
+  ].join('\n'));
+
+  try {
+    const parsed = parseGherkinFile(filePath, 'tc');
+    const description = parsed[0]?.description ?? '';
+
+    assert.equal((description.match(/"""/g) ?? []).length, 2);
+    assert.match(description, /<span style="color:#6A737D">\{<\/span><br>/);
+    assert.match(description, /<span style="color:#6A737D">  &quot;status&quot;: &quot;ok&quot;<\/span><br>/);
+    assert.match(description, /<span style="color:#6A737D">\}<\/span><br>/);
+    assert.ok(!description.includes('""" {'));
+    assert.ok(!description.includes('""" &quot;status&quot;'));
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });
 
 test('updateTestCase removes stale outline parameter fields when scenario is no longer parametrized', async () => {
@@ -235,6 +268,105 @@ test('publishTestResults binds planned runs to configured suites and points', as
     assert.equal(addedResultsPayload[0].configuration.id, '9');
   } finally {
     (AzureClient as any).create = originalCreate;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('push skips removed-case detection on tag-filtered runs', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ado-sync-push-tags-'));
+  const filePath = path.join(tempDir, 'spec.md');
+  fs.writeFileSync(filePath, [
+    '### Login works',
+    '@smoke',
+    '',
+    'Steps:',
+    '1. Open the app',
+    '',
+  ].join('\n'));
+
+  const config = makeConfig({
+    local: { type: 'markdown', include: '*.md' },
+  });
+
+  let suiteFetchCount = 0;
+  const originalCreate = AzureClient.create;
+  (AzureClient as any).create = async () => ({
+    getTestPlanApi: async () => ({
+      getTestCaseList: async () => {
+        suiteFetchCount++;
+        return [{ workItem: { id: 77 } }];
+      },
+      getTestPlanById: async () => ({ rootSuite: { id: 10 } }),
+    }),
+    getWitApi: async () => ({
+      getWorkItems: async () => [{ id: 77, fields: { 'System.Title': 'Unrelated remote case', 'System.Tags': '' } }],
+    }),
+  });
+
+  try {
+    const results = await push(config, tempDir, { dryRun: true, tags: '@smoke' });
+    assert.equal(suiteFetchCount, 0);
+    assert.ok(results.some((r) => r.action === 'created'));
+    assert.ok(!results.some((r) => r.action === 'removed'));
+  } finally {
+    (AzureClient as any).create = originalCreate;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('pull-create errors for unsupported local types instead of creating markdown files', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ado-sync-pull-create-'));
+  const filePath = path.join(tempDir, 'sample.test.ts');
+  fs.writeFileSync(filePath, "test('existing test', () => {});\n");
+
+  const config = makeConfig({
+    local: { type: 'javascript', include: '*.test.ts' },
+    sync: {
+      tagPrefix: 'tc',
+      pull: { enableCreatingNewLocalTestCases: true },
+    },
+  });
+
+  let suiteFetchCount = 0;
+  const originalCreate = AzureClient.create;
+  (AzureClient as any).create = async () => ({
+    getTestApi: async () => ({}),
+    getTestPlanApi: async () => ({
+      getTestCaseList: async () => {
+        suiteFetchCount++;
+        return [];
+      },
+      getTestPlanById: async () => ({ rootSuite: { id: 10 } }),
+    }),
+    getWitApi: async () => ({ getWorkItems: async () => [] }),
+  });
+
+  try {
+    const results = await pull(config, tempDir);
+    assert.equal(suiteFetchCount, 0);
+    assert.ok(results.some((r) => r.action === 'error' && /Pull-create is not supported/.test(r.detail ?? '')));
+    assert.equal(fs.readdirSync(tempDir).filter((name) => name.endsWith('.md') || name.endsWith('.feature')).length, 0);
+  } finally {
+    (AzureClient as any).create = originalCreate;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('configurationKey marker prefixes parse namespaced and legacy JavaScript IDs', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ado-sync-config-key-'));
+  const filePath = path.join(tempDir, 'sample.test.ts');
+  const config = makeConfig({ configurationKey: 'Smoke Suite' });
+  const markerPrefix = getPreferredMarkerTagPrefix(config);
+
+  try {
+    fs.writeFileSync(filePath, [`// @${markerPrefix}:123`, "test('namespaced id', () => {});", ''].join('\n'));
+    const namespaced = parseJavaScriptFile(filePath, [markerPrefix, 'tc']);
+    assert.equal(namespaced[0]?.azureId, 123);
+
+    fs.writeFileSync(filePath, ['// @tc:456', "test('legacy id', () => {});", ''].join('\n'));
+    const legacy = parseJavaScriptFile(filePath, [markerPrefix, 'tc']);
+    assert.equal(legacy[0]?.azureId, 456);
+  } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });

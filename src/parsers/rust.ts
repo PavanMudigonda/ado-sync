@@ -17,6 +17,7 @@
 
 import * as fs from 'fs';
 
+import { buildMarkerTagPrefixPattern, normalizeMarkerTagPrefixes } from '../id-markers';
 import { LinkConfig, ParsedStep, ParsedTest } from '../types';
 import { extractLinkRefs, extractPathTags } from './shared';
 
@@ -56,13 +57,14 @@ interface RustCommentBlock {
 function extractCommentBlockAbove(
   lines: string[],
   attrLineIdx: number,
-  tagPrefix: string
+  tagPrefix: string | string[]
 ): RustCommentBlock {
   const docLines: string[] = [];
   let azureId: number | undefined;
   const tags: string[] = [];
+  const markerTagPrefixes = normalizeMarkerTagPrefixes(tagPrefix);
 
-  const idRe       = new RegExp(`//\\s*@${tagPrefix}:(\\d+)`);
+  const idRe       = new RegExp(`//\\s*@(?!tags?:)(?:${buildMarkerTagPrefixPattern(markerTagPrefixes)}):(\\d+)`);
   const tagsRe     = /\/\/\s*@tags:\s*(.+)/i;
   const singleTagRe = /\/\/\s*@(\w+)\s*$/;
   const docRe       = /^\/\/[\/!]?\s?(.*)$/; // matches //, ///, //!
@@ -93,7 +95,7 @@ function extractCommentBlockAbove(
     }
 
     const singleTagMatch = trimmed.match(singleTagRe);
-    if (singleTagMatch && singleTagMatch[1] !== tagPrefix) {
+    if (singleTagMatch && !markerTagPrefixes.includes(singleTagMatch[1])) {
       tags.push(singleTagMatch[1]);
       continue;
     }
@@ -151,7 +153,7 @@ function parseSummary(
 
 export function parseRustFile(
   filePath: string,
-  tagPrefix: string,
+  tagPrefix: string | string[],
   linkConfigs?: LinkConfig[]
 ): ParsedTest[] {
   const source = fs.readFileSync(filePath, 'utf8');
