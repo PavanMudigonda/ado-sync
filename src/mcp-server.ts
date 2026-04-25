@@ -53,6 +53,7 @@ import { getTestCase, getTestCasesInSuite } from './azure/test-cases';
 import { findStoriesByTagAddedSince, getStoryContext, getWorkItemsByAreaPath, getWorkItemsByIds, getWorkItemsByQuery } from './azure/work-items';
 import { applyOverrides, loadConfig, resolveConfigPath } from './config';
 import { createIssuesFromResults } from './issues/create-issues';
+import { detectAiEnvironment } from './ai/summarizer';
 import { pull, push, status } from './sync/engine';
 import { generateSpecs } from './sync/generate';
 import { generateManifests } from './sync/manifest';
@@ -74,6 +75,18 @@ function resolveConfig(configPath?: string, overrides?: string[]) {
   // Resolve AI API key env var references that loadConfig doesn't handle
   if (config.sync?.ai?.apiKey) {
     config.sync.ai.apiKey = resolveEnvRef(config.sync.ai.apiKey);
+  }
+  // MCP server is always called by an AI agent — auto-detect available
+  // provider/key when no explicit AI config is set so users don't need to
+  // configure --ai-provider or --ai-key separately.
+  // First try detectAiEnvironment() for API-key-backed providers; if that
+  // returns nothing, default to heuristic (MCP ⟹ always inside an AI agent).
+  if (!config.sync?.ai?.provider) {
+    const detected = detectAiEnvironment() ?? { provider: 'heuristic' as const };
+    if (!config.sync) config.sync = {} as any;
+    if (!config.sync!.ai) config.sync!.ai = {} as any;
+    config.sync!.ai!.provider = detected.provider;
+    if ('apiKey' in detected && detected.apiKey) config.sync!.ai!.apiKey = detected.apiKey;
   }
   return { config, configDir: path.dirname(resolved), configPath: resolved };
 }
@@ -296,8 +309,8 @@ server.tool(
     outputFolder: z.string().optional().describe('Folder to write spec files (default: config pull.targetFolder or config dir)'),
     force: z.boolean().optional().default(false).describe('Overwrite existing spec files'),
     dryRun: z.boolean().optional().default(false).describe('Preview without writing files'),
-    aiProvider: z.enum(['local', 'ollama', 'openai', 'anthropic', 'huggingface', 'bedrock', 'azureai']).optional()
-      .describe('AI provider for generating spec content from the story description and AC'),
+    aiProvider: z.enum(['local', 'ollama', 'openai', 'anthropic', 'huggingface', 'bedrock', 'azureai', 'github', 'azureinference', 'heuristic']).optional()
+      .describe('AI provider for generating spec content from the story description and AC. Auto-detected from environment when omitted.'),
     aiModel: z.string().optional().describe('Model name/path/id for the AI provider'),
     aiKey: z.string().optional().describe('API key for the AI provider ($ENV_VAR reference supported)'),
     aiUrl: z.string().optional().describe('Base URL override for the AI provider endpoint'),

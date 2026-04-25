@@ -18,7 +18,7 @@ import * as path from 'path';
 import * as readline from 'readline';
 
 import pkg from '../package.json';
-import { AiSummaryOpts } from './ai/summarizer';
+import { AiSummaryOpts, detectAiEnvironment } from './ai/summarizer';
 import { AzureClient } from './azure/client';
 import { applyOverrides, CONFIG_TEMPLATE_JSON, CONFIG_TEMPLATE_YAML, loadConfig, resolveConfigPath } from './config';
 import { coverageReport, detectStaleTestCases, pull, push, status } from './sync/engine';
@@ -75,6 +75,11 @@ function collect(value: string, previous: string[]): string[] {
 /**
  * Build AiSummaryOpts from parsed CLI opts, falling back to config file values.
  * CLI flags always take precedence. Returns undefined when provider is 'none'.
+ *
+ * Fallback chain: CLI flags → config file → auto-detected AI environment → 'local'.
+ * When running inside an AI assistant terminal (Claude Code, Codex, Copilot, Cursor),
+ * the environment is detected automatically and the appropriate provider/key is used
+ * without requiring explicit --ai-provider or --ai-key flags.
  */
 function buildAiOpts(
   opts: { aiProvider?: string; aiModel?: string; aiUrl?: string; aiKey?: string; aiRegion?: string; aiContext?: string },
@@ -83,7 +88,9 @@ function buildAiOpts(
 ): AiSummaryOpts | undefined {
   const cfgAi = config?.sync?.ai;
   // CLI --ai-provider none wins over config; config provider='none' also disables
-  const provider = opts.aiProvider ?? cfgAi?.provider ?? 'local';
+  const explicitProvider = opts.aiProvider ?? cfgAi?.provider;
+  const detected = !explicitProvider ? detectAiEnvironment() : undefined;
+  const provider = explicitProvider ?? detected?.provider ?? 'local';
   if (provider === 'none') return undefined;
 
   const resolveEnvRef = (value?: string): string | undefined => {
@@ -125,11 +132,14 @@ function buildAiOpts(
     }
   }
 
+  // Use auto-detected API key as fallback when no explicit key is configured
+  const apiKey = opts.aiKey ?? cfgAi?.apiKey ?? detected?.apiKey;
+
   return {
     provider: provider as AiSummaryOpts['provider'],
     model,
     baseUrl:  opts.aiUrl    ?? cfgAi?.baseUrl,
-    apiKey:   opts.aiKey    ?? cfgAi?.apiKey,
+    apiKey,
     region:   opts.aiRegion ?? cfgAi?.region,
     heuristicFallback: true,
     contextContent,
