@@ -194,11 +194,14 @@ All tools accept these optional base parameters:
   "force": false,
   "aiProvider": "anthropic",
   "aiModel": "claude-sonnet-4-6",
-  "aiKey": "$ANTHROPIC_API_KEY"
+  "aiKey": "$ANTHROPIC_API_KEY",
+  "aiContext": ["src/orders/**", "tests/orders/**", "docs/orders.md"]
 }
 ```
 
 AI provider options: `local`, `ollama`, `openai`, `anthropic`, `huggingface`, `bedrock`, `azureai`. Falls back to `sync.ai` config when not supplied. When `dryRun: true` and an AI provider is set, the first 20 lines of generated content are included in the tool response as a preview.
+
+`aiContext` is optional and accepts files, folders, or globs. Prefer a small feature-specific slice of the repo: relevant app code, existing automation, and one or two docs files. Avoid the whole workspace.
 
 ### `publish_test_results`
 

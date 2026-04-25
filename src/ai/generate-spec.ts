@@ -51,6 +51,8 @@ export interface AiGenerateOpts {
   apiKey?: string;
   /** AWS region for bedrock (default: AWS_REGION env or us-east-1). */
   region?: string;
+  /** Additional curated repo/app/test context injected into the generation prompt. */
+  contextContent?: string;
   /** Fall back to template output if the AI call fails. Default: true. */
   heuristicFallback?: boolean;
 }
@@ -133,19 +135,31 @@ Description:
 Acceptance Criteria:
 {AC}`;
 
-function buildPrompt(story: AdoStory, format: GenerateSpecFormat): string {
+function buildPrompt(story: AdoStory, format: GenerateSpecFormat, contextContent?: string): string {
   const template = format === 'gherkin' ? GHERKIN_PROMPT : MARKDOWN_PROMPT;
+  const contextSection = storyContextSection(contextContent);
   return template
     .replace('{TITLE}', story.title)
     .replace('{TYPE}', story.workItemType ?? 'User Story')
     .replace('{STATE}', story.state ?? 'Active')
     .replace('{DESCRIPTION}', story.description?.trim() || '(not provided)')
-    .replace('{AC}', story.acceptanceCriteria?.trim() || '(not provided)');
+    .replace('{AC}', `${story.acceptanceCriteria?.trim() || '(not provided)'}${contextSection}`);
+}
+
+function storyContextSection(contextContent?: string): string {
+  const trimmed = contextContent?.trim();
+  if (!trimmed) return '';
+  return `
+
+Additional implementation and test context from the workspace:
+${trimmed}
+
+Use this context to make scenarios and steps more concrete, but do not invent behavior that conflicts with the story or AC.`;
 }
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 const esmImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
 
 function resolveEnvVar(value: string): string {
@@ -156,9 +170,9 @@ function resolveEnvVar(value: string): string {
 // ─── Provider implementations ─────────────────────────────────────────────────
 
 interface LlamaSession {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   LlamaChatSession: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   model: any;
 }
 
@@ -167,7 +181,7 @@ const llamaCache = new Map<string, Promise<LlamaSession>>();
 async function getLlamaSession(modelPath: string): Promise<LlamaSession> {
   if (llamaCache.has(modelPath)) return llamaCache.get(modelPath)!;
   const promise = (async (): Promise<LlamaSession> => {
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval, @typescript-eslint/no-explicit-any
+     
     const esmImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
     const llamaModule = await esmImport('node-llama-cpp');
     const { getLlama, LlamaChatSession } = llamaModule;
@@ -196,7 +210,7 @@ async function localProvider(prompt: string, modelPath: string): Promise<string>
 }
 
 async function ollamaProvider(prompt: string, model: string, baseUrl: string): Promise<string> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let Ollama: any;
   try {
     ({ Ollama } = await esmImport('ollama'));
@@ -217,7 +231,7 @@ async function openaiProvider(
   apiKey: string,
   baseUrl?: string
 ): Promise<string> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let OpenAI: any;
   try {
     ({ OpenAI } = await esmImport('openai'));
@@ -243,7 +257,7 @@ async function anthropicProvider(
   apiKey: string,
   baseUrl?: string
 ): Promise<string> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let Anthropic: any;
   try {
     ({ default: Anthropic } = await esmImport('@anthropic-ai/sdk'));
@@ -259,7 +273,7 @@ async function anthropicProvider(
     max_tokens: 4096,
     messages: [{ role: 'user', content: prompt }],
   });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   return (msg.content[0] as any)?.text ?? '';
 }
 
@@ -287,7 +301,7 @@ async function azureinferenceProvider(
   apiKey: string,
   endpoint: string
 ): Promise<string> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let ModelClient: any, AzureKeyCredential: any;
   try {
     ({ default: ModelClient } = await esmImport('@azure-rest/ai-inference'));
@@ -310,7 +324,7 @@ async function azureinferenceProvider(
   if (response.status !== '200') {
     throw new Error(`Azure AI Inference ${response.status}: ${JSON.stringify(response.body)}`);
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   return (response.body as any).choices?.[0]?.message?.content ?? '';
 }
 
@@ -332,7 +346,7 @@ function warnIfNoBedrockCredentials(): void {
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 async function bedrockInvokeWithRetry(client: any, command: any, maxRetries = 3, baseDelayMs = 5_000): Promise<any> {
   let attempt = 0;
   while (true) {
@@ -363,10 +377,10 @@ async function bedrockProvider(
   warnIfNoBedrockCredentials();
 
   // Dynamic import — requires @aws-sdk/client-bedrock-runtime to be installed
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let bedrockModule: any;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval, @typescript-eslint/no-explicit-any
+     
     const esmImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
     bedrockModule = await esmImport('@aws-sdk/client-bedrock-runtime');
   } catch {
@@ -416,7 +430,7 @@ async function bedrockProvider(
     accept: 'application/json',
   }));
   const responseText = new TextDecoder().decode(response.body);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const data = JSON.parse(responseText) as any;
 
   // Handle different response shapes
@@ -435,7 +449,7 @@ async function azureaiProvider(
   apiKey: string,
   baseUrl: string
 ): Promise<string> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let AzureOpenAI: any;
   try {
     ({ AzureOpenAI } = await esmImport('openai'));
@@ -469,7 +483,7 @@ export async function generateSpecFromStory(
   format: GenerateSpecFormat,
   opts: AiGenerateOpts
 ): Promise<string> {
-  const prompt = buildPrompt(story, format);
+  const prompt = buildPrompt(story, format, opts.contextContent);
   const heuristicFallback = opts.heuristicFallback ?? true;
 
   const run = async (): Promise<string> => {

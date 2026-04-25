@@ -22,7 +22,7 @@ import { AiSummaryOpts, detectAiEnvironment } from './ai/summarizer';
 import { AzureClient } from './azure/client';
 import { applyOverrides, CONFIG_TEMPLATE_JSON, CONFIG_TEMPLATE_YAML, loadConfig, resolveConfigPath } from './config';
 import { coverageReport, detectStaleTestCases, pull, push, status } from './sync/engine';
-import { generateSpecs } from './sync/generate';
+import { generateSpecs, loadGenerateContextContent } from './sync/generate';
 import { generateManifests } from './sync/manifest';
 import { publishTestResults } from './sync/publish-results';
 import { SyncConfig, SyncResult } from './types';
@@ -90,7 +90,7 @@ function buildAiOpts(
   // CLI --ai-provider none wins over config; config provider='none' also disables
   const explicitProvider = opts.aiProvider ?? cfgAi?.provider;
   const detected = !explicitProvider ? detectAiEnvironment() : undefined;
-  const provider = explicitProvider ?? detected?.provider ?? 'local';
+  const provider = explicitProvider ?? (cfgAi?.model ? 'local' : undefined) ?? detected?.provider ?? 'local';
   if (provider === 'none') return undefined;
 
   const resolveEnvRef = (value?: string): string | undefined => {
@@ -747,6 +747,7 @@ program
   .option('--ai-key <key>', 'API key for the AI provider (or $ENV_VAR reference)')
   .option('--ai-url <url>', 'Base URL override for the AI provider endpoint')
   .option('--ai-region <region>', 'AWS region for bedrock provider (default: AWS_REGION env or us-east-1)')
+  .option('--ai-context <path>', 'Additional AI context file, folder, or glob for generate (repeatable)', collect, [])
   .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
   .action(async (opts) => {
     const globalOpts = program.opts();
@@ -811,9 +812,17 @@ program
 
       // Build AI opts: CLI flags → config.sync.ai (generate.ts handles the config fallback too,
       // but constructing via buildAiOpts here gives the CLI consistent env-var resolution)
-      const aiOpts = (opts.aiProvider || config.sync?.ai?.provider)
+      const generateProvider = opts.aiProvider
+        ?? (config.sync?.ai?.provider && config.sync.ai.provider !== 'heuristic' ? config.sync.ai.provider : undefined)
+        ?? (config.sync?.ai?.model ? 'local' : undefined);
+      const generateContextSources = opts.aiContext?.length
+        ? opts.aiContext
+        : (config.sync?.ai?.contextFile ? [config.sync.ai.contextFile] : undefined);
+      const generateContextContent = loadGenerateContextContent(generateContextSources, configDir);
+
+      const aiOpts = generateProvider
         ? (() => {
-            const base = buildAiOpts(opts, config, configDir);
+            const base = buildAiOpts({ ...opts, aiContext: undefined }, config, configDir);
             if (!base) return undefined;
             return {
               provider: base.provider as import('./ai/generate-spec').AiGenerateProvider,
@@ -821,6 +830,7 @@ program
               apiKey:   base.apiKey,
               baseUrl:  base.baseUrl,
               region:   base.region,
+              contextContent: generateContextContent,
             };
           })()
         : undefined;
