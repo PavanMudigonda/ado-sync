@@ -47,6 +47,129 @@ export type AiProvider =
   | 'github'
   | 'azureinference';
 
+/**
+ * Detect if we're running inside an AI assistant environment and return the
+ * best available AI provider + credentials automatically so users don't need
+ * to pass --ai-provider / --ai-key explicitly.
+ *
+ * Detection order (first match wins):
+ *   1. Explicit API keys in env         → use the matching provider directly
+ *   2. Known AI-tool session env vars   → heuristic (the calling AI handles reasoning)
+ *   3. TERM_PROGRAM matches an AI editor→ heuristic
+ *   4. Nothing detected                 → undefined (caller falls back to 'local')
+ *
+ * Covered environments:
+ *   Claude Code, OpenAI Codex CLI, GitHub Copilot, Cursor, Windsurf,
+ *   Cline, Google Antigravity, Aider, Continue, Augment Code, Zed AI,
+ *   JetBrains AI, Roo Code, Trae, PearAI, Void, Amp, Amazon Q Developer.
+ */
+export function detectAiEnvironment(): Pick<AiSummaryOpts, 'provider' | 'apiKey'> | undefined {
+  // ── 1. Explicit API keys → use the corresponding provider directly ──────
+  if (process.env['ANTHROPIC_API_KEY']) {
+    return { provider: 'anthropic', apiKey: process.env['ANTHROPIC_API_KEY'] };
+  }
+  if (process.env['OPENAI_API_KEY']) {
+    return { provider: 'openai', apiKey: process.env['OPENAI_API_KEY'] };
+  }
+  if (process.env['GITHUB_TOKEN']) {
+    return { provider: 'github', apiKey: process.env['GITHUB_TOKEN'] };
+  }
+
+  // ── 2. Known AI assistant session env vars → heuristic ──────────────────
+  //    When one of these is set, an AI agent is orchestrating the commands —
+  //    ado-sync's own LLM call is redundant, so use fast heuristic mode.
+  const aiSessionSignals = [
+    // Claude Code (Anthropic CLI agent)
+    'CLAUDE_CODE',
+    'CLAUDE_CONTEXT',
+    // OpenAI Codex CLI
+    'CODEX',
+    'OPENAI_CODEX',
+    'CODEX_CLI',
+    // GitHub Copilot Agent Mode (VS Code)
+    'COPILOT_AGENT_MODE',
+    // Cursor (VS Code fork)
+    'CURSOR_SESSION_ID',
+    'CURSOR_TRACE_ID',
+    // Windsurf / Codeium (VS Code fork)
+    'WINDSURF_SESSION_ID',
+    // Cline (VS Code extension)
+    'CLINE_TASK_ID',
+    'CLINE_SESSION_ID',
+    // Google Antigravity (VS Code fork)
+    'ANTIGRAVITY_SESSION_ID',
+    // Aider (CLI agent)
+    'AIDER',
+    'AIDER_SESSION',
+    // Continue.dev (VS Code extension)
+    'CONTINUE_SESSION_ID',
+    // Augment Code (VS Code extension)
+    'AUGMENT_SESSION_ID',
+    // Roo Code (VS Code extension, formerly Roo Cline)
+    'ROO_CODE_SESSION_ID',
+    // Trae (ByteDance AI editor)
+    'TRAE_SESSION_ID',
+    // Amazon Q Developer
+    'AMAZON_Q_SESSION_ID',
+    'AWS_Q_SESSION_ID',
+    // Amp (Sourcegraph)
+    'AMP_SESSION_ID',
+  ];
+  for (const envVar of aiSessionSignals) {
+    if (process.env[envVar]) {
+      return { provider: 'heuristic' };
+    }
+  }
+
+  // ── 3. TERM_PROGRAM / editor detection (macOS, Linux, Windows) ────────
+  //    AI-native editors set TERM_PROGRAM (macOS/Linux) to their name.
+  //    On Windows, some set their own env vars or are detectable via PATH.
+  const termProgram = (process.env['TERM_PROGRAM'] ?? '').toLowerCase();
+  const aiTermPrograms = [
+    'cursor',           // Cursor
+    'windsurf',         // Windsurf (Codeium)
+    'antigravity',      // Google Antigravity
+    'zed',              // Zed (has built-in AI assistant)
+    'trae',             // Trae (ByteDance)
+    'pearai',           // PearAI (VS Code fork)
+    'void',             // Void (open-source AI editor)
+  ];
+  if (aiTermPrograms.includes(termProgram)) {
+    return { provider: 'heuristic' };
+  }
+
+  // ── 4. PATH-based detection for AI editors (all platforms) ──────────────
+  //    Works on macOS/Linux (PATH) and Windows (Path — Node normalises both).
+  //    Detects editors by their install directory appearing in the PATH.
+  const pathEnv = process.env['PATH'] ?? '';
+  const aiPathPatterns = [
+    /[/\\]\.antigravity[/\\]/i,      // Google Antigravity
+    /[/\\]cursor[/\\]/i,             // Cursor
+    /[/\\]windsurf[/\\]/i,           // Windsurf
+    /[/\\]trae[/\\]/i,               // Trae
+    /[/\\]pearai[/\\]/i,             // PearAI
+  ];
+  for (const pattern of aiPathPatterns) {
+    if (pattern.test(pathEnv)) {
+      return { provider: 'heuristic' };
+    }
+  }
+
+  // ── 5. JetBrains AI terminal (Linux/macOS + Windows) ────────────────────
+  //    Linux/macOS: TERMINAL_EMULATOR=JetBrains-JediTerm
+  //    Windows: IDEA_INITIAL_DIRECTORY or __INTELLIJ_COMMAND_HISTFILE__ set
+  const terminalEmulator = process.env['TERMINAL_EMULATOR'] ?? '';
+  if (/jetbrains/i.test(terminalEmulator)
+      || process.env['IDEA_INITIAL_DIRECTORY']
+      || process.env['__INTELLIJ_COMMAND_HISTFILE__']) {
+    return { provider: 'heuristic' };
+  }
+
+  // ── 6. MCP server always runs inside an AI agent (handled by caller) ────
+
+  return undefined;
+}
+
 export interface AiSummaryOpts {
   provider: AiProvider;
   /**

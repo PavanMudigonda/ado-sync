@@ -7,7 +7,7 @@ import * as fs from 'fs';
 import { glob } from 'glob';
 import * as path from 'path';
 
-import { AiSummaryOpts, summarizeTest } from '../ai/summarizer';
+import { AiSummaryOpts, detectAiEnvironment, summarizeTest } from '../ai/summarizer';
 import { stripHtml } from '../html';
 import { AzureClient } from '../azure/client';
 import {
@@ -440,13 +440,17 @@ async function pushSingle(
   }
   failOnParseErrors('push', parseFailures);
 
-  // AI auto-summary: for code-based local types, default to the local node-llama-cpp
-  // provider (with heuristic fallback) when no explicit aiSummary opts are provided.
-  // If no GGUF model path is set, the local provider transparently falls back to
-  // heuristic mode so the push always succeeds even without a model installed.
+  // AI auto-summary: for code-based local types, auto-detect the AI environment
+  // (Claude Code, Copilot, Codex, etc.) and use the available provider/key.
+  // Falls back to the local node-llama-cpp provider with heuristic fallback
+  // when no AI environment is detected, so push always succeeds.
+  const detected = detectAiEnvironment();
+  const defaultAiOpts: AiSummaryOpts = detected
+    ? { provider: detected.provider, apiKey: detected.apiKey, heuristicFallback: true }
+    : { provider: 'local', heuristicFallback: true };
   const effectiveAiOpts: AiSummaryOpts | undefined =
     opts._preloadedTests ? undefined  // AI already applied in multi-plan pre-pass
-    : opts.aiSummary ?? (CODE_TYPES.has(config.local.type) ? { provider: 'local', heuristicFallback: true } : undefined);
+    : opts.aiSummary ?? (CODE_TYPES.has(config.local.type) ? defaultAiOpts : undefined);
 
   if (effectiveAiOpts) {
     const aiTargets = resolvedTests.filter(t => t.steps.length === 0 || !t.description);
