@@ -455,7 +455,7 @@ export interface SyncConfig {
       /**
        * Path to a markdown file containing additional domain context or instructions
        * for the AI (e.g. glossary, naming conventions, step style guidelines).
-       * The file content is injected into the prompt before the test code.
+        * The file content is injected into AI prompts for summary/generate flows.
        * Relative paths are resolved from the config file directory.
        */
       contextFile?: string;

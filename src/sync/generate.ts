@@ -7,6 +7,7 @@
  */
 
 import * as fs from 'fs';
+import { globSync } from 'glob';
 import * as path from 'path';
 
 import { AiGenerateOpts, generateSpecFromStory } from '../ai/generate-spec';
@@ -192,6 +193,88 @@ function buildContent(story: AdoStory, format: GenerateFormat): string {
     : buildMarkdownContent(story);
 }
 
+function hasGlobMagic(value: string): boolean {
+  return /[*?[\]{}]/.test(value);
+}
+
+export function loadGenerateContextContent(
+  contextInputs: string[] | undefined,
+  configDir: string,
+  warningPrefix = '[ai-generate]'
+): string | undefined {
+  if (!contextInputs?.length) return undefined;
+
+  const maxFiles = 12;
+  const maxChars = 48_000;
+  const matchedFiles = new Set<string>();
+  const ignoredGlobs = ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/build/**', '**/coverage/**'];
+
+  for (const input of contextInputs) {
+    const resolvedInput = path.isAbsolute(input) ? input : path.resolve(configDir, input);
+    const candidate = hasGlobMagic(input)
+      ? globSync(input, { cwd: configDir, absolute: true, nodir: true, ignore: ignoredGlobs })
+      : fs.existsSync(resolvedInput) && fs.statSync(resolvedInput).isDirectory()
+        ? globSync('**/*', { cwd: resolvedInput, absolute: true, nodir: true, ignore: ignoredGlobs })
+        : [resolvedInput];
+
+    for (const filePath of candidate) {
+      if (matchedFiles.size >= maxFiles) break;
+      if (!fs.existsSync(filePath)) continue;
+      const stat = fs.statSync(filePath);
+      if (!stat.isFile()) continue;
+      matchedFiles.add(filePath);
+    }
+  }
+
+  if (!matchedFiles.size) return undefined;
+
+  const sections: string[] = [];
+  let totalChars = 0;
+  for (const filePath of [...matchedFiles].sort()) {
+    if (totalChars >= maxChars) break;
+    try {
+      const content = fs.readFileSync(filePath, 'utf8').replace(/\0/g, '').trim();
+      if (!content) continue;
+      const relPath = path.relative(configDir, filePath) || path.basename(filePath);
+      const remaining = maxChars - totalChars;
+      const body = content.length > remaining ? `${content.slice(0, Math.max(0, remaining - 32))}\n[truncated]` : content;
+      const section = `--- file: ${relPath} ---\n${body}`;
+      sections.push(section);
+      totalChars += section.length + 2;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`  ${warningPrefix} Warning: could not read context source "${filePath}": ${msg}\n`);
+    }
+  }
+
+  if ([...matchedFiles].length >= maxFiles) {
+    process.stderr.write(`  ${warningPrefix} Warning: context input matched more than ${maxFiles} files; only the first ${maxFiles} were used\n`);
+  }
+  if (totalChars >= maxChars) {
+    process.stderr.write(`  ${warningPrefix} Warning: context content was truncated to ${maxChars} characters\n`);
+  }
+
+  return sections.length ? sections.join('\n\n') : undefined;
+}
+
+function loadConfiguredContextFile(configDir: string, contextFile?: string): string | undefined {
+  if (!contextFile) return undefined;
+  const absPath = path.isAbsolute(contextFile)
+    ? contextFile
+    : path.resolve(configDir, contextFile);
+  if (!fs.existsSync(absPath)) {
+    process.stderr.write(`  [ai-generate] Warning: could not read contextFile "${absPath}": ENOENT\n`);
+    return undefined;
+  }
+  try {
+    return loadGenerateContextContent([absPath], configDir, '[ai-generate]');
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`  [ai-generate] Warning: could not read contextFile "${absPath}": ${msg}\n`);
+    return undefined;
+  }
+}
+
 // ─── Main function ────────────────────────────────────────────────────────────
 
 export async function generateSpecs(
@@ -209,6 +292,12 @@ export async function generateSpecs(
       apiKey:   cfgAi.apiKey,
       baseUrl:  cfgAi.baseUrl,
       region:   cfgAi.region,
+      contextContent: loadConfiguredContextFile(configDir, cfgAi.contextFile),
+    };
+  } else if (aiOpts && !aiOpts.contextContent) {
+    aiOpts = {
+      ...aiOpts,
+      contextContent: loadConfiguredContextFile(configDir, cfgAi?.contextFile),
     };
   }
 

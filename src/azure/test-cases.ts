@@ -24,6 +24,7 @@ import * as fs from 'fs';
 import { glob } from 'glob';
 import * as path from 'path';
 
+import { isMarkerTag } from '../id-markers';
 import {
   AzureStep,
   AzureTestCase,
@@ -37,7 +38,6 @@ import {
   SuiteCondition,
   SyncConfig,
 } from '../types';
-import { isMarkerTag } from '../id-markers';
 import { AzureClient } from './client';
 
 // ─── Retry wrapper (F) ────────────────────────────────────────────────────────

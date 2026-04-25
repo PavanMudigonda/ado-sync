@@ -5,11 +5,12 @@ import * as path from 'node:path';
 import test from 'node:test';
 
 import { AzureClient } from '../azure/client';
+import { updateTestCase } from '../azure/test-cases';
 import { getPreferredMarkerTagPrefix } from '../id-markers';
 import { parseGherkinFile } from '../parsers/gherkin';
-import { updateTestCase } from '../azure/test-cases';
 import { parseJavaScriptFile } from '../parsers/javascript';
 import { buildPushDiff, failOnParseErrors, pull, push } from '../sync/engine';
+import { loadGenerateContextContent } from '../sync/generate';
 import { publishTestResults } from '../sync/publish-results';
 import { writebackDocComment } from '../sync/writeback';
 import { AzureTestCase, ParsedStep, ParsedTest, SyncConfig } from '../types';
@@ -268,6 +269,49 @@ test('publishTestResults binds planned runs to configured suites and points', as
     assert.equal(addedResultsPayload[0].configuration.id, '9');
   } finally {
     (AzureClient as any).create = originalCreate;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('loadGenerateContextContent collects bounded targeted context from files and folders', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ado-sync-generate-context-'));
+  const srcDir = path.join(tempDir, 'src');
+  const testsDir = path.join(tempDir, 'tests');
+  fs.mkdirSync(srcDir, { recursive: true });
+  fs.mkdirSync(testsDir, { recursive: true });
+  fs.writeFileSync(path.join(srcDir, 'feature.ts'), 'export const buttonLabel = "Submit order";\n');
+  fs.writeFileSync(path.join(testsDir, 'feature.spec.ts'), 'test("submits order", async () => {});\n');
+
+  try {
+    const content = loadGenerateContextContent(['src', 'tests/**/*.spec.ts'], tempDir, '[test:ai-generate]');
+    assert.ok(content);
+    assert.match(content ?? '', /--- file: src\/feature.ts ---/);
+    assert.match(content ?? '', /Submit order/);
+    assert.match(content ?? '', /--- file: tests\/feature.spec.ts ---/);
+    assert.match(content ?? '', /submits order/);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('loadGenerateContextContent caps file count and skips ignored folders', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ado-sync-generate-cap-'));
+  const srcDir = path.join(tempDir, 'src');
+  const ignoredDir = path.join(tempDir, 'node_modules/pkg');
+  fs.mkdirSync(srcDir, { recursive: true });
+  fs.mkdirSync(ignoredDir, { recursive: true });
+  for (let index = 0; index < 15; index++) {
+    fs.writeFileSync(path.join(srcDir, `file-${index}.ts`), `export const value${index} = ${index};\n`);
+  }
+  fs.writeFileSync(path.join(ignoredDir, 'ignored.js'), 'module.exports = true;\n');
+
+  try {
+    const content = loadGenerateContextContent(['src/**/*', 'node_modules/**/*'], tempDir, '[test:ai-generate]');
+    assert.ok(content);
+    const sections = (content?.match(/--- file:/g) ?? []).length;
+    assert.equal(sections, 12);
+    assert.doesNotMatch(content ?? '', /ignored.js/);
+  } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });

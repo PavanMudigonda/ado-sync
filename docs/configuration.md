@@ -227,7 +227,7 @@ Use `testPlans` instead of `testPlan` to sync one repo against multiple Test Pla
 | `attachments` | *(none)* | File attachment sync — see [Attachments](advanced.md#attachments). |
 | `pull` | *(none)* | Pull-specific options — see [Pull configuration](advanced.md#pull-configuration). |
 | `suiteConditions` | *(none)* | Per-tag additive suite routing rules. |
-| `ai` | *(none)* | AI provider config for auto-summarization and failure analysis — see [AI auto-summary](advanced.md#ai-auto-summary-for-code-tests). Fields: `provider`, `model`, `baseUrl`, `apiKey`, `contextFile`, `analyzeFailures`, `writebackDocComment`. |
+| `ai` | *(none)* | AI provider config for auto-summarization, generate context, and failure analysis — see [AI auto-summary](advanced.md#ai-auto-summary-for-code-tests). Fields: `provider`, `model`, `baseUrl`, `apiKey`, `contextFile`, `analyzeFailures`, `writebackDocComment`. |
 
 ---
 

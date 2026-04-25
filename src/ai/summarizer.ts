@@ -53,10 +53,10 @@ export type AiProvider =
  * to pass --ai-provider / --ai-key explicitly.
  *
  * Detection order (first match wins):
- *   1. Explicit API keys in env         → use the matching provider directly
- *   2. Known AI-tool session env vars   → heuristic (the calling AI handles reasoning)
- *   3. TERM_PROGRAM matches an AI editor→ heuristic
- *   4. Nothing detected                 → undefined (caller falls back to 'local')
+ *   1. Explicit API keys in env          → use the matching provider directly
+ *   2. Known AI-tool session env vars    → heuristic (for summary flows only)
+ *   3. TERM_PROGRAM matches an AI editor → heuristic
+ *   4. Nothing detected                  → undefined (caller decides the fallback)
  *
  * Covered environments:
  *   Claude Code, OpenAI Codex CLI, GitHub Copilot, Cursor, Windsurf,
@@ -836,7 +836,7 @@ function parseAiResponse(
 
 // ─── Shared dynamic import helper ────────────────────────────────────────────
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 const esmImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
 
 // ─── Provider implementations ─────────────────────────────────────────────────
@@ -847,9 +847,9 @@ const esmImport = new Function('m', 'return import(m)') as (m: string) => Promis
 // slots and trigger "No sequences left" on later tests.
 
 interface LlamaSession {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   LlamaChatSession: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   model: any;
 }
 
@@ -862,9 +862,9 @@ async function getLlamaSession(modelPath: string): Promise<LlamaSession> {
   const promise = (async (): Promise<LlamaSession> => {
     // new Function bypasses TypeScript's CJS transform so the import() call is
     // emitted as a true ESM dynamic import at runtime, not as require().
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval, @typescript-eslint/no-explicit-any
+     
     const esmImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const llamaModule: any = await esmImport('node-llama-cpp');
 
     const { getLlama, LlamaChatSession } = llamaModule;
@@ -909,7 +909,7 @@ async function ollamaSummary(
   baseUrl: string,
   contextContent?: string
 ): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let Ollama: any;
   try {
     ({ Ollama } = await esmImport('ollama'));
@@ -932,7 +932,7 @@ async function openaiSummary(
   baseUrl?: string,
   contextContent?: string
 ): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let OpenAI: any;
   try {
     ({ OpenAI } = await esmImport('openai'));
@@ -960,7 +960,7 @@ async function anthropicSummary(
   baseUrl?: string,
   contextContent?: string
 ): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let Anthropic: any;
   try {
     ({ default: Anthropic } = await esmImport('@anthropic-ai/sdk'));
@@ -976,7 +976,7 @@ async function anthropicSummary(
     max_tokens: 2048,
     messages: [{ role: 'user', content: buildPrompt(code, contextContent) }],
   });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   return parseAiResponse((msg.content[0] as any)?.text ?? '', fallbackTitle);
 }
 
@@ -1025,7 +1025,7 @@ export function warnIfNoBedrockCredentials(): void {
 /**
  * Invoke a Bedrock command with retry on ThrottlingException / ServiceUnavailableException.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 async function bedrockInvokeWithRetry(client: any, command: any, label = 'bedrock', maxRetries = 3, baseDelayMs = 5_000): Promise<any> {
   let attempt = 0;
   while (true) {
@@ -1057,10 +1057,10 @@ async function bedrockSummary(
 ): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
   warnIfNoBedrockCredentials();
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let bedrockModule: any;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval, @typescript-eslint/no-explicit-any
+     
     const esmImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
     bedrockModule = await esmImport('@aws-sdk/client-bedrock-runtime');
   } catch {
@@ -1086,7 +1086,7 @@ async function bedrockSummary(
   }), 'ai-summary');
 
   const text = new TextDecoder().decode(response.body);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const data = JSON.parse(text) as any;
   const raw: string =
     data.content?.[0]?.text ??
@@ -1103,7 +1103,7 @@ async function azureaiSummary(
   baseUrl: string,
   contextContent?: string
 ): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let AzureOpenAI: any;
   try {
     ({ AzureOpenAI } = await esmImport('openai'));
@@ -1148,7 +1148,7 @@ async function azureinferenceSummary(
   endpoint: string,
   contextContent?: string
 ): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let ModelClient: any, AzureKeyCredential: any;
   try {
     ({ default: ModelClient } = await esmImport('@azure-rest/ai-inference'));
@@ -1171,7 +1171,7 @@ async function azureinferenceSummary(
   if (response.status !== '200') {
     throw new Error(`Azure AI Inference ${response.status}: ${JSON.stringify(response.body)}`);
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   return parseAiResponse((response.body as any).choices?.[0]?.message?.content ?? '', fallbackTitle);
 }
 
@@ -1238,7 +1238,7 @@ export async function analyzeFailure(
     let raw = '';
     switch (opts.provider) {
       case 'ollama': {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         let OllamaFA: any;
         try { ({ Ollama: OllamaFA } = await esmImport('ollama')); } catch { throw new Error("ollama package not installed"); }
         const ollamaClient = new OllamaFA({ host: opts.baseUrl ?? 'http://localhost:11434' });
@@ -1250,7 +1250,7 @@ export async function analyzeFailure(
         break;
       }
       case 'openai': {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         let OpenAI: any;
         try { ({ OpenAI } = await esmImport('openai')); } catch { throw new Error("openai package not installed"); }
         const openaiClient = new OpenAI({
@@ -1267,7 +1267,7 @@ export async function analyzeFailure(
         break;
       }
       case 'anthropic': {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         let Anthropic: any;
         try { ({ default: Anthropic } = await esmImport('@anthropic-ai/sdk')); } catch { throw new Error("@anthropic-ai/sdk package not installed"); }
         const anthropicClient = new Anthropic({
@@ -1279,13 +1279,13 @@ export async function analyzeFailure(
           max_tokens: 1024,
           messages: [{ role: 'user', content: prompt }],
         });
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         raw = (anthropicMsg.content[0] as any)?.text ?? '';
         break;
       }
       case 'huggingface': {
         // Hugging Face OpenAI-compatible endpoint via openai SDK
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         let OpenAIhf: any;
         try { ({ OpenAI: OpenAIhf } = await esmImport('openai')); } catch { throw new Error("openai package not installed"); }
         const hfClient = new OpenAIhf({
@@ -1302,7 +1302,7 @@ export async function analyzeFailure(
       }
       case 'bedrock': {
         warnIfNoBedrockCredentials();
-        // eslint-disable-next-line @typescript-eslint/no-implied-eval, @typescript-eslint/no-explicit-any
+         
         const esmImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
         const { BedrockRuntimeClient, InvokeModelCommand } = await esmImport('@aws-sdk/client-bedrock-runtime')
           .catch(() => { throw new Error('bedrock requires @aws-sdk/client-bedrock-runtime'); });
@@ -1324,7 +1324,7 @@ export async function analyzeFailure(
       }
       case 'azureai': {
         if (!opts.baseUrl) break;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         let AzureOpenAI: any;
         try { ({ AzureOpenAI } = await esmImport('openai')); } catch { throw new Error("openai package not installed"); }
         const azureClient = new AzureOpenAI({
@@ -1343,7 +1343,7 @@ export async function analyzeFailure(
         break;
       }
       case 'github': {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         let OpenAIgh: any;
         try { ({ OpenAI: OpenAIgh } = await esmImport('openai')); } catch { throw new Error("openai package not installed"); }
         const ghClient = new OpenAIgh({
@@ -1361,7 +1361,7 @@ export async function analyzeFailure(
       }
       case 'azureinference': {
         if (!opts.baseUrl) break;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         let ModelClientFA: any, AzureKeyCredentialFA: any;
         try {
           ({ default: ModelClientFA } = await esmImport('@azure-rest/ai-inference'));
@@ -1371,7 +1371,7 @@ export async function analyzeFailure(
         const aiResp = await aiClient.path('/chat/completions').post({
           body: { model: opts.model ?? 'gpt-4o', messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: 256 },
         });
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         raw = (aiResp.body as any).choices?.[0]?.message?.content ?? '';
         break;
       }

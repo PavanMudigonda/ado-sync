@@ -5,6 +5,7 @@
 import parseTagExpression from '@cucumber/tag-expressions';
 import * as fs from 'fs';
 import { glob } from 'glob';
+import * as os from 'os';
 import * as path from 'path';
 
 import { AiSummaryOpts, detectAiEnvironment, summarizeTest } from '../ai/summarizer';
@@ -57,6 +58,45 @@ function matchesTags(test: ParsedTest, expression: string): boolean {
 
 /** Local types whose test bodies are executable code and may benefit from AI summarisation. */
 const CODE_TYPES = new Set(['javascript', 'playwright', 'puppeteer', 'cypress', 'testcafe', 'detox', 'espresso', 'xcuitest', 'flutter', 'java', 'csharp', 'python']);
+
+function resolveEnvRef(value?: string): string | undefined {
+  if (!value) return undefined;
+  if (!value.startsWith('$')) return value;
+  return process.env[value.slice(1)] ?? value;
+}
+
+function expandHome(value?: string): string | undefined {
+  if (!value) return undefined;
+  if (value === '~') return os.homedir();
+  if (value.startsWith('~/') || value.startsWith('~\\')) {
+    return path.join(os.homedir(), value.slice(2));
+  }
+  return value;
+}
+
+function resolveConfiguredAiSummary(config: SyncConfig, configDir: string): AiSummaryOpts | undefined {
+  const cfgAi = config.sync?.ai;
+  const provider = cfgAi?.provider ?? (cfgAi?.model ? 'local' : undefined);
+  if (!provider || provider === 'none') return undefined;
+
+  let model = cfgAi?.model;
+  if (provider === 'local' && model) {
+    model = resolveEnvRef(model);
+    model = expandHome(model);
+    if (model && !path.isAbsolute(model)) {
+      model = path.resolve(configDir, model);
+    }
+  }
+
+  return {
+    provider,
+    model,
+    baseUrl: cfgAi?.baseUrl,
+    apiKey: resolveEnvRef(cfgAi?.apiKey),
+    region: cfgAi?.region,
+    heuristicFallback: true,
+  };
+}
 
 // ─── File discovery ───────────────────────────────────────────────────────────
 
@@ -444,10 +484,12 @@ async function pushSingle(
   // (Claude Code, Copilot, Codex, etc.) and use the available provider/key.
   // Falls back to the local node-llama-cpp provider with heuristic fallback
   // when no AI environment is detected, so push always succeeds.
+  const configuredAiOpts = resolveConfiguredAiSummary(config, configDir);
   const detected = detectAiEnvironment();
-  const defaultAiOpts: AiSummaryOpts = detected
-    ? { provider: detected.provider, apiKey: detected.apiKey, heuristicFallback: true }
-    : { provider: 'local', heuristicFallback: true };
+  const defaultAiOpts: AiSummaryOpts = configuredAiOpts
+    ?? (detected
+      ? { provider: detected.provider, apiKey: detected.apiKey, heuristicFallback: true }
+      : { provider: 'local', heuristicFallback: true });
   const effectiveAiOpts: AiSummaryOpts | undefined =
     opts._preloadedTests ? undefined  // AI already applied in multi-plan pre-pass
     : opts.aiSummary ?? (CODE_TYPES.has(config.local.type) ? defaultAiOpts : undefined);
