@@ -8,7 +8,6 @@ import { glob } from 'glob';
 import * as path from 'path';
 
 import { AiSummaryOpts, detectAiEnvironment, summarizeTest } from '../ai/summarizer';
-import { stripHtml } from '../html';
 import { AzureClient } from '../azure/client';
 import {
   addTestCaseToConditionSuites,
@@ -23,6 +22,7 @@ import {
   tagTestCaseAsRemoved,
   updateTestCase,
 } from '../azure/test-cases';
+import { stripHtml } from '../html';
 import { getMarkerTagPrefixes, getPreferredMarkerTagPrefix, isMarkerTag } from '../id-markers';
 import { parseCsharpFile } from '../parsers/csharp';
 import { applyRemoteToCsv, parseCsvFile } from '../parsers/csv';

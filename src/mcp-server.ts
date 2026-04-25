@@ -48,12 +48,12 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import * as path from 'path';
 import { z } from 'zod';
 
+import { detectAiEnvironment } from './ai/summarizer';
 import { AzureClient } from './azure/client';
 import { getTestCase, getTestCasesInSuite } from './azure/test-cases';
 import { findStoriesByTagAddedSince, getStoryContext, getWorkItemsByAreaPath, getWorkItemsByIds, getWorkItemsByQuery } from './azure/work-items';
 import { applyOverrides, loadConfig, resolveConfigPath } from './config';
 import { createIssuesFromResults } from './issues/create-issues';
-import { detectAiEnvironment } from './ai/summarizer';
 import { pull, push, status } from './sync/engine';
 import { generateSpecs } from './sync/generate';
 import { generateManifests } from './sync/manifest';
