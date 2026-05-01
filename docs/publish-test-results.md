@@ -132,6 +132,13 @@ ado-sync publish-test-results \
   --analyze-failures \
   --ai-provider ollama \
   --ai-model gemma-4-e4b-it
+
+# Analyse with Docker Model Runner (local, OpenAI-compatible, no API key)
+ado-sync publish-test-results \
+  --testResult results/junit.xml \
+  --analyze-failures \
+  --ai-provider docker \
+  --ai-model ai/llama3.2
 ```
 
 ### Config-based (no CLI flags needed)
@@ -158,6 +165,7 @@ With this in place, every `publish-test-results` run automatically analyses fail
 | OpenAI | `openai` | Default model: `gpt-4o-mini`. Works with any OpenAI-compatible endpoint via `--ai-url`. |
 | Anthropic | `anthropic` | Default model: `claude-haiku-4-5-20251001`. Fast and cost-effective. |
 | Ollama | `ollama` | Default model: `gemma-4-e4b-it`. Runs locally — no cloud cost or data egress. |
+| Docker Model Runner | `docker` | Default endpoint: `http://localhost:12434/engines/llama.cpp/v1`. Default model: `ai/llama3.2`. OpenAI-compatible local inference via Docker Desktop. No API key required. |
 
 > `heuristic` and `local` (node-llama-cpp) providers are not supported for failure analysis — they are suited for step generation, not conversational reasoning.
 

@@ -300,7 +300,7 @@ server.tool(
     outputFolder: z.string().optional().describe('Folder to write spec files (default: config pull.targetFolder or config dir)'),
     force: z.boolean().optional().default(false).describe('Overwrite existing spec files'),
     dryRun: z.boolean().optional().default(false).describe('Preview without writing files'),
-    aiProvider: z.enum(['local', 'ollama', 'openai', 'anthropic', 'huggingface', 'bedrock', 'azureai', 'github', 'azureinference']).optional()
+    aiProvider: z.enum(['local', 'ollama', 'docker', 'openai', 'anthropic', 'huggingface', 'bedrock', 'azureai', 'github', 'azureinference']).optional()
       .describe('AI provider for generating spec content from the story description and AC.'),
     aiModel: z.string().optional().describe('Model name/path/id for the AI provider'),
     aiKey: z.string().optional().describe('API key for the AI provider ($ENV_VAR reference supported)'),
