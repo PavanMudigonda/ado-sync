@@ -431,14 +431,16 @@ export interface SyncConfig {
        * 'local' (default): runs a GGUF model in-process via node-llama-cpp.
        * 'heuristic': fast regex-based, no model needed.
        * 'ollama': local Ollama server.
+       * 'docker': Docker Model Runner (local, OpenAI-compatible, default port 12434).
        * 'openai': OpenAI API or any OpenAI-compatible proxy (LiteLLM, Azure OpenAI, vLLM…).
        * 'anthropic': Anthropic API.
        * 'none': disable AI summary entirely.
        */
-      provider?: 'heuristic' | 'local' | 'ollama' | 'openai' | 'anthropic' | 'huggingface' | 'bedrock' | 'azureai' | 'github' | 'azureinference' | 'none';
+      provider?: 'heuristic' | 'local' | 'ollama' | 'docker' | 'openai' | 'anthropic' | 'huggingface' | 'bedrock' | 'azureai' | 'github' | 'azureinference' | 'none';
       /**
        * For 'local':       absolute path to a GGUF model file.
        * For 'ollama':      model tag, e.g. 'gemma-4-e4b-it'.
+       * For 'docker':      model tag from Docker Hub or HF, e.g. 'ai/llama3.2'.
        * For 'openai':      model name, e.g. 'gpt-4o-mini'.
        * For 'anthropic':   model name, e.g. 'claude-sonnet-4-6'.
        * For 'huggingface': model id, e.g. 'google/gemma-4-e4b-it'.
@@ -446,7 +448,7 @@ export interface SyncConfig {
        * For 'azureai':     deployment name, e.g. 'gpt-4o'.
        */
       model?: string;
-      /** Base URL for 'ollama', an OpenAI-compatible endpoint, or Azure OpenAI resource root. */
+      /** Base URL for 'ollama', 'docker', an OpenAI-compatible endpoint, or Azure OpenAI resource root. */
       baseUrl?: string;
       /** API key for 'openai' / 'anthropic' / 'huggingface' / 'azureai'. Supports $ENV_VAR references. */
       apiKey?: string;

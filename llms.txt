@@ -95,6 +95,7 @@ ado-sync push --config-override testPlan.id=99 override config at runtime
 ado-sync push --ai-provider heuristic          AI test step generation (no model needed)
 ado-sync push --ai-provider openai --ai-key $OPENAI_API_KEY
 ado-sync push --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
+ado-sync push --ai-provider docker --ai-model ai/llama3.2   Docker Model Runner (local, no key)
 ado-sync status --output json                  machine-readable output
 ado-sync publish-test-results --testPlan 32953 --testSuite 32954   planned run with TC linkage
 ado-sync publish-test-results --testConfiguration "Windows 10"     set test configuration
