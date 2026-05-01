@@ -16,12 +16,20 @@ import {
   addTestCaseToSuite,
   buildAzureSyncContent,
   createTestCase,
+  getGeneratedSuitePathKey,
+  getGeneratedSuitePathKeyForTest,
+  getOrCreateGeneratedSuiteForTest,
   getOrCreateNamedSuite,
-  getOrCreateSuiteForFile,
   getTestCase,
   getTestCasesInSuite,
+  pruneEmptyGeneratedSuitesForPathKey,
+  removeTestCaseFromSuite,
+  resolveExistingSuiteForFile,
+  resolveExistingSuiteForPathKey,
+  shouldCleanupEmptyGeneratedSuites,
   tagTestCaseAsRemoved,
   updateTestCase,
+  usesGeneratedSuiteHierarchy,
 } from '../azure/test-cases';
 import { stripHtml } from '../html';
 import { getMarkerTagPrefixes, getPreferredMarkerTagPrefix, isMarkerTag } from '../id-markers';
@@ -332,6 +340,14 @@ async function parseLocalFiles(
 export interface SyncOpts {
   dryRun?: boolean;
   tags?: string;
+  /** Restrict the operation to explicit local source files. */
+  sourceFiles?: string[];
+  /** Only create new test cases for unlinked local specs; skip linked items. */
+  createOnly?: boolean;
+  /** Only link unlinked local specs to existing remote test cases; do not create or update remote items. */
+  linkOnly?: boolean;
+  /** Only update linked test cases; skip unlinked specs and removed-case detection. */
+  updateOnly?: boolean;
   /** Called after each test case is processed. Useful for rendering a live progress bar. */
   onProgress?: (done: number, total: number, result: SyncResult) => void;
   /** Called during AI summarisation phase (before sync loop). done=0 signals start of a test. */
@@ -340,6 +356,40 @@ export interface SyncOpts {
   aiSummary?: AiSummaryOpts;
   /** Internal: pre-parsed tests injected by multi-plan push to skip re-parsing. */
   _preloadedTests?: ParsedTest[];
+}
+
+export function validatePushModeOptions(opts: Pick<SyncOpts, 'createOnly' | 'linkOnly' | 'updateOnly'>): void {
+  const enabledModes = [
+    opts.createOnly && '--create-only',
+    opts.linkOnly && '--link-only',
+    opts.updateOnly && '--update-only',
+  ].filter(Boolean) as string[];
+
+  if (enabledModes.length > 1) {
+    throw new Error(`Only one push mode can be used at a time: ${enabledModes.join(', ')}`);
+  }
+}
+
+function filterDiscoveredFiles(filePaths: string[], sourceFiles?: string[]): string[] {
+  if (!sourceFiles?.length) return filePaths;
+
+  const requested = new Set(sourceFiles.map((filePath) => path.normalize(path.resolve(filePath))));
+  return filePaths.filter((filePath) => requested.has(path.normalize(filePath)));
+}
+
+function formatSuitePreview(pathKey?: string): string | undefined {
+  if (!pathKey) return undefined;
+  return pathKey.split('/').join(' / ');
+}
+
+function mapRemoteTestsByTitle(testCases: AzureTestCase[]): Map<string, AzureTestCase[]> {
+  const byTitle = new Map<string, AzureTestCase[]>();
+  for (const testCase of testCases) {
+    const matches = byTitle.get(testCase.title) ?? [];
+    matches.push(testCase);
+    byTitle.set(testCase.title, matches);
+  }
+  return byTitle;
 }
 
 // ─── Multi-plan helpers ───────────────────────────────────────────────────────
@@ -361,6 +411,7 @@ function configForPlanEntry(base: SyncConfig, entry: TestPlanEntry): SyncConfig 
     testPlan: {
       id: entry.id,
       suiteId: entry.suiteId ?? base.testPlan.suiteId,
+      hierarchy: entry.hierarchy ?? base.testPlan.hierarchy,
       suiteMapping: entry.suiteMapping ?? base.testPlan.suiteMapping,
       suiteRouting: entry.suiteRouting ?? base.testPlan.suiteRouting,
     },
@@ -418,6 +469,8 @@ export async function push(
   configDir: string,
   opts: SyncOpts = {}
 ): Promise<SyncResult[]> {
+  validatePushModeOptions(opts);
+
   // Multi-plan: run AI summarisation across all plans first so progress totals
   // are correct, then delegate each plan's sync loop (with AI already applied).
   if (config.testPlans?.length) {
@@ -426,7 +479,10 @@ export async function push(
     const parseFailures: ParseFailure[] = [];
     for (const entry of config.testPlans) {
       const entryConfig = configForPlanEntry(config, entry);
-      const files = await discoverFiles(entryConfig.local.include, entryConfig.local.exclude, configDir);
+      const files = filterDiscoveredFiles(
+        await discoverFiles(entryConfig.local.include, entryConfig.local.exclude, configDir),
+        opts.sourceFiles
+      );
       const parsed = await parseLocalFiles(files, entryConfig, opts.tags);
       parseFailures.push(...parsed.failures);
       const tests = parsed.tests;
@@ -473,7 +529,10 @@ async function pushSingle(
   let resolvedTests = opts._preloadedTests ?? [];
   let parseFailures: ParseFailure[] = [];
   if (!opts._preloadedTests) {
-    const files = await discoverFiles(config.local.include, config.local.exclude, configDir);
+    const files = filterDiscoveredFiles(
+      await discoverFiles(config.local.include, config.local.exclude, configDir),
+      opts.sourceFiles
+    );
     const parsed = await parseLocalFiles(files, config, opts.tags);
     resolvedTests = parsed.tests;
     parseFailures = parsed.failures;
@@ -567,7 +626,7 @@ async function pushSingle(
   const titleField = config.sync?.titleField ?? 'System.Title';
   const conflictAction = config.sync?.conflictAction ?? 'overwrite';
   const disableLocal = config.sync?.disableLocalChanges ?? false;
-  const byFolder = config.testPlan.suiteMapping === 'byFolder' || config.testPlan.suiteMapping === 'byFile';
+  const byFolder = usesGeneratedSuiteHierarchy(config);
 
   // Load local cache for conflict detection and skip optimisation
   const cache = loadCache(configDir);
@@ -590,20 +649,26 @@ async function pushSingle(
   const markAutomated = config.sync?.markAutomated ?? false;
   const recoveredIds = new Set<string>(); // "filePath:line" keys
   let preloadedRemoteTcs: Awaited<ReturnType<typeof getTestCasesInSuite>> | undefined;
+  let remoteByTitle: Map<string, AzureTestCase[]> | undefined;
   const unlinkedWithAtName = resolvedTests.filter(t => !t.azureId && t.automatedTestName);
-  if (markAutomated && unlinkedWithAtName.length > 0) {
+  const shouldPreloadRemoteTcs = (markAutomated && unlinkedWithAtName.length > 0)
+    || (opts.linkOnly && resolvedTests.some((test) => !test.azureId));
+  if (shouldPreloadRemoteTcs) {
     try {
       preloadedRemoteTcs = await getTestCasesInSuite(client, config);
-      const byAtName = new Map(
-        preloadedRemoteTcs
-          .filter(tc => tc.automatedTestName)
-          .map(tc => [tc.automatedTestName!, tc])
-      );
-      for (const test of unlinkedWithAtName) {
-        const match = byAtName.get(test.automatedTestName!);
-        if (match) {
-          test.azureId = match.id;
-          recoveredIds.add(`${test.filePath}:${test.line}`);
+      remoteByTitle = mapRemoteTestsByTitle(preloadedRemoteTcs);
+      if (markAutomated && unlinkedWithAtName.length > 0) {
+        const byAtName = new Map(
+          preloadedRemoteTcs
+            .filter(tc => tc.automatedTestName)
+            .map(tc => [tc.automatedTestName!, tc])
+        );
+        for (const test of unlinkedWithAtName) {
+          const match = byAtName.get(test.automatedTestName!);
+          if (match) {
+            test.azureId = match.id;
+            recoveredIds.add(`${test.filePath}:${test.line}`);
+          }
         }
       }
     } catch { /* best-effort: if pre-load fails, continue without matching */ }
@@ -651,7 +716,20 @@ async function pushSingle(
   const pushWorkers = Array.from({ length: Math.min(PUSH_CONCURRENCY, pushQueue.length) }, async () => {
     while (pushQueue.length > 0) {
       const test = pushQueue.shift()!;
+      const currentHierarchyKey = byFolder ? getGeneratedSuitePathKeyForTest(config, test, configDir) : undefined;
+      const targetSuitePath = formatSuitePreview(currentHierarchyKey);
       if (test.azureId) {
+        if (opts.createOnly || opts.linkOnly) {
+          reportProgress({
+            action: 'skipped',
+            filePath: test.filePath,
+            title: test.title,
+            azureId: test.azureId,
+            detail: opts.createOnly ? 'skipped by create-only mode' : 'already linked; skipped by link-only mode',
+          });
+          continue;
+        }
+
         try {
           const cached = cache[test.azureId];
           // Use pre-fetched TC from cache; fall back to live fetch on miss
@@ -660,11 +738,22 @@ async function pushSingle(
             : await getTestCase(client, test.azureId, titleField);
 
           if (!remote) {
+            if (opts.updateOnly) {
+              reportProgress({
+                action: 'skipped',
+                filePath: test.filePath,
+                title: test.title,
+                azureId: test.azureId,
+                detail: 'remote test case missing; skipped by update-only mode',
+              });
+              continue;
+            }
+
             // TC was deleted from Azure — re-create it and write back the new ID.
             let newId: number | undefined;
             if (!opts.dryRun) {
               const suiteIdOverride = byFolder
-                ? await getOrCreateSuiteForFile(client, config, test.filePath, configDir, suiteCache)
+                ? await getOrCreateGeneratedSuiteForTest(client, config, test, configDir, suiteCache)
                 : await resolveTargetSuiteFromRouting(client, config, test, suiteCache);
               newId = await createTestCase(client, test, config, suiteIdOverride, configDir);
               createdIds.add(newId);
@@ -673,7 +762,7 @@ async function pushSingle(
               }
               await addTestCaseToConditionSuites(client, config, newId, test, conditionSuiteCache);
               const created = await getTestCase(client, newId, titleField);
-              if (created) updateCacheEntry(cache, test, created);
+              if (created) updateCacheEntry(cache, test, created, currentHierarchyKey);
             }
             reportProgress({ action: 'created', filePath: test.filePath, title: test.title, azureId: newId });
             continue;
@@ -683,25 +772,47 @@ async function pushSingle(
           // Normalise local to @param@ before comparing so outlines don't report
           // stepsChanged on every push after the first successful sync.
           const { changedFields, diffDetail } = buildPushDiff(test, remote, config, cached);
+          const previousHierarchyKey = cached?.suitePathKey ?? (cached?.filePath
+            ? getGeneratedSuitePathKey(config, cached.filePath, configDir)
+            : undefined);
+          const suiteChanged = byFolder &&
+            previousHierarchyKey !== undefined &&
+            currentHierarchyKey !== undefined &&
+            previousHierarchyKey !== currentHierarchyKey;
+          const previousSuitePath = formatSuitePreview(previousHierarchyKey);
 
-          if (changedFields.length === 0) {
+          const effectiveChangedFields = suiteChanged ? [...changedFields, 'suite'] : changedFields;
+          const effectiveDiffDetail = suiteChanged
+            ? [
+              ...diffDetail,
+              {
+                field: 'suite',
+                remote: previousHierarchyKey || '(plan root)',
+                local: currentHierarchyKey || '(plan root)',
+              },
+            ]
+            : diffDetail;
+
+          if (effectiveChangedFields.length === 0) {
             // Update cache entry even on skip (changedDate may differ due to other fields)
-            updateCacheEntry(cache, test, remote);
-            reportProgress({ action: 'skipped', filePath: test.filePath, title: test.title, azureId: test.azureId });
+            updateCacheEntry(cache, test, remote, currentHierarchyKey);
+            reportProgress({ action: 'skipped', filePath: test.filePath, title: test.title, azureId: test.azureId, detail: 'no changes' });
             continue;
           }
 
           // Conflict detection: remote was changed since last push AND local also differs
-          if (cached && remote.changedDate && remote.changedDate !== cached.changedDate) {
+          if (changedFields.length > 0 && cached && remote.changedDate && remote.changedDate !== cached.changedDate) {
             const relFile = path.relative(configDir, test.filePath);
             const conflict: SyncResult = {
               action: 'conflict',
               filePath: test.filePath,
               title: test.title,
               azureId: test.azureId,
-              changedFields,
-              diffDetail,
-              detail: `${relFile}:${test.line} — changed fields: ${changedFields.join(', ')}`,
+              targetSuitePath,
+              previousSuitePath,
+              changedFields: effectiveChangedFields,
+              diffDetail: effectiveDiffDetail,
+              detail: `${relFile}:${test.line} — changed fields: ${effectiveChangedFields.join(', ')}`,
             };
             if (conflictAction === 'skip') {
               reportProgress(conflict);
@@ -716,32 +827,90 @@ async function pushSingle(
           }
 
           if (!opts.dryRun) {
-            await updateTestCase(client, test.azureId, test, config, configDir);
+            if (changedFields.length > 0) {
+              await updateTestCase(client, test.azureId, test, config, configDir);
+            }
             // Ensure the TC is in the configured suite (it may not be if the suite was
             // changed in config, or if the TC was imported with an ID but never pushed before).
             const updateSuiteId = byFolder
-              ? await getOrCreateSuiteForFile(client, config, test.filePath, configDir, suiteCache)
+              ? await getOrCreateGeneratedSuiteForTest(client, config, test, configDir, suiteCache)
               : await resolveTargetSuiteFromRouting(client, config, test, suiteCache) ?? config.testPlan.suiteId;
             if (updateSuiteId) {
               await addTestCaseToSuite(client, config, test.azureId, updateSuiteId);
+              if (suiteChanged && previousHierarchyKey) {
+                const previousSuiteId = cached?.suitePathKey
+                  ? await resolveExistingSuiteForPathKey(client, config, previousHierarchyKey, suiteCache)
+                  : cached?.filePath
+                    ? await resolveExistingSuiteForFile(client, config, cached.filePath, configDir, suiteCache)
+                    : undefined;
+                if (previousSuiteId && previousSuiteId !== updateSuiteId) {
+                  await removeTestCaseFromSuite(client, config, test.azureId, previousSuiteId);
+                  if (shouldCleanupEmptyGeneratedSuites(config)) {
+                    await pruneEmptyGeneratedSuitesForPathKey(client, config, previousHierarchyKey, suiteCache);
+                  }
+                }
+              }
             } else {
               await addTestCaseToRootSuite(client, config, test.azureId);
             }
             await addTestCaseToConditionSuites(client, config, test.azureId, test, conditionSuiteCache);
-            const updated = await getTestCase(client, test.azureId, titleField);
-            if (updated) updateCacheEntry(cache, test, updated);
+            const updated = changedFields.length > 0 ? await getTestCase(client, test.azureId, titleField) : remote;
+            if (updated) updateCacheEntry(cache, test, updated, currentHierarchyKey);
           }
-          reportProgress({ action: 'updated', filePath: test.filePath, title: test.title, azureId: test.azureId, changedFields, diffDetail });
+          reportProgress({ action: 'updated', filePath: test.filePath, title: test.title, azureId: test.azureId, targetSuitePath, previousSuitePath, changedFields: effectiveChangedFields, diffDetail: effectiveDiffDetail });
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
           reportProgress({ action: 'error', filePath: test.filePath, title: test.title, azureId: test.azureId, detail: msg });
         }
       } else {
+        if (opts.updateOnly) {
+          reportProgress({
+            action: 'skipped',
+            filePath: test.filePath,
+            title: test.title,
+            detail: 'unlinked local spec; skipped by update-only mode',
+          });
+          continue;
+        }
+
+        if (opts.linkOnly) {
+          try {
+            const canonicalTitle = buildAzureSyncContent(test, config.sync?.format).title;
+            const titleMatches = remoteByTitle?.get(canonicalTitle) ?? [];
+            if (titleMatches.length !== 1) {
+              const detail = titleMatches.length === 0
+                ? 'no unique title match found in current remote scope'
+                : `multiple title matches found in current remote scope (${titleMatches.length})`;
+              reportProgress({ action: 'skipped', filePath: test.filePath, title: test.title, detail });
+              continue;
+            }
+
+            const matched = titleMatches[0];
+            test.azureId = matched.id;
+            recoveredIds.add(`${test.filePath}:${test.line}`);
+            if (!opts.dryRun && !disableLocal) {
+              pendingWritebacks.push({ test, newId: matched.id });
+            }
+
+            const detail = opts.dryRun
+              ? 'would link to existing test case by exact title match'
+              : disableLocal
+                ? 'matched existing test case by exact title match (local writeback skipped)'
+                : 'linked to existing test case by exact title match';
+            reportProgress({ action: 'linked', filePath: test.filePath, title: test.title, azureId: matched.id, detail });
+            continue;
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            reportProgress({ action: 'error', filePath: test.filePath, title: test.title, detail: msg });
+            continue;
+          }
+        }
+
         try {
           let newId: number | undefined;
           if (!opts.dryRun) {
             const suiteIdOverride = byFolder
-              ? await getOrCreateSuiteForFile(client, config, test.filePath, configDir, suiteCache)
+              ? await getOrCreateGeneratedSuiteForTest(client, config, test, configDir, suiteCache)
               : await resolveTargetSuiteFromRouting(client, config, test, suiteCache);
             newId = await createTestCase(client, test, config, suiteIdOverride, configDir);
             createdIds.add(newId);
@@ -751,9 +920,9 @@ async function pushSingle(
             await addTestCaseToConditionSuites(client, config, newId, test, conditionSuiteCache);
             // Fetch back to get changedDate for cache
             const created = await getTestCase(client, newId, titleField);
-            if (created) updateCacheEntry(cache, test, created);
+            if (created) updateCacheEntry(cache, test, created, currentHierarchyKey);
           }
-          reportProgress({ action: 'created', filePath: test.filePath, title: test.title, azureId: newId });
+          reportProgress({ action: 'created', filePath: test.filePath, title: test.title, azureId: newId, targetSuitePath });
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
           reportProgress({ action: 'error', filePath: test.filePath, title: test.title, detail: msg });
@@ -813,8 +982,8 @@ async function pushSingle(
   }
 
   // Removed TC detection is only safe on full-scope runs.
-  // Tag-filtered or condition-filtered pushes intentionally operate on a subset.
-  const shouldDetectRemoved = !opts.tags && !config.local.condition;
+  // Tag-filtered, source-file-filtered, create-only, or condition-filtered pushes intentionally operate on a subset.
+  const shouldDetectRemoved = !opts.tags && !opts.sourceFiles?.length && !opts.createOnly && !opts.linkOnly && !opts.updateOnly && !config.local.condition;
   if (shouldDetectRemoved) {
     try {
       // Reuse the pre-loaded remote TCs if we already fetched them for automatedTestName
@@ -874,7 +1043,10 @@ async function pullSingle(
   configDir: string,
   opts: SyncOpts
 ): Promise<SyncResult[]> {
-  const files = await discoverFiles(config.local.include, config.local.exclude, configDir);
+  const files = filterDiscoveredFiles(
+    await discoverFiles(config.local.include, config.local.exclude, configDir),
+    opts.sourceFiles
+  );
   const parsed = await parseLocalFiles(files, config, opts.tags);
   failOnParseErrors('pull', parsed.failures);
   const tests = parsed.tests;
@@ -919,7 +1091,7 @@ async function pullSingle(
       const descriptionChanged = (remote.description ?? '') !== (test.description ?? '');
 
       if (!titleChanged && !stepsChanged && !descriptionChanged) {
-        reportProgress({ action: 'skipped', filePath: test.filePath, title: test.title, azureId: test.azureId });
+        reportProgress({ action: 'skipped', filePath: test.filePath, title: test.title, azureId: test.azureId, detail: 'no changes' });
         continue;
       }
 
@@ -992,6 +1164,13 @@ async function pullSingle(
         title: '',
         detail: `Pull-create is not supported for local.type "${config.local.type}".`,
       });
+    } else if (opts.sourceFiles?.length) {
+      results.push({
+        action: 'error',
+        filePath: '',
+        title: '',
+        detail: 'Pull-create is not supported together with --source-file because partial runs cannot infer which unlinked remote tests to materialize.',
+      });
     } else {
       try {
         const remoteTcs = await getTestCasesInSuite(client, config);
@@ -1032,14 +1211,21 @@ async function pullSingle(
 export async function status(
   config: SyncConfig,
   configDir: string,
-  opts: Pick<SyncOpts, 'tags' | 'onProgress' | 'onAiProgress' | 'aiSummary'> = {}
+  opts: Pick<SyncOpts, 'tags' | 'sourceFiles' | 'onProgress' | 'onAiProgress' | 'aiSummary'> = {}
 ): Promise<SyncResult[]> {
-  return push(config, configDir, { dryRun: true, tags: opts.tags, onProgress: opts.onProgress, onAiProgress: opts.onAiProgress, aiSummary: opts.aiSummary });
+  return push(config, configDir, {
+    dryRun: true,
+    tags: opts.tags,
+    sourceFiles: opts.sourceFiles,
+    onProgress: opts.onProgress,
+    onAiProgress: opts.onAiProgress,
+    aiSummary: opts.aiSummary,
+  });
 }
 
 // ─── Cache helpers ────────────────────────────────────────────────────────────
 
-function updateCacheEntry(cache: SyncCache, test: ParsedTest, remote: { id: number; title: string; steps: any[]; description?: string; changedDate?: string; }): void {
+function updateCacheEntry(cache: SyncCache, test: ParsedTest, remote: { id: number; title: string; steps: any[]; description?: string; changedDate?: string; }, suitePathKey?: string): void {
   if (!remote.changedDate) return;
   cache[remote.id] = {
     title: remote.title,
@@ -1051,6 +1237,7 @@ function updateCacheEntry(cache: SyncCache, test: ParsedTest, remote: { id: numb
     remoteDescriptionHash: hashString(remote.description),
     changedDate: remote.changedDate,
     filePath: test.filePath,
+    suitePathKey,
   };
 }
 
@@ -1326,9 +1513,12 @@ export interface StaleTestCase {
 export async function detectStaleTestCases(
   config: SyncConfig,
   configDir: string,
-  opts: { tags?: string } = {}
+  opts: { tags?: string; sourceFiles?: string[] } = {}
 ): Promise<StaleTestCase[]> {
-  const files = await discoverFiles(config.local.include, config.local.exclude, configDir);
+  const files = filterDiscoveredFiles(
+    await discoverFiles(config.local.include, config.local.exclude, configDir),
+    opts.sourceFiles
+  );
   const parsed = await parseLocalFiles(files, config, opts.tags);
   failOnParseErrors('stale test case detection', parsed.failures);
   const tests = parsed.tests;
@@ -1385,9 +1575,12 @@ export interface CoverageReport {
 export async function coverageReport(
   config: SyncConfig,
   configDir: string,
-  opts: { tags?: string } = {}
+  opts: { tags?: string; sourceFiles?: string[] } = {}
 ): Promise<CoverageReport> {
-  const files = await discoverFiles(config.local.include, config.local.exclude, configDir);
+  const files = filterDiscoveredFiles(
+    await discoverFiles(config.local.include, config.local.exclude, configDir),
+    opts.sourceFiles
+  );
   const parsed = await parseLocalFiles(files, config, opts.tags);
   failOnParseErrors('coverage report', parsed.failures);
   const tests = parsed.tests;

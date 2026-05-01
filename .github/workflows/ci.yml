@@ -41,6 +41,23 @@ jobs:
       - name: Verify CLI starts
         run: node dist/cli.js --version
 
+      - name: Verify package boundary
+        shell: bash
+        run: |
+          PACK_JSON="$(npm pack --dry-run --json)"
+          echo "$PACK_JSON"
+          PACK_JSON="$PACK_JSON" node <<'EOF'
+          const pack = JSON.parse(process.env.PACK_JSON ?? '[]');
+          const files = pack[0]?.files?.map((entry) => entry.path) ?? [];
+          const unexpected = files.filter((filePath) => filePath.startsWith('docs-site/'));
+
+          if (unexpected.length > 0) {
+            console.error('Unexpected docs-site files in npm package:');
+            for (const filePath of unexpected) console.error(filePath);
+            process.exit(1);
+          }
+          EOF
+
   docs:
     name: Build docs
     runs-on: ubuntu-latest

@@ -2,6 +2,10 @@
   "name": "ado-sync",
   "version": "0.1.65",
   "description": "Bidirectional sync between local test specs (Cucumber/Markdown) and Azure DevOps Test Cases",
+  "files": [
+    "dist",
+    "llms.txt"
+  ],
   "bin": {
     "ado-sync": "./dist/cli.js",
     "ado-sync-mcp": "./dist/mcp-server.js"

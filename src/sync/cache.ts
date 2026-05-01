@@ -26,6 +26,8 @@ export interface CacheEntry {
   /** ISO changedDate from Azure at time of last sync */
   changedDate: string;
   filePath: string;
+  /** Last resolved generated suite path key for hierarchy-managed configs. */
+  suitePathKey?: string;
 }
 
 export interface SyncCache {

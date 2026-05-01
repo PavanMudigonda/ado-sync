@@ -24,7 +24,7 @@ import * as fs from 'fs';
 import { glob } from 'glob';
 import * as path from 'path';
 
-import { isMarkerTag } from '../id-markers';
+import { getSyncTargetOwnershipTag, isMarkerTag } from '../id-markers';
 import {
   AzureStep,
   AzureTestCase,
@@ -36,6 +36,7 @@ import {
   ParsedTest,
   StateConfig,
   SuiteCondition,
+  SuiteHierarchyConfig,
   SyncConfig,
 } from '../types';
 import { AzureClient } from './client';
@@ -353,13 +354,19 @@ function isIgnoredTag(tag: string, ignorePatterns: string[]): boolean {
 export function processTagsForPush(
   tags: string[],
   tagPrefix: string | string[],
-  customizations?: CustomizationsConfig
+  customizations?: CustomizationsConfig,
+  config?: SyncConfig
 ): string[] {
   let processed = tags.filter((t) => !isMarkerTag(t, tagPrefix));
 
   // Apply tag text map transformation
   if (customizations?.tagTextMapTransformation?.enabled && customizations.tagTextMapTransformation.textMap) {
     processed = applyTagTextMap(processed, customizations.tagTextMapTransformation.textMap);
+  }
+
+  const ownershipTag = config ? getSyncTargetOwnershipTag(config) : undefined;
+  if (ownershipTag && !processed.includes(ownershipTag)) {
+    processed = [...processed, ownershipTag];
   }
 
   return processed;
@@ -885,10 +892,70 @@ async function applyLinkRelations(
 // ─── Suite hierarchy helpers ──────────────────────────────────────────────────
 
 async function resolveRootSuiteId(client: AzureClient, config: SyncConfig): Promise<number> {
+  const syncTargetSuiteId = config.syncTarget?.mode === 'query' ? undefined : config.syncTarget?.suiteId;
+  if (syncTargetSuiteId) return syncTargetSuiteId;
   if (config.testPlan.suiteId) return config.testPlan.suiteId;
   const api = await client.getTestPlanApi();
   const plan = await api.getTestPlanById(config.project, config.testPlan.id);
   return plan?.rootSuite?.id ?? 0;
+}
+
+function buildAzureTestCaseFromWorkItem(workItem: any, titleField: string): AzureTestCase {
+  const fields = workItem?.fields ?? {};
+  return {
+    id: workItem.id,
+    title: fields[titleField] ?? '',
+    description: fields['System.Description'] ?? '',
+    steps: parseStepsXml(fields['Microsoft.VSTS.TCM.Steps'] ?? ''),
+    tags: tagsFromString(fields['System.Tags']),
+    changedDate: fields['System.ChangedDate'],
+    areaPath: fields['System.AreaPath'],
+    iterationPath: fields['System.IterationPath'],
+    automatedTestName: fields['Microsoft.VSTS.TCM.AutomatedTestName'] || undefined,
+  };
+}
+
+function getRemoteScopeSuiteId(config: SyncConfig, suiteId?: number): number | undefined {
+  if (suiteId) return suiteId;
+  if (config.syncTarget?.mode !== 'query' && config.syncTarget?.suiteId) return config.syncTarget.suiteId;
+  return config.testPlan.suiteId;
+}
+
+function filterScopedTestCases(testCases: AzureTestCase[], config: SyncConfig): AzureTestCase[] {
+  const ownershipTag = getSyncTargetOwnershipTag(config);
+  if (!ownershipTag) return testCases;
+
+  const normalizedOwnershipTag = ownershipTag.toLowerCase();
+  return testCases.filter((testCase) => testCase.tags.some((tag) => tag.toLowerCase() === normalizedOwnershipTag));
+}
+
+async function getTestCasesByWiql(
+  client: AzureClient,
+  config: SyncConfig,
+  titleField: string,
+  wiql: string
+): Promise<AzureTestCase[]> {
+  const wit = await client.getWitApi();
+  const queryResult = await withRetry(() => wit.queryByWiql({ query: wiql }, { project: config.project }));
+  const ids = (queryResult?.workItems ?? []).map((ref: any) => ref.id as number).filter(Boolean);
+  if (!ids.length) return [];
+
+  const fields = [
+    titleField,
+    'System.WorkItemType',
+    'System.Description',
+    'Microsoft.VSTS.TCM.Steps',
+    'System.Tags',
+    'System.ChangedDate',
+    'System.AreaPath',
+    'System.IterationPath',
+    'Microsoft.VSTS.TCM.AutomatedTestName',
+  ];
+  const workItems = await withRetry(() => wit.getWorkItems(ids, fields));
+
+  return (workItems ?? [])
+    .filter((workItem: any) => (workItem?.fields?.['System.WorkItemType'] ?? '') === 'Test Case')
+    .map((workItem: any) => buildAzureTestCaseFromWorkItem(workItem, titleField));
 }
 
 async function getOrCreateChildSuite(
@@ -914,6 +981,273 @@ async function getOrCreateChildSuite(
     config.testPlan.id
   );
   return (created as any)?.id ?? parentSuiteId;
+}
+
+function getSuiteHierarchy(config: SyncConfig): SuiteHierarchyConfig | undefined {
+  if (config.testPlan.hierarchy) return config.testPlan.hierarchy;
+  if (config.testPlan.suiteMapping === 'byFolder' || config.testPlan.suiteMapping === 'byFile') {
+    return { mode: config.testPlan.suiteMapping };
+  }
+  return undefined;
+}
+
+export function shouldCleanupEmptyGeneratedSuites(config: SyncConfig): boolean {
+  return getSuiteHierarchy(config)?.cleanupEmptySuites === true;
+}
+
+function getGeneratedSuiteSegments(
+  config: SyncConfig,
+  filePath: string,
+  configDir: string
+): string[] | undefined {
+  const hierarchy = getSuiteHierarchy(config);
+  if (!hierarchy) return undefined;
+
+  const relFile = path.relative(configDir, filePath);
+  const allSegments = relFile.split(path.sep);
+  const dirSegments = allSegments.slice(0, -1);
+  const fileName = path.basename(filePath, path.extname(filePath));
+  const rawSegments = hierarchy.mode === 'byFile' ? [...dirSegments, fileName] : dirSegments;
+  const cleanSegments = rawSegments.map((segment) => segment.replace(/^@/, '')).filter(Boolean);
+  return hierarchy.rootSuite ? [hierarchy.rootSuite, ...cleanSegments] : cleanSegments;
+}
+
+function getGeneratedSuiteSegmentsForTagHierarchy(
+  hierarchy: SuiteHierarchyConfig,
+  test: ParsedTest
+): string[] {
+  return getTagHierarchySegments(test, hierarchy.tagPrefix!, hierarchy.valueSeparator);
+}
+
+function getTagHierarchySegments(
+  test: ParsedTest,
+  tagPrefix: string,
+  valueSeparator?: string
+): string[] {
+  const normalizedPrefix = tagPrefix.trim().replace(/^@/, '').toLowerCase();
+  const separator = valueSeparator ?? '/';
+  const matchingTag = test.tags.find((tag) => {
+    const normalizedTag = tag.replace(/^@/, '');
+    return normalizedTag.toLowerCase().startsWith(`${normalizedPrefix}:`);
+  });
+
+  if (!matchingTag) {
+    return [];
+  }
+
+  const normalizedTag = matchingTag.replace(/^@/, '');
+  const rawValue = normalizedTag.slice(normalizedPrefix.length + 1);
+  return rawValue
+    .split(separator)
+    .map((segment) => segment.trim().replace(/^@/, ''))
+    .filter(Boolean);
+}
+
+function getGeneratedSuiteSegmentsForLevelsHierarchy(
+  hierarchy: SuiteHierarchyConfig,
+  test: ParsedTest,
+  configDir: string
+): string[] {
+  const relFile = path.relative(configDir, test.filePath);
+  const allSegments = relFile.split(path.sep);
+  const dirSegments = allSegments.slice(0, -1);
+  const fileName = path.basename(test.filePath, path.extname(test.filePath));
+  const resolvedSegments: string[] = [];
+
+  for (const level of hierarchy.levels ?? []) {
+    if (level.source === 'folder') {
+      const segment = dirSegments[level.index];
+      if (segment) {
+        resolvedSegments.push(segment.replace(/^@/, ''));
+      }
+      continue;
+    }
+
+    if (level.source === 'file') {
+      resolvedSegments.push(fileName.replace(/^@/, ''));
+      continue;
+    }
+
+    resolvedSegments.push(...getTagHierarchySegments(test, level.tagPrefix, level.valueSeparator));
+  }
+
+  const cleanSegments = resolvedSegments.filter(Boolean);
+  return hierarchy.rootSuite ? [hierarchy.rootSuite, ...cleanSegments] : cleanSegments;
+}
+
+function getGeneratedSuiteSegmentsForTest(
+  config: SyncConfig,
+  test: ParsedTest,
+  configDir: string
+): string[] | undefined {
+  const hierarchy = getSuiteHierarchy(config);
+  if (!hierarchy) return undefined;
+  if (hierarchy.mode === 'byTag') {
+    const tagSegments = getGeneratedSuiteSegmentsForTagHierarchy(hierarchy, test);
+    return hierarchy.rootSuite ? [hierarchy.rootSuite, ...tagSegments] : tagSegments;
+  }
+  if (hierarchy.mode === 'byLevels') {
+    return getGeneratedSuiteSegmentsForLevelsHierarchy(hierarchy, test, configDir);
+  }
+  return getGeneratedSuiteSegments(config, test.filePath, configDir);
+}
+
+export function usesGeneratedSuiteHierarchy(config: SyncConfig): boolean {
+  return getSuiteHierarchy(config) !== undefined;
+}
+
+export function getGeneratedSuitePathKey(
+  config: SyncConfig,
+  filePath: string,
+  configDir: string
+): string | undefined {
+  const segments = getGeneratedSuiteSegments(config, filePath, configDir);
+  return segments ? segments.join('/') : undefined;
+}
+
+export function getGeneratedSuitePathKeyForTest(
+  config: SyncConfig,
+  test: ParsedTest,
+  configDir: string
+): string | undefined {
+  const segments = getGeneratedSuiteSegmentsForTest(config, test, configDir);
+  return segments ? segments.join('/') : undefined;
+}
+
+async function resolveSuiteForSegments(
+  client: AzureClient,
+  config: SyncConfig,
+  segments: string[],
+  suiteCache: Map<string, number>,
+  createMissing: boolean
+): Promise<number | undefined> {
+  const baseRootSuiteId = await resolveRootSuiteId(client, config);
+  if (!segments.length) return baseRootSuiteId;
+
+  const api = await client.getTestPlanApi();
+  const suites = await api.getTestSuitesForPlan(config.project, config.testPlan.id);
+
+  let parentId = baseRootSuiteId;
+  let cacheKey = '';
+  for (const seg of segments) {
+    cacheKey = cacheKey ? `${cacheKey}/${seg}` : seg;
+    if (suiteCache.has(cacheKey)) {
+      parentId = suiteCache.get(cacheKey)!;
+      continue;
+    }
+
+    const existing = (suites ?? []).find(
+      (suite: any) => suite.parentSuite?.id === parentId && suite.name === seg
+    );
+    if (existing?.id) {
+      parentId = existing.id as number;
+      suiteCache.set(cacheKey, parentId);
+      continue;
+    }
+
+    if (!createMissing) return undefined;
+
+    parentId = await getOrCreateChildSuite(client, config, parentId, seg);
+    suiteCache.set(cacheKey, parentId);
+  }
+
+  return parentId;
+}
+
+function dropSuiteCacheBranch(suiteCache: Map<string, number>, pathKey: string): void {
+  for (const key of [...suiteCache.keys()]) {
+    if (key === pathKey || key.startsWith(`${pathKey}/`)) {
+      suiteCache.delete(key);
+    }
+  }
+}
+
+export async function resolveExistingSuiteForFile(
+  client: AzureClient,
+  config: SyncConfig,
+  filePath: string,
+  configDir: string,
+  suiteCache: Map<string, number>
+): Promise<number | undefined> {
+  const segments = getGeneratedSuiteSegments(config, filePath, configDir);
+  if (!segments) return undefined;
+  return resolveSuiteForSegments(client, config, segments, suiteCache, false);
+}
+
+export async function resolveExistingSuiteForPathKey(
+  client: AzureClient,
+  config: SyncConfig,
+  pathKey: string,
+  suiteCache: Map<string, number>
+): Promise<number | undefined> {
+  const segments = pathKey.split('/').filter(Boolean);
+  if (!segments.length) return undefined;
+  return resolveSuiteForSegments(client, config, segments, suiteCache, false);
+}
+
+export async function pruneEmptyGeneratedSuitesForFile(
+  client: AzureClient,
+  config: SyncConfig,
+  filePath: string,
+  configDir: string,
+  suiteCache: Map<string, number>
+): Promise<void> {
+  const hierarchy = getSuiteHierarchy(config);
+  const segments = getGeneratedSuiteSegments(config, filePath, configDir);
+  if (!hierarchy || !segments?.length) return;
+
+  const api = await client.getTestPlanApi();
+  const rootSuiteId = await resolveRootSuiteId(client, config);
+  const protectedDepth = hierarchy.rootSuite ? 1 : 0;
+
+  for (let depth = segments.length; depth > protectedDepth; depth--) {
+    const pathSegments = segments.slice(0, depth);
+    const pathKey = pathSegments.join('/');
+    const suiteId = await resolveSuiteForSegments(client, config, pathSegments, suiteCache, false);
+    if (!suiteId || suiteId === rootSuiteId) continue;
+
+    const suites = await api.getTestSuitesForPlan(config.project, config.testPlan.id);
+    const childSuites = (suites ?? []).filter((suite: any) => suite.parentSuite?.id === suiteId);
+    if (childSuites.length > 0) break;
+
+    const testCases = await api.getTestCaseList(config.project, config.testPlan.id, suiteId);
+    if ((testCases?.length ?? 0) > 0) break;
+
+    await api.deleteTestSuite(config.project, config.testPlan.id, suiteId);
+    dropSuiteCacheBranch(suiteCache, pathKey);
+  }
+}
+
+export async function pruneEmptyGeneratedSuitesForPathKey(
+  client: AzureClient,
+  config: SyncConfig,
+  pathKey: string,
+  suiteCache: Map<string, number>
+): Promise<void> {
+  const hierarchy = getSuiteHierarchy(config);
+  const segments = pathKey.split('/').filter(Boolean);
+  if (!hierarchy || !segments.length) return;
+
+  const api = await client.getTestPlanApi();
+  const rootSuiteId = await resolveRootSuiteId(client, config);
+  const protectedDepth = hierarchy.rootSuite ? 1 : 0;
+
+  for (let depth = segments.length; depth > protectedDepth; depth--) {
+    const pathSegments = segments.slice(0, depth);
+    const currentPathKey = pathSegments.join('/');
+    const suiteId = await resolveSuiteForSegments(client, config, pathSegments, suiteCache, false);
+    if (!suiteId || suiteId === rootSuiteId) continue;
+
+    const suites = await api.getTestSuitesForPlan(config.project, config.testPlan.id);
+    const childSuites = (suites ?? []).filter((suite: any) => suite.parentSuite?.id === suiteId);
+    if (childSuites.length > 0) break;
+
+    const testCases = await api.getTestCaseList(config.project, config.testPlan.id, suiteId);
+    if ((testCases?.length ?? 0) > 0) break;
+
+    await api.deleteTestSuite(config.project, config.testPlan.id, suiteId);
+    dropSuiteCacheBranch(suiteCache, currentPathKey);
+  }
 }
 
 /**
@@ -945,33 +1279,27 @@ export async function getOrCreateSuiteForFile(
   configDir: string,
   suiteCache: Map<string, number>
 ): Promise<number> {
-  const rootSuiteId = await resolveRootSuiteId(client, config);
-
-  const relFile = path.relative(configDir, filePath);
-  const allSegments = relFile.split(path.sep);
-
-  // byFile: include the filename (without extension) as the deepest suite segment
-  const byFile = config.testPlan.suiteMapping === 'byFile';
-  const dirSegments = allSegments.slice(0, -1);
-  const fileName = path.basename(filePath, path.extname(filePath));
-
-  const rawSegments = byFile ? [...dirSegments, fileName] : dirSegments;
-  const cleanSegments = rawSegments.map((s) => s.replace(/^@/, '')).filter(Boolean);
-
-  if (!cleanSegments.length) return rootSuiteId;
-
-  let parentId = rootSuiteId;
-  let cacheKey = '';
-  for (const seg of cleanSegments) {
-    cacheKey = cacheKey ? `${cacheKey}/${seg}` : seg;
-    if (suiteCache.has(cacheKey)) {
-      parentId = suiteCache.get(cacheKey)!;
-    } else {
-      parentId = await getOrCreateChildSuite(client, config, parentId, seg);
-      suiteCache.set(cacheKey, parentId);
-    }
+  const segments = getGeneratedSuiteSegments(config, filePath, configDir);
+  if (!segments) {
+    return resolveRootSuiteId(client, config);
   }
-  return parentId;
+
+  return (await resolveSuiteForSegments(client, config, segments, suiteCache, true)) ?? await resolveRootSuiteId(client, config);
+}
+
+export async function getOrCreateGeneratedSuiteForTest(
+  client: AzureClient,
+  config: SyncConfig,
+  test: ParsedTest,
+  configDir: string,
+  suiteCache: Map<string, number>
+): Promise<number> {
+  const segments = getGeneratedSuiteSegmentsForTest(config, test, configDir);
+  if (!segments) {
+    return resolveRootSuiteId(client, config);
+  }
+
+  return (await resolveSuiteForSegments(client, config, segments, suiteCache, true)) ?? await resolveRootSuiteId(client, config);
 }
 
 // ─── API layer ───────────────────────────────────────────────────────────────
@@ -1059,7 +1387,7 @@ export async function createTestCase(
   }
 
   // Process tags: apply tag text map transformation
-  const processedTags = processTagsForPush(test.tags, syncCfg.tagPrefix ?? 'tc', config.customizations);
+  const processedTags = processTagsForPush(test.tags, syncCfg.tagPrefix ?? 'tc', config.customizations, config);
   const filteredTags = processedTags.join('; ');
   if (filteredTags) {
     patchDoc.push({ op: 'add', path: '/fields/System.Tags', value: filteredTags });
@@ -1086,7 +1414,7 @@ export async function createTestCase(
   }
   if (!wi?.id) throw new Error(`Failed to create test case for: ${test.title} — Azure returned no work item ID. Check that the project name, plan ID, and PAT permissions (Test Management: Write) are correct.`);
 
-  const resolvedSuiteId = suiteIdOverride ?? config.testPlan.suiteId;
+  const resolvedSuiteId = suiteIdOverride ?? getRemoteScopeSuiteId(config);
   if (resolvedSuiteId) {
     await addTestCaseToSuite(client, config, wi.id, resolvedSuiteId);
   } else {
@@ -1114,7 +1442,7 @@ export async function updateTestCase(
   const { title, steps } = buildAzureSyncContent(test, syncCfg.format);
 
   // Process tags with transformations
-  const processedLocalTags = processTagsForPush(test.tags, syncCfg.tagPrefix ?? 'tc', config.customizations);
+  const processedLocalTags = processTagsForPush(test.tags, syncCfg.tagPrefix ?? 'tc', config.customizations, config);
 
   // Fetch existing Azure tags and parameter fields so updates can merge/clear correctly.
   const wi = await withRetry(() => wit.getWorkItem(id, [
@@ -1272,6 +1600,22 @@ export async function addTestCaseToSuite(
   }
 }
 
+export async function removeTestCaseFromSuite(
+  client: AzureClient,
+  config: SyncConfig,
+  testCaseId: number,
+  suiteId: number
+): Promise<void> {
+  const api = await client.getTestPlanApi();
+  try {
+    await api.removeTestCasesFromSuite(config.project, config.testPlan.id, suiteId, String(testCaseId));
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/not found|does not exist|invalid/i.test(msg)) return;
+    throw err;
+  }
+}
+
 export async function addTestCaseToRootSuite(
   client: AzureClient,
   config: SyncConfig,
@@ -1341,11 +1685,19 @@ export async function getTestCasesInSuite(
   config: SyncConfig,
   suiteId?: number
 ): Promise<AzureTestCase[]> {
-  const api = await client.getTestPlanApi();
-  const wit = await client.getWitApi();
   const titleField = config.sync?.titleField ?? 'System.Title';
 
-  let resolvedSuiteId = suiteId ?? config.testPlan.suiteId;
+  if (config.syncTarget?.mode === 'query') {
+    return filterScopedTestCases(
+      await getTestCasesByWiql(client, config, titleField, config.syncTarget.wiql),
+      config
+    );
+  }
+
+  const api = await client.getTestPlanApi();
+  const wit = await client.getWitApi();
+
+  let resolvedSuiteId = getRemoteScopeSuiteId(config, suiteId);
   if (!resolvedSuiteId) {
     const plan = await api.getTestPlanById(config.project, config.testPlan.id);
     resolvedSuiteId = plan?.rootSuite?.id;
@@ -1374,18 +1726,8 @@ export async function getTestCasesInSuite(
 
   const workItems = await withRetry(() => wit.getWorkItems(ids, fields));
 
-  return (workItems ?? []).map((wi: any): AzureTestCase => {
-    const f = wi.fields ?? {};
-    return {
-      id: wi.id,
-      title: f[titleField] ?? '',
-      description: f['System.Description'] ?? '',
-      steps: parseStepsXml(f['Microsoft.VSTS.TCM.Steps'] ?? ''),
-      tags: tagsFromString(f['System.Tags']),
-      changedDate: f['System.ChangedDate'],
-      areaPath: f['System.AreaPath'],
-      iterationPath: f['System.IterationPath'],
-      automatedTestName: f['Microsoft.VSTS.TCM.AutomatedTestName'] || undefined,
-    };
-  });
+  return filterScopedTestCases(
+    (workItems ?? []).map((workItem: any) => buildAzureTestCaseFromWorkItem(workItem, titleField)),
+    config
+  );
 }

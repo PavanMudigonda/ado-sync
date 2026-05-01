@@ -72,7 +72,12 @@ Push local spec files to Azure DevOps — creates new Test Cases or updates exis
 ```bash
 ado-sync push
 ado-sync push --dry-run
+ado-sync push --create-only
+ado-sync push --link-only
+ado-sync push --update-only
 ado-sync push --tags "@smoke and not @wip"
+ado-sync push --source-file specs/login.feature
+ado-sync push --source-file specs/login.feature --source-file specs/checkout.feature
 ado-sync push --config-override testPlan.id=9999
 
 # AI-generated test steps for code files
@@ -97,6 +102,28 @@ ado-sync push --ai-context ./docs/ai-context.md # inject domain context
 | ID tag, no changes | Skipped |
 | ID tag, content changed | Updates the existing Test Case |
 | Deleted locally, still in Azure | Tagged `ado-sync:removed` in Azure |
+
+### Mode comparison
+
+| Flag | Remote create | Remote update | Local ID writeback | Removed detection | Best use |
+|------|---------------|---------------|--------------------|-------------------|----------|
+| `--source-file` | Yes, when needed | Yes, when needed | Yes, when needed | No | Work on one or a few explicit files without scanning the whole repo |
+| `--create-only` | Yes | No | Yes, for newly created cases | No | Seed new Azure test cases without touching linked inventory |
+| `--link-only` | No | No | Yes, only for unique exact-title matches | No | Restore missing local IDs from an existing scoped remote inventory |
+| `--update-only` | No | Yes, for linked cases | No new IDs | No | Push content changes only for already linked specs |
+
+Quick rule of thumb:
+Use `--source-file` when you want a smaller slice of normal push behavior. Use `--create-only`, `--link-only`, or `--update-only` when you want to change the kind of operation, not just the scope.
+
+`--source-file` is repeatable and limits the run to explicit local files. Partial file runs skip removed-case detection so ado-sync does not misclassify untouched specs as deletions.
+
+`--create-only` limits push to unlinked local specs. Linked tests are reported as skipped, and removed-case detection is disabled because the run is intentionally not a full ownership sweep.
+
+`--link-only` limits push to ID recovery. It does not create or update remote test cases. An unlinked local spec is linked only when ado-sync finds exactly one existing remote test case in the current scope whose canonical Azure title matches exactly. Linked specs are skipped, ambiguous title matches are skipped, and removed-case detection is disabled for the run.
+
+`--update-only` limits push to already linked test cases. Unlinked local specs are skipped instead of being created, linked cases whose remote test case no longer exists are skipped instead of being recreated, and removed-case detection is disabled because the run is intentionally not a full reconciliation.
+
+The mode flags are mutually exclusive: use at most one of `--create-only`, `--link-only`, or `--update-only` in a single run.
 
 ### AI auto-summary
 
@@ -165,6 +192,7 @@ Pull Azure DevOps Test Case changes into local spec files.
 ado-sync pull
 ado-sync pull --dry-run
 ado-sync pull --tags "@smoke"
+ado-sync pull --source-file specs/login.feature
 
 # AI step generation — same providers as push, used when pull creates new local stubs
 ado-sync pull --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
@@ -178,6 +206,10 @@ ado-sync pull --ai-provider github       --ai-model gpt-4o
 ado-sync pull --ai-provider azureinference --ai-url https://myendpoint.inference.azure.com --ai-model gpt-4o --ai-key $AZURE_AI_KEY
 ```
 
+`--source-file` limits pull to the selected local files. When pull-create is enabled in config, ado-sync skips pull-create for source-file-limited runs because a partial local slice cannot safely infer which unlinked remote test cases should become new files.
+
+Set `toolSettings.outputLevel` to `diagnostic` when you want push, pull, and status to print per-result detail strings, changed-field summaries, and generated suite previews consistently during troubleshooting.
+
 ---
 
 ## `status`
@@ -187,6 +219,7 @@ Show what would change on the next push without making any modifications.
 ```bash
 ado-sync status
 ado-sync status --tags "@smoke"
+ado-sync status --source-file specs/login.feature
 ado-sync status --output json    # machine-readable
 
 # AI step generation — used when computing diff for code-based test types
@@ -200,6 +233,8 @@ ado-sync status --ai-provider github         --ai-model gpt-4o
 ado-sync status --ai-provider azureinference --ai-url https://myendpoint.inference.azure.com --ai-model gpt-4o --ai-key $AZURE_AI_KEY
 ```
 
+For hierarchy-managed configs, `status` previews the resolved generated suite target on created and updated items. When a linked spec moved between generated suite paths, the output also shows the previous generated suite.
+
 ---
 
 ## `diff`
@@ -209,6 +244,7 @@ Show a field-level diff between local specs and Azure DevOps — richer than `st
 ```bash
 ado-sync diff
 ado-sync diff --tags "@smoke"
+ado-sync diff --source-file specs/login.feature
 ```
 
 Output example:
@@ -216,6 +252,8 @@ Output example:
 ~ specs/login.feature:12 · Login with valid credentials [#1234]
     changed fields: title, steps
 ```
+
+For hierarchy-managed configs, `diff` also includes the resolved generated suite target. When the drift is a hierarchy relocation, the diff shows both the target suite and the previous generated suite path.
 
 ---
 
@@ -574,6 +612,33 @@ Options:
   env:
     AZURE_DEVOPS_TOKEN: ${{ secrets.AZURE_DEVOPS_TOKEN }}
 ```
+
+---
+
+## `watch`
+
+Watch local spec files and rerun `push` automatically when files change.
+
+```bash
+ado-sync watch
+ado-sync watch --dry-run
+ado-sync watch --source-file specs/login.feature
+ado-sync watch --source-file specs/login.feature --update-only
+ado-sync watch --tags "@smoke" --debounce 1200
+ado-sync watch --create-only
+ado-sync watch --link-only
+```
+
+`watch` forwards the same constrained push modes that `push` supports:
+
+- `--source-file` limits both the watched files and the push scope.
+- `--create-only` creates only unlinked local specs on each run.
+- `--link-only` restores local IDs by unique exact-title match without remote mutations.
+- `--update-only` updates only already linked specs.
+
+The mode flags are mutually exclusive in `watch` just as they are in `push`.
+
+Use `watch` when you want the normal push feedback loop after each save, but still need the safety boundaries from the explicit push modes.
 
 ---
 
