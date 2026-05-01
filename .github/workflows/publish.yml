@@ -21,6 +21,10 @@ on:
           - 'true'
           - 'false'
 
+concurrency:
+  group: publish-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     name: Publish
@@ -61,6 +65,23 @@ jobs:
           npm version "$TAG_VERSION" --no-git-tag-version --allow-same-version
           echo "✓ package.json version set to $TAG_VERSION (from tag $GITHUB_REF_NAME)"
 
+      - name: Check npm version availability
+        id: npm_version_check
+        run: |
+          PACKAGE_NAME=$(node -p "require('./package.json').name")
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+
+          echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
+          echo "package_version=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
+
+          if npm view "$PACKAGE_NAME@$PACKAGE_VERSION" version >/dev/null 2>&1; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+            echo "Skipping publish because $PACKAGE_NAME@$PACKAGE_VERSION already exists on npm."
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+            echo "$PACKAGE_NAME@$PACKAGE_VERSION is available to publish."
+          fi
+
       - name: Publish (dry run)
         if: github.event.inputs.dry_run == 'true'
         run: npm publish --dry-run --access public
@@ -68,7 +89,11 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish
-        if: github.event_name == 'release' || github.event_name == 'push' || github.event.inputs.dry_run == 'false'
+        if: (github.event_name == 'release' || github.event_name == 'push' || github.event.inputs.dry_run == 'false') && steps.npm_version_check.outputs.already_published != 'true'
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Skip publish for existing version
+        if: (github.event_name == 'release' || github.event_name == 'push' || github.event.inputs.dry_run == 'false') && steps.npm_version_check.outputs.already_published == 'true'
+        run: echo "Publish skipped because ${{ steps.npm_version_check.outputs.package_name }}@${{ steps.npm_version_check.outputs.package_version }} is already published."
