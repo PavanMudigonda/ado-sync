@@ -60,7 +60,8 @@ export type AiProvider =
  *   4. Nothing detected                  → undefined (caller decides the fallback)
  *
  * Covered environments:
- *   Claude Code, OpenAI Codex CLI, GitHub Copilot, Cursor, Windsurf,
+ *   Claude Code, OpenAI Codex CLI, GitHub Copilot, Visual Studio Agent
+ *   Application, Cursor, Windsurf,
  *   Cline, Google Antigravity, Aider, Continue, Augment Code, Zed AI,
  *   JetBrains AI, Roo Code, Trae, PearAI, Void, Amp, Amazon Q Developer.
  */
@@ -87,6 +88,10 @@ export function detectAiEnvironment(): Pick<AiSummaryOpts, 'provider' | 'apiKey'
     'CODEX',
     'OPENAI_CODEX',
     'CODEX_CLI',
+    // Visual Studio Agent Application / Copilot agent surfaces
+    'VISUAL_STUDIO_AGENT_MODE',
+    'VISUAL_STUDIO_COPILOT_AGENT_MODE',
+    'VS_COPILOT_AGENT_MODE',
     // GitHub Copilot Agent Mode (VS Code)
     'COPILOT_AGENT_MODE',
     // Cursor (VS Code fork)

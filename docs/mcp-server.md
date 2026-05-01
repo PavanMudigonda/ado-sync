@@ -1,6 +1,6 @@
 # MCP Server
 
-`ado-sync` ships a built-in MCP (Model Context Protocol) server that exposes its sync operations as **structured tools** for AI agents — Claude Code, GitHub Copilot, Cursor, and any other MCP-compatible host.
+`ado-sync` ships a built-in MCP (Model Context Protocol) server that exposes its sync operations as **structured tools** for AI agents — Claude Code, GitHub Copilot, Visual Studio Agent Application, Codex, Cursor, and any other MCP-compatible host.
 
 Using the MCP server instead of spawning the CLI gives agents:
 - Typed JSON responses (no output parsing)
@@ -22,6 +22,25 @@ npm install -g ado-sync
 
 Use `npx --yes --package=ado-sync ado-sync-mcp` as the command in all configs below.
 npx downloads and runs the package automatically on first use.
+
+---
+
+## Host compatibility matrix
+
+Use this table when wiring `ado-sync-mcp` into a new AI host.
+
+| Host | Config shape | Server command | Required env | Verify step |
+|------|--------------|----------------|--------------|-------------|
+| Claude Code / Claude Desktop | `mcpServers` | `npx --yes --package=ado-sync ado-sync-mcp` | `AZURE_DEVOPS_TOKEN`, absolute `ADO_SYNC_CONFIG` | Run `/mcp`, then call `validate_config` |
+| VS Code (GitHub Copilot agent mode) | `servers` + `type: "stdio"` | `npx --yes --package=ado-sync ado-sync-mcp` | `AZURE_DEVOPS_TOKEN`, `ADO_SYNC_CONFIG` | Confirm server in MCP list, then call `validate_config` |
+| Visual Studio Agent Application | host MCP settings for a stdio server | `npx --yes --package=ado-sync ado-sync-mcp` | `AZURE_DEVOPS_TOKEN`, `ADO_SYNC_CONFIG` | Confirm server loads, then call `validate_config` |
+| Codex CLI / Codex Agents | host MCP settings for a stdio server | `npx --yes --package=ado-sync ado-sync-mcp` | `AZURE_DEVOPS_TOKEN`, absolute `ADO_SYNC_CONFIG` | Confirm server appears in MCP tools, then call `validate_config` |
+| Cursor | `mcpServers` | `npx --yes --package=ado-sync ado-sync-mcp` | `AZURE_DEVOPS_TOKEN`, absolute `ADO_SYNC_CONFIG` | Confirm MCP server is active, then call `validate_config` |
+
+Standard post-registration flow for all hosts:
+1. Call `validate_config`.
+2. Call `status` (safe read-only drift check).
+3. Run `push_specs` with `dryRun: true` before any write operation.
 
 ---
 
@@ -107,6 +126,53 @@ Create `.vscode/mcp.json` in your workspace root:
 ```
 
 `${env:AZURE_DEVOPS_TOKEN}` reads the variable from your shell environment — no hardcoded secrets.
+
+---
+
+## Visual Studio Agent Application (Preview)
+
+If your Visual Studio Agent Application build exposes MCP registration, add `ado-sync-mcp` as a stdio server. The exact config surface may change while the product is in preview, so treat the block below as a template and adapt field names to the host UI/schema:
+
+```json
+{
+  "servers": {
+    "ado-sync": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["--yes", "--package=ado-sync", "ado-sync-mcp"],
+      "env": {
+        "AZURE_DEVOPS_TOKEN": "${env:AZURE_DEVOPS_TOKEN}",
+        "ADO_SYNC_CONFIG": "${workspaceFolder}/ado-sync.json"
+      }
+    }
+  }
+}
+```
+
+Use an absolute path for `ADO_SYNC_CONFIG` if the host does not support `${workspaceFolder}`-style substitution.
+
+---
+
+## Codex CLI / Codex Agents
+
+If your Codex host exposes MCP settings, add `ado-sync` as a stdio server using a config block like this:
+
+```json
+{
+  "mcpServers": {
+    "ado-sync": {
+      "command": "npx",
+      "args": ["--yes", "--package=ado-sync", "ado-sync-mcp"],
+      "env": {
+        "AZURE_DEVOPS_TOKEN": "<your-pat>",
+        "ADO_SYNC_CONFIG": "/absolute/path/to/ado-sync.json"
+      }
+    }
+  }
+}
+```
+
+The exact settings file path and top-level key are host-dependent; use this as a template for the Codex MCP configuration surface your environment provides.
 
 ---
 
