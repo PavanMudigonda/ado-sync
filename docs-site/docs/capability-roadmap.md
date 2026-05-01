@@ -20,41 +20,7 @@ The roadmap below focuses on gaps that limit scale, predictability, or user trus
 
 ---
 
-## Phase 1: Fix correctness gaps first
-
-### Why this comes first
-
-Some configuration surfaces are documented and typed, but not fully honored at runtime. That weakens confidence in the tool even when the rest of the workflow is sound.
-
-### Priority work
-
-1. Align `publish-test-results` docs, types, and runtime behavior.
-2. Either implement or remove unsupported settings from public docs and config types.
-3. Add focused regression tests around run creation and configuration lookup.
-
-### Main files
-
-- `src/sync/publish-results.ts`
-- `src/types.ts`
-- `docs/publish-test-results.md`
-- `src/__tests__/regressions.test.ts`
-
-### Concrete targets
-
-- honor `publishTestResults.testConfiguration.name` by resolving configuration names to IDs before run creation
-- support explicit test suite targeting for result publication when configured
-- implement deterministic flaky-outcome policies instead of exposing them as no-op configuration
-- document only behavior that is actually live
-
-### Exit criteria
-
-- every documented `publishTestResults` setting is either implemented end-to-end or removed
-- dry-run and live-run behavior produce matching routing decisions
-- regression coverage exists for name-based configuration selection and flaky handling
-
----
-
-## Phase 2: Introduce scoped synchronization
+## Phase 1: Introduce scoped synchronization
 
 ### Problem to solve
 
@@ -80,7 +46,7 @@ This model should work alongside `configurationKey`, not replace it.
 - `src/config.ts`
 - `src/sync/engine.ts`
 - `src/cli.ts`
-- `docs/configuration.md`
+- `docs-site/docs/configuration.md`
 
 ### Exit criteria
 
@@ -90,7 +56,7 @@ This model should work alongside `configurationKey`, not replace it.
 
 ---
 
-## Phase 3: Build a real hierarchy engine
+## Phase 2: Build a real hierarchy engine
 
 ### Problem to solve
 
@@ -114,8 +80,8 @@ Create named hierarchy definitions that can materialize test suites from local s
 - `src/azure/test-cases.ts`
 - `src/sync/engine.ts`
 - `src/types.ts`
-- `docs/advanced.md`
-- `docs/configuration.md`
+- `docs-site/docs/advanced.md`
+- `docs-site/docs/configuration.md`
 
 ### Exit criteria
 
@@ -125,7 +91,7 @@ Create named hierarchy definitions that can materialize test suites from local s
 
 ---
 
-## Phase 4: Expand the command surface for scale workflows
+## Phase 3: Expand the command surface for scale workflows
 
 ### Problem to solve
 
@@ -143,7 +109,7 @@ The current command line is clean, but it is missing a few control points that m
 - `src/cli.ts`
 - `src/config.ts`
 - `src/sync/engine.ts`
-- `docs/cli.md`
+- `docs-site/docs/cli.md`
 
 ### Exit criteria
 
@@ -153,7 +119,7 @@ The current command line is clean, but it is missing a few control points that m
 
 ---
 
-## Phase 5: Modernize configuration ergonomics
+## Phase 4: Modernize configuration ergonomics
 
 ### Problem to solve
 
@@ -174,7 +140,7 @@ Make configuration layering easier, safer, and more portable.
 
 - `src/config.ts`
 - `src/types.ts`
-- `docs/configuration.md`
+- `docs-site/docs/configuration.md`
 - `src/cli.ts`
 
 ### Exit criteria
@@ -185,7 +151,7 @@ Make configuration layering easier, safer, and more portable.
 
 ---
 
-## Phase 6: Deepen automation and result publishing
+## Phase 5: Deepen automation and result publishing
 
 ### Problem to solve
 
@@ -198,10 +164,9 @@ Expand the publishing model so it can express how tests were executed, where run
 ### Priority work
 
 1. Support automation classification rules instead of a single coarse toggle.
-2. Resolve named test configurations at runtime.
-3. Allow controlled publication to more than one destination suite when desired.
-4. Add stronger matching and fallback rules for automated result association.
-5. Expand attachment and comment policies for passing, flaky, and retried tests.
+2. Allow controlled publication to more than one destination suite when desired.
+3. Add stronger matching and fallback rules for automated result association.
+4. Expand comment and attachment policies for complex retry-heavy pipelines.
 
 ### Main files
 
@@ -209,17 +174,17 @@ Expand the publishing model so it can express how tests were executed, where run
 - `src/azure/test-runs.ts`
 - `src/azure/test-cases.ts`
 - `src/types.ts`
-- `docs/publish-test-results.md`
+- `docs-site/docs/publish-test-results.md`
 
 ### Exit criteria
 
 - automation metadata is predictable across push and publish flows
-- result publication can be routed by configuration rather than ad hoc flags alone
+- result publication can be routed beyond a single suite binding when required
 - retry-heavy pipelines produce consistent final outcomes
 
 ---
 
-## Phase 7: Add extension points instead of hard-coding every variant
+## Phase 6: Add extension points instead of hard-coding every variant
 
 ### Problem to solve
 
@@ -255,15 +220,14 @@ Introduce a narrow extension model for parser registration, result ingestion, cu
 
 ## Recommended implementation order
 
-1. Phase 1: correctness and documentation trust
-2. Phase 2: scoped synchronization model
-3. Phase 4: command-surface improvements needed to operate the new scope model
-4. Phase 3: hierarchy engine
-5. Phase 6: deeper automation and result-routing behavior
-6. Phase 5: configuration ergonomics and shared profiles
-7. Phase 7: extension model
+1. Phase 1: scoped synchronization model
+2. Phase 3: command-surface improvements needed to operate the new scope model
+3. Phase 2: hierarchy engine
+4. Phase 5: deeper automation and result-routing behavior
+5. Phase 4: configuration ergonomics and shared profiles
+6. Phase 6: extension model
 
-This order reduces user-facing confusion first, then hardens ownership boundaries before adding more advanced routing and hierarchy features.
+This order hardens ownership boundaries first, then adds the operational controls and routing depth needed for larger installations.
 
 ---
 
@@ -271,10 +235,10 @@ This order reduces user-facing confusion first, then hardens ownership boundarie
 
 If the goal is to start implementation immediately, the highest-value first batch is:
 
-1. fix `publish-test-results` contract drift
-2. add named test configuration lookup
-3. design `syncTarget` ownership schema in `src/types.ts`
-4. wire ownership filtering into `status`, `push`, `pull`, and `stale`
-5. add `--source-file`, `--create-only`, and `--link-only` style command controls
+1. design `syncTarget` ownership schema in `src/types.ts`
+2. wire ownership filtering into `status`, `push`, `pull`, and `stale`
+3. add `--source-file`, `--create-only`, and `--link-only` style command controls
+4. design declarative hierarchy definitions that can coexist with `syncTarget`
+5. tighten result-routing rules for suite-aware publication at scale
 
-That batch improves trust, reduces operational risk, and lays the foundation for the larger roadmap.
+That batch reduces operational risk, hardens ownership boundaries, and lays the foundation for the larger roadmap.
