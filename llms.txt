@@ -181,14 +181,14 @@ Register in Claude Code (`~/.claude/claude_desktop_config.json`):
 
 ## Documentation index
 
-- docs/cli.md               — full CLI reference (all commands, flags, options)
-- docs/configuration.md     — complete config schema reference
-- docs/workflows.md         — framework-specific end-to-end examples
-- docs/spec-formats.md      — spec file format details per framework
-- docs/work-item-links.md   — linking Test Cases to User Stories / Bugs
-- docs/publish-test-results.md — TRX / JUnit / Playwright result publishing
-- docs/advanced.md          — suite routing, fieldUpdates, attachments, CI mode
-- docs/mcp-server.md        — MCP server setup and tool reference
-- docs/troubleshooting.md   — common errors and fixes
-- docs/agent-setup.md       — step-by-step guide for AI agents doing autonomous setup
-- docs/vscode-extension.md  — VS Code extension commands, settings, CodeLens, sidebar, troubleshooting
+- docs-site/docs/cli.md               — full CLI reference (all commands, flags, options)
+- docs-site/docs/configuration.md     — complete config schema reference
+- docs-site/docs/workflows.md         — framework-specific end-to-end examples
+- docs-site/docs/spec-formats.md      — spec file format details per framework
+- docs-site/docs/work-item-links.md   — linking Test Cases to User Stories / Bugs
+- docs-site/docs/publish-test-results.md — TRX / JUnit / Playwright result publishing
+- docs-site/docs/advanced.md          — suite routing, fieldUpdates, attachments, CI mode
+- docs-site/docs/mcp-server.md        — MCP server setup and tool reference
+- docs-site/docs/troubleshooting.md   — common errors and fixes
+- docs-site/docs/agent-setup.md       — step-by-step guide for AI agents doing autonomous setup
+- docs-site/docs/vscode-extension.md  — VS Code extension commands, settings, CodeLens, sidebar, troubleshooting

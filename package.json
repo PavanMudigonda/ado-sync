@@ -13,6 +13,8 @@
     "build:watch": "tsc --watch",
     "clean": "rm -rf dist",
     "dev": "ts-node src/cli.ts",
+    "docs:build": "npm --prefix docs-site run build",
+    "docs:start": "npm --prefix docs-site run start",
     "lint": "eslint src --ext .ts --quiet",
     "lint:fix": "eslint src --ext .ts --fix --quiet",
     "format": "prettier --write \"src/**/*.ts\"",
