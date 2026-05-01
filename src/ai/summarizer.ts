@@ -39,6 +39,7 @@ export type AiProvider =
   | 'heuristic'
   | 'local'
   | 'ollama'
+  | 'docker'
   | 'openai'
   | 'anthropic'
   | 'huggingface'
@@ -914,7 +915,7 @@ async function ollamaSummary(
   baseUrl: string,
   contextContent?: string
 ): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
-   
+
   let Ollama: any;
   try {
     ({ Ollama } = await esmImport('ollama'));
@@ -927,6 +928,33 @@ async function ollamaSummary(
     messages: [{ role: 'user', content: buildPrompt(code, contextContent) }],
   });
   return parseAiResponse(response.message?.content ?? '', fallbackTitle);
+}
+
+async function dockerSummary(
+  code: string,
+  fallbackTitle: string,
+  model: string,
+  baseUrl: string,
+  contextContent?: string
+): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
+
+  let OpenAI: any;
+  try {
+    ({ OpenAI } = await esmImport('openai'));
+  } catch {
+    throw new Error("'docker' provider requires the openai package. Install it with: npm install openai");
+  }
+  const client = new OpenAI({
+    apiKey: 'docker',
+    baseURL: baseUrl.replace(/\/$/, ''),
+  });
+  const msg = await client.chat.completions.create({
+    model,
+    messages: [{ role: 'user', content: buildPrompt(code, contextContent) }],
+    temperature: 0,
+    max_tokens: 2048,
+  });
+  return parseAiResponse(msg.choices?.[0]?.message?.content ?? '', fallbackTitle);
 }
 
 async function openaiSummary(
@@ -1243,7 +1271,7 @@ export async function analyzeFailure(
     let raw = '';
     switch (opts.provider) {
       case 'ollama': {
-         
+
         let OllamaFA: any;
         try { ({ Ollama: OllamaFA } = await esmImport('ollama')); } catch { throw new Error("ollama package not installed"); }
         const ollamaClient = new OllamaFA({ host: opts.baseUrl ?? 'http://localhost:11434' });
@@ -1252,6 +1280,24 @@ export async function analyzeFailure(
           messages: [{ role: 'user', content: prompt }],
         });
         raw = ollamaResp.message?.content ?? '';
+        break;
+      }
+      case 'docker': {
+        // Docker Model Runner — local OpenAI-compatible endpoint (no API key required).
+
+        let OpenAIdmr: any;
+        try { ({ OpenAI: OpenAIdmr } = await esmImport('openai')); } catch { throw new Error("openai package not installed"); }
+        const dmrClient = new OpenAIdmr({
+          apiKey: resolveEnvVar(opts.apiKey ?? '') || 'docker',
+          baseURL: (opts.baseUrl ?? 'http://localhost:12434/engines/llama.cpp/v1').replace(/\/$/, ''),
+        });
+        const dmrMsg = await dmrClient.chat.completions.create({
+          model: opts.model ?? 'ai/llama3.2',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0,
+          max_tokens: 256,
+        });
+        raw = dmrMsg.choices?.[0]?.message?.content ?? '';
         break;
       }
       case 'openai': {
@@ -1438,6 +1484,13 @@ export async function summarizeTest(
           body, fallbackTitle,
           opts.model ?? 'gemma-4-e4b-it',
           opts.baseUrl ?? 'http://localhost:11434',
+          ctx
+        );
+      case 'docker':
+        return await dockerSummary(
+          body, fallbackTitle,
+          opts.model ?? 'ai/llama3.2',
+          opts.baseUrl ?? 'http://localhost:12434/engines/llama.cpp/v1',
           ctx
         );
       case 'openai':

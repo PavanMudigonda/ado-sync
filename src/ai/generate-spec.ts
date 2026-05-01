@@ -22,6 +22,7 @@ import { AdoStory } from '../azure/work-items';
 export type AiGenerateProvider =
   | 'local'
   | 'ollama'
+  | 'docker'
   | 'openai'
   | 'anthropic'
   | 'huggingface'
@@ -210,7 +211,7 @@ async function localProvider(prompt: string, modelPath: string): Promise<string>
 }
 
 async function ollamaProvider(prompt: string, model: string, baseUrl: string): Promise<string> {
-   
+
   let Ollama: any;
   try {
     ({ Ollama } = await esmImport('ollama'));
@@ -223,6 +224,27 @@ async function ollamaProvider(prompt: string, model: string, baseUrl: string): P
     messages: [{ role: 'user', content: prompt }],
   });
   return response.message?.content ?? '';
+}
+
+async function dockerProvider(prompt: string, model: string, baseUrl: string): Promise<string> {
+
+  let OpenAI: any;
+  try {
+    ({ OpenAI } = await esmImport('openai'));
+  } catch {
+    throw new Error("'docker' provider requires the openai package. Install it with: npm install openai");
+  }
+  const client = new OpenAI({
+    apiKey: 'docker',
+    baseURL: baseUrl.replace(/\/$/, ''),
+  });
+  const msg = await client.chat.completions.create({
+    model,
+    messages: [{ role: 'user', content: prompt }],
+    temperature: 0.3,
+    max_tokens: 4096,
+  });
+  return msg.choices[0]?.message?.content ?? '';
 }
 
 async function openaiProvider(
@@ -497,6 +519,13 @@ export async function generateSpecFromStory(
           prompt,
           opts.model ?? 'gemma-4-e4b-it',
           opts.baseUrl ?? 'http://localhost:11434'
+        );
+      }
+      case 'docker': {
+        return dockerProvider(
+          prompt,
+          opts.model ?? 'ai/llama3.2',
+          opts.baseUrl ?? 'http://localhost:12434/engines/llama.cpp/v1'
         );
       }
       case 'openai': {

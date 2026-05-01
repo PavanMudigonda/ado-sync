@@ -491,7 +491,7 @@ test('should log in with valid credentials', async ({ page }) => { ... });
 
 ### AI failure analysis
 
-When `sync.ai.analyzeFailures: true` is set (and the provider is `ollama`, `openai`, or `anthropic`), ado-sync uses the AI provider to generate a root-cause summary for failing test results during `publish-test-results`. The summary is attached as a comment on the Azure Test Run result.
+When `sync.ai.analyzeFailures: true` is set (and the provider is `ollama`, `docker`, `openai`, or `anthropic`), ado-sync uses the AI provider to generate a root-cause summary for failing test results during `publish-test-results`. The summary is attached as a comment on the Azure Test Run result.
 
 ```json
 {
@@ -518,6 +518,7 @@ The AI receives the test name, error message, and stack trace (if available) and
 | `local` *(default)* | Good–Excellent | A GGUF model file (see setup below) |
 | `heuristic` | Basic | Nothing — zero dependencies, works offline |
 | `ollama` | Good–Excellent | [Ollama](https://ollama.com) server running locally |
+| `docker` | Good–Excellent | Docker Desktop with Model Runner enabled — `--ai-model ai/llama3.2`, no API key |
 | `openai` | Excellent | OpenAI API key, or any OpenAI-compatible proxy (LiteLLM, Azure OpenAI, vLLM, etc.) |
 | `anthropic` | Excellent | Anthropic API key |
 
@@ -528,8 +529,8 @@ The AI receives the test name, error message, and stack trace (if available) and
 | Flag | Description |
 |------|-------------|
 | `--ai-provider <p>` | Provider to use. Default: `local`. Pass `none` to disable entirely. |
-| `--ai-model <m>` | For `local`: path to `.gguf` file. For `ollama`/`openai`/`anthropic`: model name/tag. |
-| `--ai-url <url>` | Base URL for `ollama` or an OpenAI-compatible endpoint. |
+| `--ai-model <m>` | For `local`: path to `.gguf` file. For `ollama`/`docker`/`openai`/`anthropic`: model name/tag. |
+| `--ai-url <url>` | Base URL for `ollama`, `docker`, or an OpenAI-compatible endpoint. |
 | `--ai-key <key>` | API key for `openai` or `anthropic`. Supports `$ENV_VAR` references. |
 | `--ai-context <file>` | Path to a markdown file with domain context/instructions injected into the AI prompt. |
 
@@ -596,7 +597,7 @@ The file is plain markdown — write whatever helps the AI produce better output
 
 #### Notes
 
-- Context is injected for all LLM providers: `local`, `ollama`, `openai`, `anthropic`.
+- Context is injected for all LLM providers: `local`, `ollama`, `docker`, `openai`, `anthropic`.
 - The `heuristic` provider does not use a prompt and ignores this setting.
 - If the file cannot be read, a warning is printed and the push continues without it.
 
