@@ -1135,6 +1135,7 @@ test('push can prune empty generated suites after a hierarchy-managed move', asy
   (AzureClient as any).create = async () => ({
     getTestPlanApi: async () => ({
       getTestCaseList: async (_project: string, _planId: number, suiteId: number) => {
+        if (suiteId === 10) return [{ testCase: { id: 77 } }];
         if (suiteId === 102 || suiteId === 101) return [];
         return [];
       },
@@ -1165,6 +1166,101 @@ test('push can prune empty generated suites after a hierarchy-managed move', asy
         },
       }),
       updateWorkItem: async () => ({})
+    }),
+  });
+
+  try {
+    await push(config, tempDir, { dryRun: false });
+    assert.deepEqual(deletedSuites, [102]);
+  } finally {
+    (AzureClient as any).create = originalCreate;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('push can prune empty stale generated suites for removed local specs on full-scope runs', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ado-sync-push-hierarchy-stale-prune-'));
+  const filePath = path.join(tempDir, 'specs', 'active', 'login.md');
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, ['### Active case', '@tc:55', '', 'Steps:', '1. Existing step', ''].join('\n'));
+  fs.writeFileSync(path.join(tempDir, '.ado-sync-state.json'), JSON.stringify({
+    55: {
+      title: 'Active case',
+      stepsHash: 'cached-steps',
+      descriptionHash: 'cached-description',
+      remoteDescriptionHash: 'cached-remote-description',
+      changedDate: '2026-05-01T00:00:00Z',
+      filePath,
+    },
+    77: {
+      title: 'Removed local case',
+      stepsHash: 'stale-steps',
+      descriptionHash: 'stale-description',
+      remoteDescriptionHash: 'stale-remote-description',
+      changedDate: '2026-05-01T00:00:00Z',
+      filePath: path.join(tempDir, 'specs', 'legacy', 'old.md'),
+      suitePathKey: 'specs/legacy',
+    },
+  }, null, 2));
+
+  const config = makeConfig({
+    local: { type: 'markdown', include: 'specs/**/*.md' },
+    testPlan: {
+      id: 1,
+      suiteId: 10,
+      hierarchy: { mode: 'byFolder', cleanupEmptySuites: true },
+    },
+  });
+
+  const deletedSuites: number[] = [];
+  const suites = [
+    { id: 101, name: 'specs', parentSuite: { id: 10 } },
+    { id: 102, name: 'legacy', parentSuite: { id: 101 } },
+    { id: 103, name: 'active', parentSuite: { id: 101 } },
+  ];
+
+  const originalCreate = AzureClient.create;
+  (AzureClient as any).create = async () => ({
+    getTestPlanApi: async () => ({
+      getTestCaseList: async (_project: string, _planId: number, suiteId: number) => {
+        if (suiteId === 10) return [{ workItem: { id: 77 } }];
+        if (suiteId === 103) return [{ workItem: { id: 55 } }];
+        if (suiteId === 102 || suiteId === 101) return [];
+        return [];
+      },
+      getTestPlanById: async () => ({ id: 1, rootSuite: { id: 10 } }),
+      getTestSuitesForPlan: async () => suites,
+      addTestCasesToSuite: async () => undefined,
+      removeTestCasesFromSuite: async () => undefined,
+      deleteTestSuite: async (_project: string, _planId: number, suiteId: number) => {
+        deletedSuites.push(suiteId);
+        const index = suites.findIndex((suite) => suite.id === suiteId);
+        if (index >= 0) suites.splice(index, 1);
+      },
+    }),
+    getWitApi: async () => ({
+      getWorkItem: async (id: number) => ({
+        id,
+        fields: {
+          'System.Title': id === 55 ? 'Active case' : 'Removed local case',
+          'System.Description': '',
+          'Microsoft.VSTS.TCM.Steps': '<steps id="0" last="2"><step id="2" type="ValidateStep"><parameterizedString isformatted="true">&lt;DIV&gt;&lt;P&gt;Step Existing step&lt;/P&gt;&lt;/DIV&gt;</parameterizedString><parameterizedString isformatted="true"></parameterizedString><description/></step></steps>',
+          'System.Tags': '',
+          'System.ChangedDate': '2026-05-01T00:00:00Z',
+        },
+      }),
+      getWorkItems: async () => [{
+        id: 77,
+        fields: {
+          'System.WorkItemType': 'Test Case',
+          'System.Title': 'Removed local case',
+          'System.Description': '',
+          'Microsoft.VSTS.TCM.Steps': '<steps id="0" last="2"><step id="2" type="ValidateStep"><parameterizedString isformatted="true">&lt;DIV&gt;&lt;P&gt;Step Existing step&lt;/P&gt;&lt;/DIV&gt;</parameterizedString><parameterizedString isformatted="true"></parameterizedString><description/></step></steps>',
+          'System.Tags': '',
+          'System.ChangedDate': '2026-05-01T00:00:00Z',
+        },
+      }],
+      updateWorkItem: async () => ({}),
     }),
   });
 

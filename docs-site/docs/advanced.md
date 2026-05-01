@@ -288,7 +288,7 @@ Use `testPlan.hierarchy` when you want suite generation to read like a real conf
 
 `mode: "byFolder"` mirrors the relative folder path. `mode: "byFile"` mirrors folders and then adds one more suite named after the spec file. `mode: "byTag"` reads the first matching tag with the configured `tagPrefix` and treats the tag value as the generated suite path. `mode: "byLevels"` builds the path from explicit folder, file, and tag rules. When `rootSuite` is set, ado-sync creates that suite under `suiteId` or the plan root and anchors the generated tree beneath it.
 
-Set `cleanupEmptySuites: true` when you want ado-sync to prune empty generated suites left behind by hierarchy-managed moves. This cleanup is opt-in because deleting suites is a stronger action than creating or reusing them.
+Set `cleanupEmptySuites: true` when you want ado-sync to prune empty generated suites left behind by hierarchy-managed moves or by stale cached branches discovered during a safe full-scope push. This cleanup is opt-in because deleting suites is a stronger action than creating or reusing them.
 
 ### `byFolder` — mirror folder structure
 
@@ -383,7 +383,7 @@ Use `folder` rules to pick a specific relative directory segment by zero-based i
 
 Child suites are created automatically if they do not exist. The suite hierarchy is re-used across runs.
 
-When a linked spec file or its hierarchy-driving tag changes to a different generated path, the next `push` adds the Test Case to the new generated suite and removes it from the previous generated suite membership. If `cleanupEmptySuites` is enabled, ado-sync also deletes empty generated suites left behind on the old branch.
+When a linked spec file or its hierarchy-driving tag changes to a different generated path, the next `push` adds the Test Case to the new generated suite and removes it from the previous generated suite membership. If `cleanupEmptySuites` is enabled, ado-sync also deletes empty generated suites left behind on the old branch. On safe full-scope runs, the same option also prunes empty stale generated branches recovered from cache entries for specs that are no longer present locally.
 
 ---
 
