@@ -43,8 +43,8 @@ ado-sync publish-test-results \
 | `--runName <name>` | Name for the Test Run in Azure DevOps. Defaults to `ado-sync <ISO timestamp>`. |
 | `--buildId <id>` | Build ID to associate with the Test Run. |
 | `--testConfiguration <nameOrId>` | Azure test configuration name or numeric ID for the published run. |
-| `--testSuite <nameOrId>` | Azure test suite name or numeric ID for planned run publication. |
-| `--testPlan <nameOrId>` | Azure test plan name or numeric ID used with `--testSuite`. |
+| `--testSuite <nameOrId>` | Azure test suite (name or ID) for **planned run** publication. Enables TC linkage. |
+| `--testPlan <nameOrId>` | Azure test plan (name or ID). Used with `--testSuite`. Falls back to `testPlan.id` from config. |
 | `--dry-run` | Parse results and print summary without creating a run in Azure. |
 | `--create-issues-on-failure` | File GitHub Issues or ADO Bugs for each failed test after publishing. |
 | `--issue-provider <github\|ado>` | Issue provider. Default: `github`. |
@@ -58,6 +58,44 @@ ado-sync publish-test-results \
 | `--ai-url <url>` | Base URL for Ollama or an OpenAI-compatible endpoint. |
 | `--ai-key <key>` | API key. Supports `$ENV_VAR` references. |
 | `--config-override` | Override config values (repeatable, same as other commands). |
+
+---
+
+## Planned runs (TC linkage)
+
+Azure DevOps **silently ignores** `testCase.id` on unplanned test runs. To link published
+results to Test Cases in the Test Plans UI, you must create a **planned run** that uses
+test points.
+
+Pass `--testPlan` and `--testSuite` to enable planned-run mode:
+
+```bash
+ado-sync publish-test-results \
+  --testPlan 32953 \
+  --testSuite 32954 \
+  --testResult results/junit.xml
+```
+
+How it works:
+
+1. ado-sync resolves the test suite's test points (each point links a Test Case to a configuration).
+2. A planned run is created with those point IDs — ADO pre-populates result slots linked to each TC.
+3. Parsed results are matched to TCs by the `tc` property/tag in the result file.
+4. Matched results are patched with outcome, duration, and error message.
+
+Results **without** a TC ID are skipped with a warning (the run still succeeds).
+Test Cases **without** a matching result keep the default "Active" outcome.
+
+### Config equivalent
+
+```yaml
+publishTestResults:
+  testSuite:
+    id: 32954           # or name: "My Suite"
+    testPlan: "32953"   # or plan name
+  testConfiguration:
+    id: 1               # optional — filter points by configuration
+```
 
 ---
 
