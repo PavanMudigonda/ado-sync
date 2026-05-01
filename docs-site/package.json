@@ -5,7 +5,8 @@
   "scripts": {
     "start": "docusaurus start",
     "build": "docusaurus build",
-    "serve": "docusaurus serve",
+    "serve": "python3 -m http.server 3000 --directory build",
+    "serve:docusaurus": "docusaurus serve build --host 0.0.0.0 --port 3000",
     "clear": "docusaurus clear"
   },
   "dependencies": {
