@@ -1686,6 +1686,15 @@ export async function publishTestResults(
     ? await resolvePlannedRunContext(client, config, pubConfig.testSuite, effectiveResults, resolvedConfigurationId)
     : undefined;
 
+  if (!plannedRunContext) {
+    const withTcIds = effectiveResults.filter((r) => r.testCaseId !== undefined).length;
+    if (withTcIds > 0) {
+      process.stderr.write(`  [warn] ${withTcIds} result(s) have test case IDs but no --testSuite was specified.\n`);
+      process.stderr.write(`         Azure DevOps only links results to test cases through planned runs.\n`);
+      process.stderr.write(`         Add --testSuite <id> --testPlan <id> to enable TC linkage.\n`);
+    }
+  }
+
   const runSettings = pubConfig?.testRunSettings;
   const runName = opts.runName ?? runSettings?.name ?? `ado-sync ${new Date().toISOString()}`;
 
@@ -1721,9 +1730,6 @@ export async function publishTestResults(
     };
     if (r.errorMessage) result.errorMessage = r.errorMessage;
     if (r.stackTrace)   result.stackTrace   = r.stackTrace;
-    // When a TC id was extracted from the result file, link directly by id.
-    // This is more reliable than AutomatedTestName matching and works even when
-    // the FQMN has changed since the TC was last pushed.
     if (r.testCaseId)   result.testCase = { id: String(r.testCaseId) };
     if (resolvedConfigurationId) result.configuration = { id: String(resolvedConfigurationId) };
     if (r.testCaseId && plannedRunContext) {

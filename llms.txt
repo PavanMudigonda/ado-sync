@@ -96,7 +96,13 @@ ado-sync push --ai-provider heuristic          AI test step generation (no model
 ado-sync push --ai-provider openai --ai-key $OPENAI_API_KEY
 ado-sync push --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
 ado-sync status --output json                  machine-readable output
+ado-sync publish-test-results --testPlan 32953 --testSuite 32954   planned run with TC linkage
+ado-sync publish-test-results --testConfiguration "Windows 10"     set test configuration
 ```
+
+> **TC linkage requires planned runs.** Azure DevOps silently ignores `testCase.id` on
+> unplanned runs. Use `--testPlan` and `--testSuite` so results are linked to Test Cases
+> through test points.
 
 ## Suite routing
 
