@@ -984,15 +984,15 @@ async function pushSingle(
   // Removed TC detection is only safe on full-scope runs.
   // Tag-filtered, source-file-filtered, create-only, or condition-filtered pushes intentionally operate on a subset.
   const shouldDetectRemoved = !opts.tags && !opts.sourceFiles?.length && !opts.createOnly && !opts.linkOnly && !opts.updateOnly && !config.local.condition;
+  const localIds = new Set([
+    ...(resolvedTests.map((t) => t.azureId).filter(Boolean) as number[]),
+    ...createdIds,
+  ]);
   if (shouldDetectRemoved) {
     try {
       // Reuse the pre-loaded remote TCs if we already fetched them for automatedTestName
       // matching, otherwise fetch now. This avoids a redundant round-trip.
       const remoteTcs = preloadedRemoteTcs ?? await getTestCasesInSuite(client, config);
-      const localIds = new Set([
-        ...(resolvedTests.map((t) => t.azureId).filter(Boolean) as number[]),
-        ...createdIds,
-      ]);
       for (const remote of remoteTcs) {
         if (!localIds.has(remote.id)) {
           if (!opts.dryRun) {
@@ -1008,6 +1008,25 @@ async function pushSingle(
         }
       }
     } catch { /* best-effort: don't fail the whole push */ }
+  }
+
+  if (!opts.dryRun && shouldCleanupEmptyGeneratedSuites(config) && shouldDetectRemoved) {
+    const staleHierarchyKeys = [...new Set(
+      Object.entries(cache)
+        .filter(([cacheKey]) => cacheKey !== '_suites')
+        .map(([cacheKey, entry]) => ({ azureId: Number(cacheKey), entry }))
+        .filter(({ azureId, entry }) => Number.isFinite(azureId) && !localIds.has(azureId) && !!entry)
+        .map(({ entry }) => entry.suitePathKey ?? getGeneratedSuitePathKey(config, entry.filePath, configDir))
+        .filter((pathKey): pathKey is string => !!pathKey)
+    )];
+
+    for (const staleHierarchyKey of staleHierarchyKeys) {
+      try {
+        await pruneEmptyGeneratedSuitesForPathKey(client, config, staleHierarchyKey, suiteCache);
+      } catch {
+        // Best-effort cleanup; do not fail the push when stale branch pruning cannot complete.
+      }
+    }
   }
 
   if (!opts.dryRun) {

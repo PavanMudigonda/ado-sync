@@ -32,7 +32,7 @@ Create named hierarchy definitions that can materialize test suites from local s
 
 ### Proposed capabilities
 
-- broader cleanup policies for stale nodes and stale memberships beyond move-driven pruning
+- broader stale-membership cleanup beyond the current move-driven and stale-branch pruning
 - optional multiple hierarchy outputs from the same local corpus
 
 ### Main files
@@ -51,7 +51,7 @@ Create named hierarchy definitions that can materialize test suites from local s
 
 Remaining follow-up:
 
-- expand cleanup beyond move-driven pruning into broader stale-node and stale-membership policies
+- expand cleanup beyond the current move-driven and stale-branch pruning into broader stale-membership policies
 - support multiple parallel hierarchy outputs from the same local corpus
 
 ---
