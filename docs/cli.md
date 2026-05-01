@@ -79,6 +79,7 @@ ado-sync push --config-override testPlan.id=9999
 ado-sync push --ai-provider heuristic           # fast regex, no model needed
 ado-sync push --ai-provider local --ai-model ~/.cache/models/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf
 ado-sync push --ai-provider ollama --ai-model qwen2.5-coder:7b
+ado-sync push --ai-provider docker --ai-model ai/llama3.2                        # Docker Model Runner, no key needed
 ado-sync push --ai-provider openai  --ai-key $OPENAI_API_KEY
 ado-sync push --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
 ado-sync push --ai-provider huggingface --ai-model mistralai/Mistral-7B-Instruct-v0.3 --ai-key $HF_TOKEN
@@ -108,6 +109,7 @@ For code-based types (`java`, `csharp`, `python`, `javascript`, `playwright`, `c
 | `local` *(default)* | Good–Excellent | Download a GGUF model (see below) |
 | `heuristic` | Basic | None — offline, zero dependencies |
 | `ollama` | Good–Excellent | `ollama pull qwen2.5-coder:7b` |
+| `docker` | Good–Excellent | Docker Desktop with Model Runner enabled — `--ai-model ai/llama3.2` |
 | `openai` | Excellent | `--ai-key $OPENAI_API_KEY` |
 | `anthropic` | Excellent | `--ai-key $ANTHROPIC_API_KEY` |
 | `huggingface` | Good–Excellent | `--ai-model <model-id> --ai-key $HF_TOKEN` |
@@ -168,6 +170,7 @@ ado-sync pull --tags "@smoke"
 ado-sync pull --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
 ado-sync pull --ai-provider openai    --ai-key $OPENAI_API_KEY --ai-model gpt-4o
 ado-sync pull --ai-provider ollama    --ai-model qwen2.5-coder:7b
+ado-sync pull --ai-provider docker    --ai-model ai/llama3.2
 ado-sync pull --ai-provider huggingface --ai-model mistralai/Mistral-7B-Instruct-v0.3 --ai-key $HF_TOKEN
 ado-sync pull --ai-provider bedrock      --ai-model anthropic.claude-3-haiku-20240307-v1:0 --ai-region us-east-1
 ado-sync pull --ai-provider azureai      --ai-url https://myresource.openai.azure.com --ai-model gpt-4o --ai-key $AZURE_OPENAI_KEY
@@ -190,6 +193,7 @@ ado-sync status --output json    # machine-readable
 ado-sync status --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
 ado-sync status --ai-provider openai    --ai-key $OPENAI_API_KEY
 ado-sync status --ai-provider ollama    --ai-model qwen2.5-coder:7b
+ado-sync status --ai-provider docker    --ai-model ai/llama3.2
 ado-sync status --ai-provider bedrock        --ai-model anthropic.claude-3-haiku-20240307-v1:0 --ai-region us-east-1
 ado-sync status --ai-provider azureai        --ai-url https://myresource.openai.azure.com --ai-model gpt-4o --ai-key $AZURE_OPENAI_KEY
 ado-sync status --ai-provider github         --ai-model gpt-4o
@@ -240,6 +244,7 @@ ado-sync generate --story-ids 1234 --dry-run             # preview without writi
 ado-sync generate --story-ids 1234 --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
 ado-sync generate --story-ids 1234 --ai-provider openai --ai-key $OPENAI_API_KEY --ai-model gpt-4o
 ado-sync generate --story-ids 1234 --ai-provider ollama --ai-model qwen2.5-coder:7b
+ado-sync generate --story-ids 1234 --ai-provider docker --ai-model ai/llama3.2
 ado-sync generate --story-ids 1234 --ai-provider huggingface --ai-model mistralai/Mistral-7B-Instruct-v0.3 --ai-key $HF_TOKEN
 ado-sync generate --story-ids 1234 --ai-provider bedrock        --ai-model anthropic.claude-3-haiku-20240307-v1:0 --ai-region us-east-1
 ado-sync generate --story-ids 1234 --ai-provider azureai        --ai-url https://myresource.openai.azure.com --ai-model gpt-4o --ai-key $AZURE_OPENAI_KEY
@@ -254,7 +259,7 @@ ado-sync generate --story-ids 1234 --ai-provider openai --ai-key $OPENAI_API_KEY
 
 | Flag | Description |
 |------|-------------|
-| `--ai-provider` | Provider: `local`, `ollama`, `openai`, `anthropic`, `huggingface`, `bedrock`, `azureai`, `github`, `azureinference` |
+| `--ai-provider` | Provider: `local`, `ollama`, `docker`, `openai`, `anthropic`, `huggingface`, `bedrock`, `azureai`, `github`, `azureinference` |
 | `--ai-model` | Model name, path, or deployment ID |
 | `--ai-key` | API key (or `$ENV_VAR` reference) |
 | `--ai-url` | Base URL override (Ollama, Azure OpenAI full endpoint, OpenAI-compatible) |

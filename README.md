@@ -99,6 +99,7 @@ ado-sync supports multiple AI providers for test-step summarisation (`push`/`pul
 | `heuristic` | push / pull / status | none — built-in | none |
 | `local` | push / pull / status | `node-llama-cpp` *(included)* | GGUF model file path |
 | `ollama` | all AI commands | `npm i ollama` | local Ollama server |
+| `docker` | all AI commands | `npm i openai` | Docker Desktop with Model Runner — no API key |
 | `openai` | all AI commands | `npm i openai` | `$OPENAI_API_KEY` |
 | `anthropic` | all AI commands | `npm i @anthropic-ai/sdk` | `$ANTHROPIC_API_KEY` |
 | `huggingface` | all AI commands | `npm i openai` | `$HF_TOKEN` |
@@ -112,6 +113,7 @@ ado-sync supports multiple AI providers for test-step summarisation (`push`/`pul
 - Use `heuristic` for zero-setup summaries.
 - Use `local` for GGUF models through `node-llama-cpp`.
 - Use `ollama` if you already manage models with Ollama.
+- Use `docker` for Docker Model Runner — local inference via Docker Desktop, no API key required.
 - Use `openai`, `anthropic`, `github`, `bedrock`, `azureai`, or `azureinference` for hosted/provider-backed generation.
 - For `generate`, pass a small set of relevant files with `--ai-context` instead of the whole repo.
 
@@ -120,6 +122,9 @@ Examples:
 ```bash
 # Fastest setup
 ado-sync push --ai-provider heuristic
+
+# Local inference via Docker Desktop (no API key)
+ado-sync push --ai-provider docker --ai-model ai/llama3.2
 
 # Hosted model
 ado-sync push --ai-provider github --ai-model gpt-4o
