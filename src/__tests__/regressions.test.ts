@@ -4,9 +4,9 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
 
+import { detectAiEnvironment } from '../ai/summarizer';
 import { AzureClient } from '../azure/client';
 import { updateTestCase } from '../azure/test-cases';
-import { detectAiEnvironment } from '../ai/summarizer';
 import { getPreferredMarkerTagPrefix } from '../id-markers';
 import { parseGherkinFile } from '../parsers/gherkin';
 import { parseJavaScriptFile } from '../parsers/javascript';
