@@ -18,11 +18,11 @@ import * as path from 'path';
 import * as readline from 'readline';
 
 import pkg from '../package.json';
-import { AiSummaryOpts } from './ai/summarizer';
+import { AiSummaryOpts, detectAiEnvironment } from './ai/summarizer';
 import { AzureClient } from './azure/client';
 import { applyOverrides, CONFIG_TEMPLATE_JSON, CONFIG_TEMPLATE_YAML, loadConfig, resolveConfigPath } from './config';
 import { coverageReport, detectStaleTestCases, pull, push, status } from './sync/engine';
-import { generateSpecs } from './sync/generate';
+import { generateSpecs, loadGenerateContextContent } from './sync/generate';
 import { generateManifests } from './sync/manifest';
 import { publishTestResults } from './sync/publish-results';
 import { SyncConfig, SyncResult } from './types';
@@ -75,6 +75,11 @@ function collect(value: string, previous: string[]): string[] {
 /**
  * Build AiSummaryOpts from parsed CLI opts, falling back to config file values.
  * CLI flags always take precedence. Returns undefined when provider is 'none'.
+ *
+ * Fallback chain: CLI flags → config file → auto-detected AI environment → 'local'.
+ * When running inside an AI assistant terminal (Claude Code, Codex, Copilot, Cursor),
+ * the environment is detected automatically and the appropriate provider/key is used
+ * without requiring explicit --ai-provider or --ai-key flags.
  */
 function buildAiOpts(
   opts: { aiProvider?: string; aiModel?: string; aiUrl?: string; aiKey?: string; aiRegion?: string; aiContext?: string },
@@ -83,7 +88,9 @@ function buildAiOpts(
 ): AiSummaryOpts | undefined {
   const cfgAi = config?.sync?.ai;
   // CLI --ai-provider none wins over config; config provider='none' also disables
-  const provider = opts.aiProvider ?? cfgAi?.provider ?? 'local';
+  const explicitProvider = opts.aiProvider ?? cfgAi?.provider;
+  const detected = !explicitProvider ? detectAiEnvironment() : undefined;
+  const provider = explicitProvider ?? (cfgAi?.model ? 'local' : undefined) ?? detected?.provider ?? 'local';
   if (provider === 'none') return undefined;
 
   const resolveEnvRef = (value?: string): string | undefined => {
@@ -125,11 +132,14 @@ function buildAiOpts(
     }
   }
 
+  // Use auto-detected API key as fallback when no explicit key is configured
+  const apiKey = opts.aiKey ?? cfgAi?.apiKey ?? detected?.apiKey;
+
   return {
     provider: provider as AiSummaryOpts['provider'],
     model,
     baseUrl:  opts.aiUrl    ?? cfgAi?.baseUrl,
-    apiKey:   opts.aiKey    ?? cfgAi?.apiKey,
+    apiKey,
     region:   opts.aiRegion ?? cfgAi?.region,
     heuristicFallback: true,
     contextContent,
@@ -145,19 +155,25 @@ program
   .action(async (output: string | undefined, opts) => {
     const outFile = output ?? 'ado-sync.json';
     const outPath = path.resolve(outFile);
-    if (fs.existsSync(outPath)) {
-      console.error(chalk.red(`File already exists: ${outPath}`));
-      process.exit(1);
-    }
     const ext = path.extname(outFile).toLowerCase();
     const isYaml = ext === '.yml' || ext === '.yaml';
 
-    // K: interactive wizard when stdin is a TTY and --no-interactive is not set
-    if (opts.interactive && process.stdin.isTTY) {
-      const answers = await runInitWizard(isYaml);
-      fs.writeFileSync(outPath, answers, 'utf8');
-    } else {
-      fs.writeFileSync(outPath, isYaml ? CONFIG_TEMPLATE_YAML : CONFIG_TEMPLATE_JSON, 'utf8');
+    try {
+      const fd = fs.openSync(outPath, 'wx');
+      // K: interactive wizard when stdin is a TTY and --no-interactive is not set
+      if (opts.interactive && process.stdin.isTTY) {
+        const answers = await runInitWizard(isYaml);
+        fs.writeFileSync(fd, answers, 'utf8');
+      } else {
+        fs.writeFileSync(fd, isYaml ? CONFIG_TEMPLATE_YAML : CONFIG_TEMPLATE_JSON, 'utf8');
+      }
+      fs.closeSync(fd);
+    } catch (err: any) {
+      if (err.code === 'EEXIST') {
+        console.error(chalk.red(`File already exists: ${outPath}`));
+        process.exit(1);
+      }
+      throw err;
     }
 
     console.log(chalk.green(`Created ${outPath}`));
@@ -340,6 +356,9 @@ program
   .option('--attachmentsFolder <path>', 'Folder with screenshots/videos/logs to attach to test results')
   .option('--runName <name>', 'Name for the test run in Azure DevOps')
   .option('--buildId <id>', 'Build ID to associate with the test run')
+  .option('--testConfiguration <nameOrId>', 'Azure test configuration name or numeric ID for the published run')
+  .option('--testSuite <nameOrId>', 'Azure test suite name or numeric ID for planned run publication')
+  .option('--testPlan <nameOrId>', 'Azure test plan name or numeric ID used with --testSuite')
   .option('--dry-run', 'Parse results and show summary without publishing')
   .option('--create-issues-on-failure', 'File GitHub Issues or ADO Bugs for each failed test')
   .option('--issue-provider <provider>', 'Issue provider: github (default) or ado')
@@ -359,7 +378,19 @@ program
     try {
       const configPath = resolveConfigPath(globalOpts.config);
       const config = loadConfig(configPath);
-      if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
+      const cliPublishOverrides = [
+        ...(opts.testConfiguration ? [/^\d+$/.test(opts.testConfiguration)
+          ? `publishTestResults.testConfiguration.id=${opts.testConfiguration}`
+          : `publishTestResults.testConfiguration.name=${opts.testConfiguration}`] : []),
+        ...(opts.testSuite ? [/^\d+$/.test(opts.testSuite)
+          ? `publishTestResults.testSuite.id=${opts.testSuite}`
+          : `publishTestResults.testSuite.name=${opts.testSuite}`] : []),
+        ...(opts.testPlan ? [/^\d+$/.test(opts.testPlan)
+          ? `publishTestResults.testSuite.testPlan=${opts.testPlan}`
+          : `publishTestResults.testSuite.testPlan=${opts.testPlan}`] : []),
+      ];
+      const configOverrides = [...(opts.configOverride ?? []), ...cliPublishOverrides];
+      if (configOverrides.length) applyOverrides(config, configOverrides);
       const configDir = path.dirname(configPath);
 
       console.log(chalk.bold('ado-sync publish-test-results'));
@@ -394,7 +425,7 @@ program
         issueOverrides: {
           ...(opts.issueProvider  && { provider:   opts.issueProvider }),
           ...(opts.githubRepo     && { repo:        opts.githubRepo }),
-          ...(opts.githubToken    && { token:       opts.githubToken }),
+          ...(opts.githubToken    && { token:       opts.githubToken.startsWith('$') ? (process.env[opts.githubToken.slice(1)] ?? opts.githubToken) : opts.githubToken }),
           ...(opts.bugThreshold   && { threshold:   parseInt(opts.bugThreshold) }),
           ...(opts.maxIssues      && { maxIssues:   parseInt(opts.maxIssues) }),
         },
@@ -716,6 +747,7 @@ program
   .option('--ai-key <key>', 'API key for the AI provider (or $ENV_VAR reference)')
   .option('--ai-url <url>', 'Base URL override for the AI provider endpoint')
   .option('--ai-region <region>', 'AWS region for bedrock provider (default: AWS_REGION env or us-east-1)')
+  .option('--ai-context <path>', 'Additional AI context file, folder, or glob for generate (repeatable)', collect, [])
   .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
   .action(async (opts) => {
     const globalOpts = program.opts();
@@ -780,9 +812,17 @@ program
 
       // Build AI opts: CLI flags → config.sync.ai (generate.ts handles the config fallback too,
       // but constructing via buildAiOpts here gives the CLI consistent env-var resolution)
-      const aiOpts = (opts.aiProvider || config.sync?.ai?.provider)
+      const generateProvider = opts.aiProvider
+        ?? (config.sync?.ai?.provider && config.sync.ai.provider !== 'heuristic' ? config.sync.ai.provider : undefined)
+        ?? (config.sync?.ai?.model ? 'local' : undefined);
+      const generateContextSources = opts.aiContext?.length
+        ? opts.aiContext
+        : (config.sync?.ai?.contextFile ? [config.sync.ai.contextFile] : undefined);
+      const generateContextContent = loadGenerateContextContent(generateContextSources, configDir);
+
+      const aiOpts = generateProvider
         ? (() => {
-            const base = buildAiOpts(opts, config, configDir);
+            const base = buildAiOpts({ ...opts, aiContext: undefined }, config, configDir);
             if (!base) return undefined;
             return {
               provider: base.provider as import('./ai/generate-spec').AiGenerateProvider,
@@ -790,6 +830,7 @@ program
               apiKey:   base.apiKey,
               baseUrl:  base.baseUrl,
               region:   base.region,
+              contextContent: generateContextContent,
             };
           })()
         : undefined;

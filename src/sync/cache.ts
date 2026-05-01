@@ -39,7 +39,9 @@ export function loadCache(configDir: string): SyncCache {
   if (!fs.existsSync(cachePath)) return {};
   try {
     return JSON.parse(fs.readFileSync(cachePath, 'utf8')) as SyncCache;
-  } catch {
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`  [warn] Corrupt cache file ${cachePath} — starting fresh: ${msg}`);
     return {};
   }
 }

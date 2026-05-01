@@ -51,6 +51,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+import { buildMarkerTagPrefixPattern, normalizeMarkerTagPrefixes } from '../id-markers';
 import { LinkConfig, ParsedStep, ParsedTest } from '../types';
 import { extractLinkRefs, extractPathTags } from './shared';
 
@@ -173,12 +174,13 @@ interface CommentMetadata {
 function extractCommentMetadataAbove(
   lines: string[],
   itLineIdx: number,
-  tagPrefix: string
+  tagPrefix: string | string[]
 ): CommentMetadata {
   const tags: string[] = [];
   let azureId: number | undefined;
+  const markerTagPrefixes = normalizeMarkerTagPrefixes(tagPrefix);
 
-  const idRe      = new RegExp(`//\\s*@${tagPrefix}:(\\d+)`);
+  const idRe      = new RegExp(`//\\s*@(?!tags?:)(?:${buildMarkerTagPrefixPattern(markerTagPrefixes)}):(\\d+)`);
   const tagsListRe = /\/\/\s*@tags?\s*:\s*(.+)/i;
   const singleTagRe = /\/\/\s*@(\w+)\s*$/;
 
@@ -207,7 +209,7 @@ function extractCommentMetadataAbove(
 
     // Single tag shorthand: // @smoke
     const singleTag = trimmed.match(singleTagRe);
-    if (singleTag && singleTag[1] !== tagPrefix) {
+    if (singleTag && !markerTagPrefixes.includes(singleTag[1])) {
       tags.push(singleTag[1]);
       continue;
     }
@@ -233,12 +235,13 @@ function extractCommentMetadataAbove(
 function extractPlaywrightNativeMetadata(
   lines: string[],
   itLineIdx: number,
-  tagPrefix: string
+  tagPrefix: string | string[]
 ): { azureId?: number; tags: string[] } {
   const tags: string[] = [];
   let azureId: number | undefined;
+  const markerTagPrefixes = normalizeMarkerTagPrefixes(tagPrefix);
 
-  const typeRe     = new RegExp(`type\\s*:\\s*['"]${tagPrefix}['"]`);
+  const typeRe     = new RegExp(`type\\s*:\\s*['"](?:${buildMarkerTagPrefixPattern(markerTagPrefixes)})['"]`);
   const descRe     = /description\s*:\s*['"](\d+)['"]/;
   const tagTokenRe = /'@?([\w:]+)'|"@?([\w:]+)"/g;
 
@@ -288,8 +291,9 @@ function extractPlaywrightNativeMetadata(
       let m: RegExpExecArray | null;
       while ((m = tagTokenRe.exec(trimmed)) !== null) {
         const t = (m[1] ?? m[2] ?? '').replace(/^@/, '');
-        if (t.startsWith(`${tagPrefix}:`)) {
-          const n = parseInt(t.slice(tagPrefix.length + 1), 10);
+        const markerPrefix = markerTagPrefixes.find((prefix) => t.startsWith(`${prefix}:`));
+        if (markerPrefix) {
+          const n = parseInt(t.slice(markerPrefix.length + 1), 10);
           if (!isNaN(n) && azureId === undefined) azureId = n;
         } else if (t) {
           tags.push(t);
@@ -348,7 +352,7 @@ function parseSummary(
 
 export function parseJavaScriptFile(
   filePath: string,
-  tagPrefix: string,
+  tagPrefix: string | string[],
   linkConfigs?: LinkConfig[]
 ): ParsedTest[] {
   const source = fs.readFileSync(filePath, 'utf8');

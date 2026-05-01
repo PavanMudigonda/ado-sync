@@ -236,7 +236,7 @@ export interface PublishTestResultsConfig {
   testSuite?: {
     name?: string;
     id?: number;
-    testPlan?: string;
+    testPlan?: string | number;
   };
   testRunSettings?: {
     name?: string;
@@ -438,10 +438,10 @@ export interface SyncConfig {
       provider?: 'heuristic' | 'local' | 'ollama' | 'openai' | 'anthropic' | 'huggingface' | 'bedrock' | 'azureai' | 'github' | 'azureinference' | 'none';
       /**
        * For 'local':       absolute path to a GGUF model file.
-       * For 'ollama':      model tag, e.g. 'qwen2.5-coder:7b'.
+       * For 'ollama':      model tag, e.g. 'gemma-4-e4b-it'.
        * For 'openai':      model name, e.g. 'gpt-4o-mini'.
        * For 'anthropic':   model name, e.g. 'claude-sonnet-4-6'.
-       * For 'huggingface': model id, e.g. 'mistralai/Mistral-7B-Instruct-v0.3'.
+       * For 'huggingface': model id, e.g. 'google/gemma-4-e4b-it'.
        * For 'bedrock':     model id, e.g. 'anthropic.claude-3-haiku-20240307-v1:0'.
        * For 'azureai':     deployment name, e.g. 'gpt-4o'.
        */
@@ -455,7 +455,7 @@ export interface SyncConfig {
       /**
        * Path to a markdown file containing additional domain context or instructions
        * for the AI (e.g. glossary, naming conventions, step style guidelines).
-       * The file content is injected into the prompt before the test code.
+        * The file content is injected into AI prompts for summary/generate flows.
        * Relative paths are resolved from the config file directory.
        */
       contextFile?: string;

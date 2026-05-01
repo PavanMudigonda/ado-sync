@@ -24,6 +24,13 @@ ado-sync publish-test-results --testResult results/test.trx --dry-run
 ado-sync publish-test-results \
   --testResult results/test.trx \
   --buildId 12345
+
+# Publish to a specific planned suite/configuration
+ado-sync publish-test-results \
+  --testResult results/test.trx \
+  --testPlan "Smoke Plan" \
+  --testSuite "BDD" \
+  --testConfiguration "Windows 10"
 ```
 
 ### Options
@@ -35,6 +42,9 @@ ado-sync publish-test-results \
 | `--attachmentsFolder <path>` | Folder to scan for screenshots/videos/logs to attach to test results. |
 | `--runName <name>` | Name for the Test Run in Azure DevOps. Defaults to `ado-sync <ISO timestamp>`. |
 | `--buildId <id>` | Build ID to associate with the Test Run. |
+| `--testConfiguration <nameOrId>` | Azure test configuration name or numeric ID for the published run. |
+| `--testSuite <nameOrId>` | Azure test suite name or numeric ID for planned run publication. |
+| `--testPlan <nameOrId>` | Azure test plan name or numeric ID used with `--testSuite`. |
 | `--dry-run` | Parse results and print summary without creating a run in Azure. |
 | `--create-issues-on-failure` | File GitHub Issues or ADO Bugs for each failed test after publishing. |
 | `--issue-provider <github\|ado>` | Issue provider. Default: `github`. |
@@ -44,7 +54,7 @@ ado-sync publish-test-results \
 | `--max-issues <n>` | Hard cap on issues filed per run. Default: `50`. |
 | `--analyze-failures` | Use AI to analyse each failed test and post a root-cause + suggestion comment on the Azure test result. |
 | `--ai-provider <provider>` | AI provider for failure analysis: `ollama`, `openai`, or `anthropic`. |
-| `--ai-model <model>` | Model name (e.g. `gpt-4o-mini`, `claude-haiku-4-5-20251001`, `qwen2.5-coder:7b`). |
+| `--ai-model <model>` | Model name (e.g. `gpt-4o-mini`, `claude-haiku-4-5-20251001`, `gemma-4-e4b-it`). |
 | `--ai-url <url>` | Base URL for Ollama or an OpenAI-compatible endpoint. |
 | `--ai-key <key>` | API key. Supports `$ENV_VAR` references. |
 | `--config-override` | Override config values (repeatable, same as other commands). |
@@ -83,7 +93,7 @@ ado-sync publish-test-results \
   --testResult results/junit.xml \
   --analyze-failures \
   --ai-provider ollama \
-  --ai-model qwen2.5-coder:7b
+  --ai-model gemma-4-e4b-it
 ```
 
 ### Config-based (no CLI flags needed)
@@ -109,7 +119,7 @@ With this in place, every `publish-test-results` run automatically analyses fail
 |----------|-----------|-------|
 | OpenAI | `openai` | Default model: `gpt-4o-mini`. Works with any OpenAI-compatible endpoint via `--ai-url`. |
 | Anthropic | `anthropic` | Default model: `claude-haiku-4-5-20251001`. Fast and cost-effective. |
-| Ollama | `ollama` | Default model: `qwen2.5-coder:7b`. Runs locally — no cloud cost or data egress. |
+| Ollama | `ollama` | Default model: `gemma-4-e4b-it`. Runs locally — no cloud cost or data egress. |
 
 > `heuristic` and `local` (node-llama-cpp) providers are not supported for failure analysis — they are suited for step generation, not conversational reasoning.
 
@@ -772,11 +782,16 @@ Results can also be configured in the config file under `publishTestResults`:
 | `flakyTestOutcome` | How to handle flaky tests: `"lastAttemptOutcome"` *(default)* · `"firstAttemptOutcome"` · `"worstOutcome"`. |
 | `testConfiguration.name` | Name of the Azure test configuration to associate. |
 | `testConfiguration.id` | ID of the Azure test configuration. |
+| `testSuite.name` | Name of the Azure test suite to publish against. Requires every result to resolve to a test case ID. |
+| `testSuite.id` | ID of the Azure test suite to publish against. |
+| `testSuite.testPlan` | Optional test plan name or ID used when resolving the target suite. Defaults to `testPlan.id` from the main config. |
 | `testRunSettings.name` | Name for the Test Run. |
 | `testRunSettings.comment` | Comment attached to the Test Run. |
 | `testRunSettings.runType` | `"Automated"` *(default)* · `"Manual"`. |
 | `testResultSettings.comment` | Comment applied to every test result. |
 | `publishAttachmentsForPassingTests` | `"none"` *(default)* · `"files"` · `"all"`. |
+
+When `testSuite` is configured, ado-sync creates a planned run and binds each published result to the matching test point in that suite. If a suite contains multiple configurations for the same test case, set `testConfiguration.id` or `testConfiguration.name` so the target point can be resolved unambiguously.
 
 ---
 

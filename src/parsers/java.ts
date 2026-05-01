@@ -33,6 +33,7 @@
 
 import * as fs from 'fs';
 
+import { buildMarkerTagPrefixPattern, normalizeMarkerTagPrefixes } from '../id-markers';
 import { LinkConfig, ParsedStep, ParsedTest } from '../types';
 import { extractLinkRefs, extractPathTags } from './shared';
 
@@ -131,9 +132,10 @@ function extractJavadocBefore(lines: string[], testLineIdx: number): string[] {
  *
  * Stops at a closing brace or class declaration.
  */
-function extractTcIdAbove(lines: string[], testLineIdx: number, tagPrefix: string): number | undefined {
-  const tagRe  = new RegExp(`^@Tag\\(\\s*"${tagPrefix}:(\\d+)"\\s*\\)$`);
-  const cmmtRe = new RegExp(`//\\s*@${tagPrefix}:(\\d+)`);
+function extractTcIdAbove(lines: string[], testLineIdx: number, tagPrefix: string | string[]): number | undefined {
+  const markerTagPrefixes = normalizeMarkerTagPrefixes(tagPrefix);
+  const tagRe  = new RegExp(`^@Tag\\(\\s*"(?:${buildMarkerTagPrefixPattern(markerTagPrefixes)}):(\\d+)"\\s*\\)$`);
+  const cmmtRe = new RegExp(`//\\s*@(?!tags?:)(?:${buildMarkerTagPrefixPattern(markerTagPrefixes)}):(\\d+)`);
 
   for (let i = testLineIdx - 1; i >= 0 && i >= testLineIdx - 25; i--) {
     const trimmed = lines[i].trim();
@@ -283,7 +285,7 @@ function parseSummary(
 
 export function parseJavaFile(
   filePath: string,
-  tagPrefix: string,
+  tagPrefix: string | string[],
   linkConfigs?: LinkConfig[]
 ): ParsedTest[] {
   const source = fs.readFileSync(filePath, 'utf8');
@@ -291,10 +293,11 @@ export function parseJavaFile(
 
   const pkg = extractPackage(lines);
   const className = extractClassName(lines);
+  const markerTagPrefixes = normalizeMarkerTagPrefixes(tagPrefix);
   const pathTags = extractPathTags(filePath);
 
   // ID tag regex: matches e.g. "tc:12345" inside a @Tag value
-  const idTagValueRe = new RegExp(`^${tagPrefix}:(\\d+)$`);
+  const idTagValueRe = new RegExp(`^(?:${buildMarkerTagPrefixPattern(markerTagPrefixes)}):(\\d+)$`);
 
   const results: ParsedTest[] = [];
 

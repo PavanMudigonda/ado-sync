@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// @ts-nocheck — MCP SDK uses deeply recursive types that exceed TS2589 instantiation depth limit
 
 /**
  * ado-sync MCP Server
@@ -49,23 +48,47 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import * as path from 'path';
 import { z } from 'zod';
 
+import { detectAiEnvironment } from './ai/summarizer';
 import { AzureClient } from './azure/client';
 import { getTestCase, getTestCasesInSuite } from './azure/test-cases';
 import { findStoriesByTagAddedSince, getStoryContext, getWorkItemsByAreaPath, getWorkItemsByIds, getWorkItemsByQuery } from './azure/work-items';
 import { applyOverrides, loadConfig, resolveConfigPath } from './config';
 import { createIssuesFromResults } from './issues/create-issues';
 import { pull, push, status } from './sync/engine';
-import { generateSpecs } from './sync/generate';
+import { generateSpecs, loadGenerateContextContent } from './sync/generate';
 import { generateManifests } from './sync/manifest';
 import { publishTestResults } from './sync/publish-results';
 
 // ─── Config resolution ────────────────────────────────────────────────────────
 
+/** Resolve $ENV_VAR references to their actual values. */
+function resolveEnvRef(value?: string): string | undefined {
+  if (!value) return undefined;
+  if (!value.startsWith('$')) return value;
+  return process.env[value.slice(1)] ?? value;
+}
+
 function resolveConfig(configPath?: string, overrides?: string[]) {
   const resolved = resolveConfigPath(configPath ?? process.env.ADO_SYNC_CONFIG);
   const config = loadConfig(resolved);
   if (overrides?.length) applyOverrides(config, overrides);
+  // Resolve AI API key env var references that loadConfig doesn't handle
+  if (config.sync?.ai?.apiKey) {
+    config.sync.ai.apiKey = resolveEnvRef(config.sync.ai.apiKey);
+  }
   return { config, configDir: path.dirname(resolved), configPath: resolved };
+}
+
+/** Wrap an MCP tool handler with try/catch so exceptions produce structured error responses. */
+function safeHandler<T>(handler: (args: T) => Promise<any>): (args: T) => Promise<any> {
+  return async (args: T) => {
+    try {
+      return await handler(args);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { content: [{ type: 'text', text: `Error: ${msg}` }], isError: true };
+    }
+  };
 }
 
 // ─── Server setup ─────────────────────────────────────────────────────────────
@@ -157,7 +180,7 @@ server.tool(
     suiteId: z.number().int().positive().optional().describe('Suite ID (defaults to plan root suite)'),
     configPath: z.string().optional().describe('Path to ado-sync config file'),
   },
-  async ({ suiteId, configPath }) => {
+  safeHandler(async ({ suiteId, configPath }) => {
     const { config } = resolveConfig(configPath);
     const client = await AzureClient.create(config);
     const tcs = await getTestCasesInSuite(client, config, suiteId);
@@ -174,7 +197,7 @@ server.tool(
         text: `Found ${tcs.length} test case(s).\n\n${JSON.stringify(summary, null, 2)}`,
       }],
     };
-  }
+  })
 );
 
 // ─── Tool: get_test_case ──────────────────────────────────────────────────────
@@ -186,7 +209,7 @@ server.tool(
     id: z.number().int().positive().describe('Azure DevOps Test Case work item ID'),
     configPath: z.string().optional().describe('Path to ado-sync config file'),
   },
-  async ({ id, configPath }) => {
+  safeHandler(async ({ id, configPath }) => {
     const { config } = resolveConfig(configPath);
     const client = await AzureClient.create(config);
     const tc = await getTestCase(client, id, config.sync?.titleField ?? 'System.Title');
@@ -199,7 +222,7 @@ server.tool(
         text: JSON.stringify(tc, null, 2),
       }],
     };
-  }
+  })
 );
 
 // ─── Tool: push_specs ─────────────────────────────────────────────────────────
@@ -214,11 +237,14 @@ server.tool(
     configPath: z.string().optional().describe('Path to ado-sync config file'),
     configOverrides: z.array(z.string()).optional().describe('Config overrides, e.g. ["sync.tagPrefix=tc"]'),
   },
-  async ({ dryRun, tags, configPath, configOverrides }) => {
+  safeHandler(async ({ dryRun, tags, configPath, configOverrides }) => {
     const { config, configDir } = resolveConfig(configPath, configOverrides);
-    const results = await push(config, configDir, { dryRun, tags });
+    const aiSummary = config.sync?.ai?.provider || config.sync?.ai?.model
+      ? undefined
+      : { provider: (detectAiEnvironment()?.provider ?? 'heuristic') as import('./ai/summarizer').AiProvider, apiKey: detectAiEnvironment()?.apiKey, heuristicFallback: true };
+    const results = await push(config, configDir, { dryRun, tags, aiSummary });
     return { content: [{ type: 'text', text: formatSyncResults(results, dryRun) }] };
-  }
+  })
 );
 
 // ─── Tool: pull_specs ─────────────────────────────────────────────────────────
@@ -233,11 +259,11 @@ server.tool(
     configPath: z.string().optional().describe('Path to ado-sync config file'),
     configOverrides: z.array(z.string()).optional().describe('Config overrides'),
   },
-  async ({ dryRun, tags, configPath, configOverrides }) => {
+  safeHandler(async ({ dryRun, tags, configPath, configOverrides }) => {
     const { config, configDir } = resolveConfig(configPath, configOverrides);
     const results = await pull(config, configDir, { dryRun, tags });
     return { content: [{ type: 'text', text: formatSyncResults(results, dryRun) }] };
-  }
+  })
 );
 
 // ─── Tool: status ─────────────────────────────────────────────────────────────
@@ -251,11 +277,11 @@ server.tool(
     configPath: z.string().optional().describe('Path to ado-sync config file'),
     configOverrides: z.array(z.string()).optional().describe('Config overrides'),
   },
-  async ({ tags, configPath, configOverrides }) => {
+  safeHandler(async ({ tags, configPath, configOverrides }) => {
     const { config, configDir } = resolveConfig(configPath, configOverrides);
     const results = await status(config, configDir, { tags });
     return { content: [{ type: 'text', text: formatSyncResults(results, true) }] };
-  }
+  })
 );
 
 // ─── Tool: generate_specs ────────────────────────────────────────────────────
@@ -274,29 +300,33 @@ server.tool(
     outputFolder: z.string().optional().describe('Folder to write spec files (default: config pull.targetFolder or config dir)'),
     force: z.boolean().optional().default(false).describe('Overwrite existing spec files'),
     dryRun: z.boolean().optional().default(false).describe('Preview without writing files'),
-    aiProvider: z.enum(['local', 'ollama', 'openai', 'anthropic', 'huggingface', 'bedrock', 'azureai']).optional()
-      .describe('AI provider for generating spec content from the story description and AC'),
+    aiProvider: z.enum(['local', 'ollama', 'openai', 'anthropic', 'huggingface', 'bedrock', 'azureai', 'github', 'azureinference']).optional()
+      .describe('AI provider for generating spec content from the story description and AC.'),
     aiModel: z.string().optional().describe('Model name/path/id for the AI provider'),
     aiKey: z.string().optional().describe('API key for the AI provider ($ENV_VAR reference supported)'),
     aiUrl: z.string().optional().describe('Base URL override for the AI provider endpoint'),
     aiRegion: z.string().optional().describe('AWS region for bedrock provider (default: us-east-1)'),
+        aiContext: z.array(z.string()).optional().describe('Additional AI context files, folders, or globs for generate'),
     configPath: z.string().optional().describe('Path to ado-sync config file'),
     configOverrides: z.array(z.string()).optional().describe('Config overrides'),
   },
-  async ({ storyIds, query, areaPath, format, outputFolder, force, dryRun,
-          aiProvider, aiModel, aiKey, aiUrl, aiRegion, configPath, configOverrides }) => {
+  safeHandler(async ({ storyIds, query, areaPath, format, outputFolder, force, dryRun,
+          aiProvider, aiModel, aiKey, aiUrl, aiRegion, aiContext, configPath, configOverrides }) => {
     const { config, configDir } = resolveConfig(configPath, configOverrides);
 
     // AI opts: prefer explicit params, fall back to config.sync.ai
     const cfgAi = config.sync?.ai;
-    const resolvedProvider = aiProvider ?? cfgAi?.provider;
+    const resolvedProvider = aiProvider ?? (cfgAi?.provider !== 'heuristic' ? cfgAi?.provider : undefined);
+        const contextSources = aiContext?.length ? aiContext : (cfgAi?.contextFile ? [cfgAi.contextFile] : undefined);
+        const contextContent = loadGenerateContextContent(contextSources, configDir, '[mcp:ai-generate]');
     const aiOpts = resolvedProvider && resolvedProvider !== 'none'
       ? {
           provider: resolvedProvider as import('./ai/generate-spec').AiGenerateProvider,
           model:   aiModel   ?? cfgAi?.model,
-          apiKey:  aiKey     ?? cfgAi?.apiKey,
+          apiKey:  resolveEnvRef(aiKey ?? cfgAi?.apiKey),
           baseUrl: aiUrl     ?? cfgAi?.baseUrl,
           region:  aiRegion  ?? cfgAi?.region,
+          contextContent,
         }
       : undefined;
 
@@ -327,7 +357,7 @@ server.tool(
       ...skipped.map(r => `= [#${r.storyId}] ${r.title} (already exists)`),
     ];
     return { content: [{ type: 'text', text: lines.join('\n') }] };
-  }
+  })
 );
 
 // ─── Tool: get_work_items ─────────────────────────────────────────────────────
@@ -343,7 +373,7 @@ server.tool(
     workItemType: z.string().optional().default('User Story').describe('Work item type for area path query (default: "User Story")'),
     configPath: z.string().optional().describe('Path to ado-sync config file'),
   },
-  async ({ ids, query, areaPath, workItemType, configPath }) => {
+  safeHandler(async ({ ids, query, areaPath, workItemType, configPath }) => {
     const { config } = resolveConfig(configPath);
     const client = await AzureClient.create(config);
 
@@ -368,7 +398,7 @@ server.tool(
         text: `Found ${stories.length} work item(s).\n\n${JSON.stringify(stories, null, 2)}`,
       }],
     };
-  }
+  })
 );
 
 // ─── Tool: publish_test_results ───────────────────────────────────────────────
@@ -393,7 +423,7 @@ server.tool(
     configPath: z.string().optional().describe('Path to ado-sync config file'),
     configOverrides: z.array(z.string()).optional().describe('Config overrides'),
   },
-  async ({ resultFiles, resultFormat, runName, buildId, attachmentsFolder, dryRun,
+  safeHandler(async ({ resultFiles, resultFormat, runName, buildId, attachmentsFolder, dryRun,
            createIssuesOnFailure, issueProvider, githubRepo, githubToken, bugThreshold, maxIssues,
            configPath, configOverrides }) => {
     const { config, configDir } = resolveConfig(configPath, configOverrides);
@@ -408,7 +438,7 @@ server.tool(
       issueOverrides: {
         ...(issueProvider && { provider:  issueProvider }),
         ...(githubRepo    && { repo:      githubRepo }),
-        ...(githubToken   && { token:     githubToken }),
+        ...(githubToken   && { token:     resolveEnvRef(githubToken) }),
         ...(bugThreshold  && { threshold: bugThreshold }),
         ...(maxIssues     && { maxIssues }),
       },
@@ -433,7 +463,7 @@ server.tool(
       }
     }
     return { content: [{ type: 'text', text: lines.join('\n') }] };
-  }
+  })
 );
 
 // ─── Tool: create_issue ───────────────────────────────────────────────────────
@@ -455,7 +485,7 @@ server.tool(
     configPath:    z.string().optional().describe('Path to ado-sync config file'),
     configOverrides: z.array(z.string()).optional().describe('Config overrides'),
   },
-  async ({ title, body, provider, githubRepo, githubToken, labels, assignees, testCaseId, areaPath, configPath, configOverrides }) => {
+  safeHandler(async ({ title, body, provider, githubRepo, githubToken, labels, assignees, testCaseId, areaPath, configPath, configOverrides }) => {
     const { config } = resolveConfig(configPath, configOverrides);
 
     // Build a minimal CreateIssuesConfig and reuse createIssuesFromResults with a
@@ -463,7 +493,7 @@ server.tool(
     const issueConfig = {
       provider:      provider ?? 'github' as const,
       repo:          githubRepo,
-      token:         githubToken,
+      token:         resolveEnvRef(githubToken),
       labels:        labels ?? ['test-failure'],
       assignees,
       areaPath,
@@ -494,7 +524,7 @@ server.tool(
     }
     const skipped = summary.issued.find((i) => i.action === 'skipped');
     return { content: [{ type: 'text', text: `Issue skipped: ${skipped?.reason ?? 'unknown reason'}` }] };
-  }
+  })
 );
 
 // ─── Tool: get_story_context ──────────────────────────────────────────────────
@@ -510,7 +540,7 @@ server.tool(
     configPath:      z.string().optional().describe('Path to ado-sync config file'),
     configOverrides: z.array(z.string()).optional().describe('Config overrides'),
   },
-  async ({ storyId, configPath, configOverrides }) => {
+  safeHandler(async ({ storyId, configPath, configOverrides }) => {
     const { config } = resolveConfig(configPath, configOverrides);
     const client = await AzureClient.create(config);
     const ctx = await getStoryContext(client, config.project, storyId, config.orgUrl);
@@ -537,7 +567,7 @@ server.tool(
       // Also return structured JSON so agents can parse it without text parsing
       _structured: ctx,
     };
-  }
+  })
 );
 
 // ─── Tool: generate_manifest ──────────────────────────────────────────────────
@@ -557,7 +587,7 @@ server.tool(
     configPath:      z.string().optional().describe('Path to ado-sync config file'),
     configOverrides: z.array(z.string()).optional().describe('Config overrides'),
   },
-  async ({ storyIds, outputFolder, format, force, dryRun, configPath, configOverrides }) => {
+  safeHandler(async ({ storyIds, outputFolder, format, force, dryRun, configPath, configOverrides }) => {
     const { config, configDir } = resolveConfig(configPath, configOverrides);
     const results = await generateManifests(config, configDir, {
       storyIds,
@@ -578,7 +608,7 @@ server.tool(
     }
 
     return { content: [{ type: 'text', text: lines.join('\n') }] };
-  }
+  })
 );
 
 // ─── Tool: find_tagged_items ──────────────────────────────────────────────────
@@ -598,7 +628,7 @@ server.tool(
     configPath:      z.string().optional().describe('Path to ado-sync config file'),
     configOverrides: z.array(z.string()).optional().describe('Config overrides'),
   },
-  async ({ tag, hours, days, workItemType, configPath, configOverrides }) => {
+  safeHandler(async ({ tag, hours, days, workItemType, configPath, configOverrides }) => {
     if (!hours && !days) {
       return { content: [{ type: 'text', text: 'Provide either hours or days to define the time window.' }] };
     }
@@ -647,7 +677,7 @@ server.tool(
     return {
       content: [{ type: 'text', text: lines.join('\n') }],
     };
-  }
+  })
 );
 
 // ─── Shared output helpers ────────────────────────────────────────────────────

@@ -41,7 +41,7 @@ Minimum config:
 | `pull` | Azure Test Cases → local files |
 | `status` | Show pending changes without modifying anything |
 | `diff` | Field-level drift between local and Azure |
-| `generate` | Scaffold spec files from ADO User Stories (AI-powered or template) |
+| `generate` | Scaffold spec files from ADO User Stories (template-first, optionally AI-enhanced) |
 | `publish-test-results` | Publish TRX / JUnit / Playwright / Cucumber results to a Test Run |
 | `story-context` | Show AC, suggested tags, and linked TCs for a User Story |
 | `coverage` | Spec link rate and story coverage report |
@@ -75,6 +75,7 @@ Minimum config:
 |-------|------|
 | CLI reference | [docs/cli.md](docs/cli.md) |
 | Configuration reference | [docs/configuration.md](docs/configuration.md) |
+| Capability roadmap | [docs/capability-roadmap.md](docs/capability-roadmap.md) |
 | Spec file formats | [docs/spec-formats.md](docs/spec-formats.md) |
 | Workflow examples (per framework + CI) | [docs/workflows.md](docs/workflows.md) |
 | Work item links | [docs/work-item-links.md](docs/work-item-links.md) |
@@ -91,6 +92,8 @@ Minimum config:
 
 ado-sync supports multiple AI providers for test-step summarisation (`push`/`pull`/`status`), spec generation (`generate`), and failure analysis (`publish-test-results`). All provider SDKs are **optional** — install only what you need.
 
+`generate` does not crawl the whole repo by default. It uses ADO story data first, and you can add targeted app/test context explicitly when you want richer AI-generated specs.
+
 | Provider | Commands | SDK (install separately) | Auth |
 |---|---|---|---|
 | `heuristic` | push / pull / status | none — built-in | none |
@@ -104,24 +107,41 @@ ado-sync supports multiple AI providers for test-step summarisation (`push`/`pul
 | `github` | all AI commands | `npm i openai` | `$GITHUB_TOKEN` (auto-detected) |
 | `azureinference` | all AI commands | `npm i @azure-rest/ai-inference @azure/core-auth` | `$AZURE_AI_KEY` + `--ai-url` |
 
+### AI quick guide
+
+- Use `heuristic` for zero-setup summaries.
+- Use `local` for GGUF models through `node-llama-cpp`.
+- Use `ollama` if you already manage models with Ollama.
+- Use `openai`, `anthropic`, `github`, `bedrock`, `azureai`, or `azureinference` for hosted/provider-backed generation.
+- For `generate`, pass a small set of relevant files with `--ai-context` instead of the whole repo.
+
+Examples:
+
 ```bash
-# GitHub Models — free tier available, no billing setup needed
+# Fastest setup
+ado-sync push --ai-provider heuristic
+
+# Hosted model
 ado-sync push --ai-provider github --ai-model gpt-4o
 
-# Anthropic
-ado-sync push --ai-provider anthropic --ai-key $ANTHROPIC_API_KEY
-
-# AWS Bedrock
-ado-sync push --ai-provider bedrock --ai-model anthropic.claude-3-haiku-20240307-v1:0 --ai-region us-east-1
-
-# Azure AI Inference (AI Foundry)
-ado-sync generate --story-ids 1234 --ai-provider azureinference \
-  --ai-url https://myendpoint.inference.azure.com --ai-model gpt-4o --ai-key $AZURE_AI_KEY
+# Repo-aware spec generation with targeted context
+ado-sync generate --story-ids 1234 \
+  --ai-provider openai --ai-key $OPENAI_API_KEY \
+  --ai-context src/orders/** \
+  --ai-context tests/orders/** \
+  --ai-context docs/orders.md
 ```
 
 Set once in `ado-sync.json` to apply to all commands:
+
 ```json
 { "sync": { "ai": { "provider": "github", "model": "gpt-4o" } } }
 ```
+
+Detailed AI setup, local-model guidance, provider-specific examples, and generate-context recommendations are in the docs:
+
+- [docs/cli.md](docs/cli.md)
+- [docs/advanced.md](docs/advanced.md)
+- [docs/mcp-server.md](docs/mcp-server.md)
 
 > **LLM / AI crawlers:** [`llms.txt`](llms.txt) contains a single-file summary of the entire project — config schema, CLI flags, ID writeback formats, and the full doc index.

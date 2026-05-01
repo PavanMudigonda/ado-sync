@@ -38,6 +38,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+import { buildMarkerTagPrefixPattern, normalizeMarkerTagPrefixes } from '../id-markers';
 import { LinkConfig, ParsedStep, ParsedTest } from '../types';
 import { extractLinkRefs, extractPathTags } from './shared';
 
@@ -135,12 +136,13 @@ interface CommentMetadata {
 function extractCommentMetadataAbove(
   lines: string[],
   testLineIdx: number,
-  tagPrefix: string
+  tagPrefix: string | string[]
 ): CommentMetadata {
   const tags: string[] = [];
   let azureId: number | undefined;
+  const markerTagPrefixes = normalizeMarkerTagPrefixes(tagPrefix);
 
-  const idRe       = new RegExp(`//\\s*@${tagPrefix}:(\\d+)`);
+  const idRe       = new RegExp(`//\\s*@(?!tags?:)(?:${buildMarkerTagPrefixPattern(markerTagPrefixes)}):(\\d+)`);
   const tagsListRe = /\/\/\s*@tags?\s*:\s*(.+)/i;
   const singleTagRe = /\/\/\s*@(\w+)\s*$/;
 
@@ -163,7 +165,7 @@ function extractCommentMetadataAbove(
     }
 
     const singleTag = trimmed.match(singleTagRe);
-    if (singleTag && singleTag[1] !== tagPrefix) {
+    if (singleTag && !markerTagPrefixes.includes(singleTag[1])) {
       tags.push(singleTag[1]);
       continue;
     }
@@ -196,10 +198,12 @@ interface MetaChainResult {
 function extractMetaChainResult(
   lines: string[],
   startLineIdx: number,
-  tagPrefix: string
+  tagPrefix: string | string[]
 ): MetaChainResult | null {
   let azureId: number | undefined;
   const tags: string[] = [];
+  const markerTagPrefixes = normalizeMarkerTagPrefixes(tagPrefix);
+  const markerTagPattern = buildMarkerTagPrefixPattern(markerTagPrefixes);
 
   const scanEnd = Math.min(startLineIdx + 8, lines.length);
 
@@ -223,7 +227,7 @@ function extractMetaChainResult(
 
     // Extract TC ID — key-value form: .meta('tc', '12345')
     const kvRe = new RegExp(
-      `\\.meta\\s*\\(\\s*['"]${tagPrefix}['"]\\s*,\\s*['"]([\\d]+)['"]`
+      `\\.meta\\s*\\(\\s*['"](?:${markerTagPattern})['"]\\s*,\\s*['"]([\\d]+)['"]`
     );
     const kvMatch = collected.match(kvRe);
     if (kvMatch) {
@@ -233,7 +237,7 @@ function extractMetaChainResult(
     // Extract TC ID — object form: .meta({ tc: '12345', ... }) or .meta({ "tc": '12345' })
     if (azureId === undefined) {
       const objRe = new RegExp(
-        `\\.meta\\s*\\(\\s*\\{[^}]*['"]?${tagPrefix}['"]?\\s*:\\s*['"]([\\d]+)['"]`
+        `\\.meta\\s*\\(\\s*\\{[^}]*['"]?(?:${markerTagPattern})['"]?\\s*:\\s*['"]([\\d]+)['"]`
       );
       const objMatch = collected.match(objRe);
       if (objMatch) {
@@ -247,7 +251,7 @@ function extractMetaChainResult(
       const pairRe = /['"]?([\w]+)['"]?\s*:\s*['"]([^'"]+)['"]/g;
       let pm: RegExpExecArray | null;
       while ((pm = pairRe.exec(metaObjMatch[1])) !== null) {
-        if (pm[1] !== tagPrefix) tags.push(pm[2]);
+        if (!markerTagPrefixes.includes(pm[1])) tags.push(pm[2]);
       }
     }
 
@@ -295,7 +299,7 @@ function parseSummary(
 
 export function parseTestCafeFile(
   filePath: string,
-  tagPrefix: string,
+  tagPrefix: string | string[],
   linkConfigs?: LinkConfig[]
 ): ParsedTest[] {
   const source = fs.readFileSync(filePath, 'utf8');

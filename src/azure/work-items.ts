@@ -7,6 +7,7 @@
  * extracted actors (user roles) parsed from the Acceptance Criteria text.
  */
 
+import { stripHtmlFull } from '../html';
 import { AzureClient } from './client';
 
 export interface AdoStory {
@@ -32,26 +33,7 @@ const FIELDS = [
   'System.WorkItemType',
 ];
 
-/** Strip HTML tags and normalise whitespace. */
-function stripHtml(html: string | undefined): string | undefined {
-  if (!html) return undefined;
-  const text = html
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n')
-    .replace(/<\/li>/gi, '\n')
-    .replace(/<li>/gi, '- ')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\r\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-  return text || undefined;
-}
+// stripHtmlFull is imported from ../html (decodes all entities including angle brackets)
 
 function mapWorkItem(wi: any): AdoStory {
   const f = wi.fields ?? {};
@@ -63,8 +45,8 @@ function mapWorkItem(wi: any): AdoStory {
   return {
     id: wi.id,
     title: f['System.Title'] ?? `Work Item ${wi.id}`,
-    description: stripHtml(f['System.Description']),
-    acceptanceCriteria: stripHtml(f['Microsoft.VSTS.Common.AcceptanceCriteria']),
+    description: stripHtmlFull(f['System.Description']),
+    acceptanceCriteria: stripHtmlFull(f['Microsoft.VSTS.Common.AcceptanceCriteria']),
     state: f['System.State'],
     tags: tags?.length ? tags : undefined,
     workItemType: f['System.WorkItemType'],
@@ -188,8 +170,8 @@ export async function getStoryContext(
   const rawAc    = f['Microsoft.VSTS.Common.AcceptanceCriteria'];
   const rawTags  = f['System.Tags'] ?? '';
 
-  const description        = stripHtml(rawDesc);
-  const acceptanceCriteria = stripHtml(rawAc);
+  const description        = stripHtmlFull(rawDesc);
+  const acceptanceCriteria = stripHtmlFull(rawAc);
 
   // AC bullet items — split on newlines, strip list markers, drop blank lines
   const acItems = (acceptanceCriteria ?? '')
@@ -327,7 +309,7 @@ export async function acGate(
     const rawTitle = f['System.Title'] ?? `Work Item ${id}`;
     const state    = f['System.State'];
 
-    const acText = stripHtml(rawAc) ?? '';
+    const acText = stripHtmlFull(rawAc) ?? '';
     const acItems = acText
       .split('\n')
       .map((l: string) => l.replace(/^[-*•\d.)\s]+/, '').trim())

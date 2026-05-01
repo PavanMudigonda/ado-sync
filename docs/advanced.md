@@ -612,11 +612,10 @@ All models use the `Q4_K_M` quantization (best balance of size and quality).
 
 | Model | RAM needed | Quality | HF repo |
 |-------|-----------|---------|---------|
-| 0.5B | ~400 MB | Minimal | `Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF` |
-| **1.5B** *(start here)* | ~1.1 GB | Good | `Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF` |
-| 3B | ~2 GB | Better | `Qwen/Qwen2.5-Coder-3B-Instruct-GGUF` |
-| 7B | ~4.5 GB | Best local | `Qwen/Qwen2.5-Coder-7B-Instruct-GGUF` |
-| 14B | ~8.5 GB | Excellent | `Qwen/Qwen2.5-Coder-14B-Instruct-GGUF` |
+| E2B | ~3.2 GB | Good | `google/gemma-4-e2b-it-GGUF` |
+| **E4B** *(start here)* | ~5 GB | Better | `google/gemma-4-e4b-it-GGUF` |
+| 26B A4B (MoE) | ~15.6 GB | Excellent local | `google/gemma-4-26b-a4b-it-GGUF` |
+| 31B | ~17.4 GB | Best | `google/gemma-4-31b-it-GGUF` |
 
 #### Step 2 — Download the model
 
@@ -625,13 +624,13 @@ All models use the `Q4_K_M` quantization (best balance of size and quality).
 mkdir -p ~/.cache/ado-sync/models
 
 # curl (no extra tools needed)
-curl -L -o ~/.cache/ado-sync/models/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf \
-  "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
+curl -L -o ~/.cache/ado-sync/models/gemma-4-e4b-it-Q4_K_M.gguf \
+  "https://huggingface.co/google/gemma-4-e4b-it-GGUF/resolve/main/gemma-4-e4b-it-Q4_K_M.gguf"
 
 # or huggingface-cli (shows a progress bar — useful for larger models)
 pip install -U huggingface_hub
-huggingface-cli download Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF \
-  qwen2.5-coder-1.5b-instruct-q4_k_m.gguf \
+huggingface-cli download google/gemma-4-e4b-it-GGUF \
+  gemma-4-e4b-it-Q4_K_M.gguf \
   --local-dir ~/.cache/ado-sync/models
 ```
 
@@ -641,13 +640,13 @@ New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\ado-sync\models"
 
 # Invoke-WebRequest
 Invoke-WebRequest `
-  -Uri "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf" `
-  -OutFile "$env:LOCALAPPDATA\ado-sync\models\qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
+  -Uri "https://huggingface.co/google/gemma-4-e4b-it-GGUF/resolve/main/gemma-4-e4b-it-Q4_K_M.gguf" `
+  -OutFile "$env:LOCALAPPDATA\ado-sync\models\gemma-4-e4b-it-Q4_K_M.gguf"
 
 # or huggingface-cli (shows a progress bar)
 pip install -U huggingface_hub
-huggingface-cli download Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF `
-  qwen2.5-coder-1.5b-instruct-q4_k_m.gguf `
+huggingface-cli download google/gemma-4-e4b-it-GGUF `
+  gemma-4-e4b-it-Q4_K_M.gguf `
   --local-dir "$env:LOCALAPPDATA\ado-sync\models"
 ```
 
@@ -655,10 +654,10 @@ huggingface-cli download Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF `
 
 ```bash
 # macOS / Linux
-ado-sync push --ai-model ~/.cache/ado-sync/models/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf
+ado-sync push --ai-model ~/.cache/ado-sync/models/gemma-4-e4b-it-Q4_K_M.gguf
 
 # Windows
-ado-sync push --ai-model "$env:LOCALAPPDATA\ado-sync\models\qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
+ado-sync push --ai-model "$env:LOCALAPPDATA\ado-sync\models\gemma-4-e4b-it-Q4_K_M.gguf"
 ```
 
 The model is loaded once and reused for all tests in the run — no repeated loading overhead.
@@ -706,10 +705,10 @@ ado-sync push --config ado-sync.yaml
 # 1. Install Ollama from https://ollama.com
 
 # 2. Pull a model
-ollama pull qwen2.5-coder:7b
+ollama pull gemma-4-e4b-it
 
 # 3. Push (Ollama server must be running)
-ado-sync push --ai-provider ollama --ai-model qwen2.5-coder:7b
+ado-sync push --ai-provider ollama --ai-model gemma-4-e4b-it
 ```
 
 ### Setting up OpenAI / Anthropic
@@ -925,7 +924,7 @@ Config file equivalent — set any `--ai-*` flag in `sync.ai` to avoid repeating
 The `sync.ai` block works for any provider:
 
 ```json
-{ "sync": { "ai": { "provider": "ollama", "model": "qwen2.5-coder:7b" } } }
+{ "sync": { "ai": { "provider": "ollama", "model": "gemma-4-e4b-it" } } }
 ```
 
 ```json

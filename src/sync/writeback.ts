@@ -224,8 +224,16 @@ export function writebackJavaScript(test: ParsedTest, id: number, tagPrefix: str
       break;
     }
 
-    // Stop at blank lines — the ID comment must be adjacent to the test
-    if (trimmed === '') break;
+    // Stop at blank lines — the ID comment must be adjacent to the test.
+    // But first peek one more line above a blank line in case the ID comment
+    // is separated by a single blank line.
+    if (trimmed === '') {
+      if (i - 1 >= 0 && existingRe.test(lines[i - 1].trim())) {
+        lines[i - 1] = lines[i - 1].replace(existingRe, comment.trim());
+        replaced = true;
+      }
+      break;
+    }
   }
 
   if (!replaced) {

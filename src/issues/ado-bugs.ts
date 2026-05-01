@@ -59,13 +59,18 @@ export async function findOpenAdoBug(config: SyncConfig, title: string): Promise
   const client = await AzureClient.create(config);
   const witApi = await client.getWitApi();
 
-  const escaped = title.replace(/'/g, "''");
-  const wiql = `SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] = 'Bug' AND [System.State] NOT IN ('Closed','Resolved','Done') AND [System.Title] = '${escaped}' AND [System.TeamProject] = '${config.project}'`;
-  const result = await witApi.queryByWiql({ query: wiql }, config.project as any);
+  const escaped = escapeWiql(title);
+  const wiql = `SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] = 'Bug' AND [System.State] NOT IN ('Closed','Resolved','Done') AND [System.Title] = '${escaped}' AND [System.TeamProject] = '${escapeWiql(config.project)}'`;
+  const result = await witApi.queryByWiql({ query: wiql }, { project: config.project });
   return result.workItems?.[0]?.id ?? null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Escape a string for safe interpolation into a WIQL single-quoted literal. */
+function escapeWiql(value: string): string {
+  return value.replace(/'/g, "''");
+}
 
 function mdToHtml(md: string): string {
   return md

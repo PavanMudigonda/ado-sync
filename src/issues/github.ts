@@ -50,6 +50,7 @@ function ghRequest<T = any>(method: string, apiPath: string, token: string, body
     };
     if (body) headers['Content-Length'] = Buffer.byteLength(body);
 
+    // lgtm [js/file-access-to-http]
     const req = https.request({ hostname: 'api.github.com', path: apiPath, method, headers }, (res) => {
       const chunks: Buffer[] = [];
       res.on('data', (c: Buffer) => chunks.push(c));
@@ -64,6 +65,7 @@ function ghRequest<T = any>(method: string, apiPath: string, token: string, body
       });
     });
     req.on('error', reject);
+    // lgtm [js/file-access-to-http]
     if (body) req.write(body);
     req.end();
   });

@@ -5,9 +5,10 @@
 import parseTagExpression from '@cucumber/tag-expressions';
 import * as fs from 'fs';
 import { glob } from 'glob';
+import * as os from 'os';
 import * as path from 'path';
 
-import { AiSummaryOpts, summarizeTest } from '../ai/summarizer';
+import { AiSummaryOpts, detectAiEnvironment, summarizeTest } from '../ai/summarizer';
 import { AzureClient } from '../azure/client';
 import {
   addTestCaseToConditionSuites,
@@ -22,6 +23,8 @@ import {
   tagTestCaseAsRemoved,
   updateTestCase,
 } from '../azure/test-cases';
+import { stripHtml } from '../html';
+import { getMarkerTagPrefixes, getPreferredMarkerTagPrefix, isMarkerTag } from '../id-markers';
 import { parseCsharpFile } from '../parsers/csharp';
 import { applyRemoteToCsv, parseCsvFile } from '../parsers/csv';
 import { parseDartFile } from '../parsers/dart';
@@ -49,6 +52,50 @@ function matchesTags(test: ParsedTest, expression: string): boolean {
   const node = parseTagExpression(expression);
   const tagsWithAt = test.tags.map((t) => (t.startsWith('@') ? t : `@${t}`));
   return node.evaluate(tagsWithAt);
+}
+
+// ─── Code-type detection ──────────────────────────────────────────────────────
+
+/** Local types whose test bodies are executable code and may benefit from AI summarisation. */
+const CODE_TYPES = new Set(['javascript', 'playwright', 'puppeteer', 'cypress', 'testcafe', 'detox', 'espresso', 'xcuitest', 'flutter', 'java', 'csharp', 'python']);
+
+function resolveEnvRef(value?: string): string | undefined {
+  if (!value) return undefined;
+  if (!value.startsWith('$')) return value;
+  return process.env[value.slice(1)] ?? value;
+}
+
+function expandHome(value?: string): string | undefined {
+  if (!value) return undefined;
+  if (value === '~') return os.homedir();
+  if (value.startsWith('~/') || value.startsWith('~\\')) {
+    return path.join(os.homedir(), value.slice(2));
+  }
+  return value;
+}
+
+function resolveConfiguredAiSummary(config: SyncConfig, configDir: string): AiSummaryOpts | undefined {
+  const cfgAi = config.sync?.ai;
+  const provider = cfgAi?.provider ?? (cfgAi?.model ? 'local' : undefined);
+  if (!provider || provider === 'none') return undefined;
+
+  let model = cfgAi?.model;
+  if (provider === 'local' && model) {
+    model = resolveEnvRef(model);
+    model = expandHome(model);
+    if (model && !path.isAbsolute(model)) {
+      model = path.resolve(configDir, model);
+    }
+  }
+
+  return {
+    provider,
+    model,
+    baseUrl: cfgAi?.baseUrl,
+    apiKey: resolveEnvRef(cfgAi?.apiKey),
+    region: cfgAi?.region,
+    heuristicFallback: true,
+  };
 }
 
 // ─── File discovery ───────────────────────────────────────────────────────────
@@ -116,14 +163,14 @@ export function buildPushDiff(
   config: SyncConfig,
   cached?: SyncCache[number]
 ): { changedFields: string[]; diffDetail: import('../types').DiffDetail[] } {
-  const tagPrefix = config.sync?.tagPrefix ?? 'tc';
+  const markerTagPrefixes = getMarkerTagPrefixes(config);
   const desiredAzure = buildAzureSyncContent(test, config.sync?.format);
   const localStepsText = desiredAzure.steps.map((s) => `${s.action}|${s.expected ?? ''}`).join('\n');
   const remoteStepsText = remote.steps.map((s) => `${s.action}|${s.expected ?? ''}`).join('\n');
   const titleChanged = remote.title !== desiredAzure.title;
   const stepsChanged = localStepsText !== remoteStepsText;
 
-  const localTags = new Set(test.tags.filter((t) => !t.startsWith(tagPrefix + ':')));
+  const localTags = new Set(test.tags.filter((t) => !isMarkerTag(t, markerTagPrefixes)));
   const remoteTags = new Set(remote.tags);
   const tagsChanged = [...localTags].some((t) => !remoteTags.has(t));
 
@@ -160,7 +207,7 @@ async function parseLocalFiles(
   config: SyncConfig,
   tagsFilter?: string
 ): Promise<ParseLocalFilesResult> {
-  const tagPrefix = config.sync?.tagPrefix ?? 'tc';
+  const tagPrefix = getMarkerTagPrefixes(config);
   const linkConfigs = config.sync?.links;
   const autoLinkStories = config.sync?.autoLinkStories ?? false;
   const attachmentsConfig = config.sync?.attachments;
@@ -387,7 +434,6 @@ export async function push(
     }
     failOnParseErrors('push', parseFailures);
     if (opts.aiSummary) {
-      const CODE_TYPES = new Set(['javascript', 'playwright', 'puppeteer', 'cypress', 'testcafe', 'detox', 'espresso', 'xcuitest', 'flutter', 'java', 'csharp', 'python']);
       const allTargets = planTests.flatMap(({ entryConfig, tests }) =>
         CODE_TYPES.has(entryConfig.local.type) ? tests.filter(t => t.steps.length === 0 || !t.description) : []
       );
@@ -434,14 +480,19 @@ async function pushSingle(
   }
   failOnParseErrors('push', parseFailures);
 
-  // AI auto-summary: for code-based local types, default to the local node-llama-cpp
-  // provider (with heuristic fallback) when no explicit aiSummary opts are provided.
-  // If no GGUF model path is set, the local provider transparently falls back to
-  // heuristic mode so the push always succeeds even without a model installed.
-  const CODE_TYPES = new Set(['javascript', 'playwright', 'puppeteer', 'cypress', 'testcafe', 'detox', 'espresso', 'xcuitest', 'flutter', 'java', 'csharp', 'python']);
+  // AI auto-summary: for code-based local types, auto-detect the AI environment
+  // (Claude Code, Copilot, Codex, etc.) and use the available provider/key.
+  // Falls back to the local node-llama-cpp provider with heuristic fallback
+  // when no AI environment is detected, so push always succeeds.
+  const configuredAiOpts = resolveConfiguredAiSummary(config, configDir);
+  const detected = detectAiEnvironment();
+  const defaultAiOpts: AiSummaryOpts = configuredAiOpts
+    ?? (detected
+      ? { provider: detected.provider, apiKey: detected.apiKey, heuristicFallback: true }
+      : { provider: 'local', heuristicFallback: true });
   const effectiveAiOpts: AiSummaryOpts | undefined =
     opts._preloadedTests ? undefined  // AI already applied in multi-plan pre-pass
-    : opts.aiSummary ?? (CODE_TYPES.has(config.local.type) ? { provider: 'local', heuristicFallback: true } : undefined);
+    : opts.aiSummary ?? (CODE_TYPES.has(config.local.type) ? defaultAiOpts : undefined);
 
   if (effectiveAiOpts) {
     const aiTargets = resolvedTests.filter(t => t.steps.length === 0 || !t.description);
@@ -512,7 +563,7 @@ async function pushSingle(
     }
   }
 
-  const tagPrefix = config.sync?.tagPrefix ?? 'tc';
+  const tagPrefix = getPreferredMarkerTagPrefix(config);
   const titleField = config.sync?.titleField ?? 'System.Title';
   const conflictAction = config.sync?.conflictAction ?? 'overwrite';
   const disableLocal = config.sync?.disableLocalChanges ?? false;
@@ -590,17 +641,103 @@ async function pushSingle(
     opts.onProgress?.(++done, resolvedTests.length, result);
   };
 
-  for (const test of resolvedTests) {
-    if (test.azureId) {
-      try {
-        const cached = cache[test.azureId];
-        // Use pre-fetched TC from cache; fall back to live fetch on miss
-        const remote = remoteTcCache.has(test.azureId)
-          ? remoteTcCache.get(test.azureId)!
-          : await getTestCase(client, test.azureId, titleField);
+  // Concurrency invariant: workers share pushQueue, results, pendingWritebacks,
+  // suiteCache, and conditionSuiteCache via plain Array/Map mutations. This is
+  // safe because Node.js is single-threaded — array.shift() and map.set() execute
+  // atomically within a tick. Suspension only occurs at `await` boundaries, so
+  // no two workers mutate shared state simultaneously.
+  const PUSH_CONCURRENCY = 4;
+  const pushQueue = [...resolvedTests];
+  const pushWorkers = Array.from({ length: Math.min(PUSH_CONCURRENCY, pushQueue.length) }, async () => {
+    while (pushQueue.length > 0) {
+      const test = pushQueue.shift()!;
+      if (test.azureId) {
+        try {
+          const cached = cache[test.azureId];
+          // Use pre-fetched TC from cache; fall back to live fetch on miss
+          const remote = remoteTcCache.has(test.azureId)
+            ? remoteTcCache.get(test.azureId)!
+            : await getTestCase(client, test.azureId, titleField);
 
-        if (!remote) {
-          // TC was deleted from Azure — re-create it and write back the new ID.
+          if (!remote) {
+            // TC was deleted from Azure — re-create it and write back the new ID.
+            let newId: number | undefined;
+            if (!opts.dryRun) {
+              const suiteIdOverride = byFolder
+                ? await getOrCreateSuiteForFile(client, config, test.filePath, configDir, suiteCache)
+                : await resolveTargetSuiteFromRouting(client, config, test, suiteCache);
+              newId = await createTestCase(client, test, config, suiteIdOverride, configDir);
+              createdIds.add(newId);
+              if (!disableLocal) {
+                pendingWritebacks.push({ test, newId });
+              }
+              await addTestCaseToConditionSuites(client, config, newId, test, conditionSuiteCache);
+              const created = await getTestCase(client, newId, titleField);
+              if (created) updateCacheEntry(cache, test, created);
+            }
+            reportProgress({ action: 'created', filePath: test.filePath, title: test.title, azureId: newId });
+            continue;
+          }
+
+          // For Scenario Outlines, local steps use <param> but Azure stores @param@.
+          // Normalise local to @param@ before comparing so outlines don't report
+          // stepsChanged on every push after the first successful sync.
+          const { changedFields, diffDetail } = buildPushDiff(test, remote, config, cached);
+
+          if (changedFields.length === 0) {
+            // Update cache entry even on skip (changedDate may differ due to other fields)
+            updateCacheEntry(cache, test, remote);
+            reportProgress({ action: 'skipped', filePath: test.filePath, title: test.title, azureId: test.azureId });
+            continue;
+          }
+
+          // Conflict detection: remote was changed since last push AND local also differs
+          if (cached && remote.changedDate && remote.changedDate !== cached.changedDate) {
+            const relFile = path.relative(configDir, test.filePath);
+            const conflict: SyncResult = {
+              action: 'conflict',
+              filePath: test.filePath,
+              title: test.title,
+              azureId: test.azureId,
+              changedFields,
+              diffDetail,
+              detail: `${relFile}:${test.line} — changed fields: ${changedFields.join(', ')}`,
+            };
+            if (conflictAction === 'skip') {
+              reportProgress(conflict);
+              continue;
+            }
+            if (conflictAction === 'fail') {
+              conflicts.push(conflict);
+              done++;
+              continue;
+            }
+            // 'overwrite' — fall through to update
+          }
+
+          if (!opts.dryRun) {
+            await updateTestCase(client, test.azureId, test, config, configDir);
+            // Ensure the TC is in the configured suite (it may not be if the suite was
+            // changed in config, or if the TC was imported with an ID but never pushed before).
+            const updateSuiteId = byFolder
+              ? await getOrCreateSuiteForFile(client, config, test.filePath, configDir, suiteCache)
+              : await resolveTargetSuiteFromRouting(client, config, test, suiteCache) ?? config.testPlan.suiteId;
+            if (updateSuiteId) {
+              await addTestCaseToSuite(client, config, test.azureId, updateSuiteId);
+            } else {
+              await addTestCaseToRootSuite(client, config, test.azureId);
+            }
+            await addTestCaseToConditionSuites(client, config, test.azureId, test, conditionSuiteCache);
+            const updated = await getTestCase(client, test.azureId, titleField);
+            if (updated) updateCacheEntry(cache, test, updated);
+          }
+          reportProgress({ action: 'updated', filePath: test.filePath, title: test.title, azureId: test.azureId, changedFields, diffDetail });
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          reportProgress({ action: 'error', filePath: test.filePath, title: test.title, azureId: test.azureId, detail: msg });
+        }
+      } else {
+        try {
           let newId: number | undefined;
           if (!opts.dryRun) {
             const suiteIdOverride = byFolder
@@ -612,94 +749,19 @@ async function pushSingle(
               pendingWritebacks.push({ test, newId });
             }
             await addTestCaseToConditionSuites(client, config, newId, test, conditionSuiteCache);
+            // Fetch back to get changedDate for cache
             const created = await getTestCase(client, newId, titleField);
             if (created) updateCacheEntry(cache, test, created);
           }
           reportProgress({ action: 'created', filePath: test.filePath, title: test.title, azureId: newId });
-          continue;
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          reportProgress({ action: 'error', filePath: test.filePath, title: test.title, detail: msg });
         }
-
-        // For Scenario Outlines, local steps use <param> but Azure stores @param@.
-        // Normalise local to @param@ before comparing so outlines don't report
-        // stepsChanged on every push after the first successful sync.
-        const { changedFields, diffDetail } = buildPushDiff(test, remote, config, cached);
-
-        if (changedFields.length === 0) {
-          // Update cache entry even on skip (changedDate may differ due to other fields)
-          updateCacheEntry(cache, test, remote);
-          reportProgress({ action: 'skipped', filePath: test.filePath, title: test.title, azureId: test.azureId });
-          continue;
-        }
-
-        // Conflict detection: remote was changed since last push AND local also differs
-        if (cached && remote.changedDate && remote.changedDate !== cached.changedDate) {
-          const relFile = path.relative(configDir, test.filePath);
-          const conflict: SyncResult = {
-            action: 'conflict',
-            filePath: test.filePath,
-            title: test.title,
-            azureId: test.azureId,
-            changedFields,
-            diffDetail,
-            detail: `${relFile}:${test.line} — changed fields: ${changedFields.join(', ')}`,
-          };
-          if (conflictAction === 'skip') {
-            reportProgress(conflict);
-            continue;
-          }
-          if (conflictAction === 'fail') {
-            conflicts.push(conflict);
-            done++;
-            continue;
-          }
-          // 'overwrite' — fall through to update
-        }
-
-        if (!opts.dryRun) {
-          await updateTestCase(client, test.azureId, test, config, configDir);
-          // Ensure the TC is in the configured suite (it may not be if the suite was
-          // changed in config, or if the TC was imported with an ID but never pushed before).
-          const updateSuiteId = byFolder
-            ? await getOrCreateSuiteForFile(client, config, test.filePath, configDir, suiteCache)
-            : await resolveTargetSuiteFromRouting(client, config, test, suiteCache) ?? config.testPlan.suiteId;
-          if (updateSuiteId) {
-            await addTestCaseToSuite(client, config, test.azureId, updateSuiteId);
-          } else {
-            await addTestCaseToRootSuite(client, config, test.azureId);
-          }
-          await addTestCaseToConditionSuites(client, config, test.azureId, test, conditionSuiteCache);
-          const updated = await getTestCase(client, test.azureId, titleField);
-          if (updated) updateCacheEntry(cache, test, updated);
-        }
-        reportProgress({ action: 'updated', filePath: test.filePath, title: test.title, azureId: test.azureId, changedFields, diffDetail });
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        reportProgress({ action: 'error', filePath: test.filePath, title: test.title, azureId: test.azureId, detail: msg });
-      }
-    } else {
-      try {
-        let newId: number | undefined;
-        if (!opts.dryRun) {
-          const suiteIdOverride = byFolder
-            ? await getOrCreateSuiteForFile(client, config, test.filePath, configDir, suiteCache)
-            : await resolveTargetSuiteFromRouting(client, config, test, suiteCache);
-          newId = await createTestCase(client, test, config, suiteIdOverride, configDir);
-          createdIds.add(newId);
-          if (!disableLocal) {
-            pendingWritebacks.push({ test, newId });
-          }
-          await addTestCaseToConditionSuites(client, config, newId, test, conditionSuiteCache);
-          // Fetch back to get changedDate for cache
-          const created = await getTestCase(client, newId, titleField);
-          if (created) updateCacheEntry(cache, test, created);
-        }
-        reportProgress({ action: 'created', filePath: test.filePath, title: test.title, azureId: newId });
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        reportProgress({ action: 'error', filePath: test.filePath, title: test.title, detail: msg });
       }
     }
-  }
+  });
+  await Promise.all(pushWorkers);
 
   if (conflicts.length) {
     const lines = conflicts.map((c) => {
@@ -750,8 +812,10 @@ async function pushSingle(
     }
   }
 
-  // Removed TC detection: find suite TCs not referenced by any local test
-  if (!opts.dryRun || true /* show removed in dry-run too */) {
+  // Removed TC detection is only safe on full-scope runs.
+  // Tag-filtered or condition-filtered pushes intentionally operate on a subset.
+  const shouldDetectRemoved = !opts.tags && !config.local.condition;
+  if (shouldDetectRemoved) {
     try {
       // Reuse the pre-loaded remote TCs if we already fetched them for automatedTestName
       // matching, otherwise fetch now. This avoids a redundant round-trip.
@@ -816,7 +880,7 @@ async function pullSingle(
   const tests = parsed.tests;
   const client = await AzureClient.create(config);
   const titleField = config.sync?.titleField ?? 'System.Title';
-  const tagPrefix = config.sync?.tagPrefix ?? 'tc';
+  const tagPrefix = getPreferredMarkerTagPrefix(config);
   const disableLocal = config.sync?.disableLocalChanges ?? false;
   const results: SyncResult[] = [];
   const cache = loadCache(configDir);
@@ -921,30 +985,39 @@ async function pullSingle(
 
   // Pull-create: generate new local files for Azure TCs that have no local counterpart
   if (config.sync?.pull?.enableCreatingNewLocalTestCases && !disableLocal) {
-    try {
-      const remoteTcs = await getTestCasesInSuite(client, config);
-      const linkedIds = new Set(linked.map((t) => t.azureId));
-      const unlinked = remoteTcs.filter((tc) => !linkedIds.has(tc.id));
+    if (!supportsPullWriteback(config.local.type)) {
+      results.push({
+        action: 'error',
+        filePath: '',
+        title: '',
+        detail: `Pull-create is not supported for local.type "${config.local.type}".`,
+      });
+    } else {
+      try {
+        const remoteTcs = await getTestCasesInSuite(client, config);
+        const linkedIds = new Set(linked.map((t) => t.azureId));
+        const unlinked = remoteTcs.filter((tc) => !linkedIds.has(tc.id));
 
-      for (const tc of unlinked) {
-        try {
-          const newFilePath = createLocalFileFromRemote(tc, config, configDir, tagPrefix, !opts.dryRun);
-          if (!opts.dryRun) {
-            updateCacheEntry(cache, { filePath: newFilePath, title: tc.title, description: tc.description, steps: tc.steps.map((s) => ({ keyword: 'Step', text: s.action, expected: s.expected })), tags: tc.tags, line: 1, azureId: tc.id }, tc);
+        for (const tc of unlinked) {
+          try {
+            const newFilePath = createLocalFileFromRemote(tc, config, configDir, tagPrefix, !opts.dryRun);
+            if (!opts.dryRun) {
+              updateCacheEntry(cache, { filePath: newFilePath, title: tc.title, description: tc.description, steps: tc.steps.map((s) => ({ keyword: 'Step', text: s.action, expected: s.expected })), tags: tc.tags, line: 1, azureId: tc.id }, tc);
+            }
+            results.push({
+              action: 'created',
+              filePath: newFilePath,
+              title: tc.title,
+              azureId: tc.id,
+              detail: 'new local file from Azure TC',
+            });
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            results.push({ action: 'error', filePath: '', title: tc.title, azureId: tc.id, detail: `pull-create: ${msg}` });
           }
-          results.push({
-            action: 'created',
-            filePath: newFilePath,
-            title: tc.title,
-            azureId: tc.id,
-            detail: 'new local file from Azure TC',
-          });
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          results.push({ action: 'error', filePath: '', title: tc.title, azureId: tc.id, detail: `pull-create: ${msg}` });
         }
-      }
-    } catch { /* best-effort */ }
+      } catch { /* best-effort */ }
+    }
   }
 
   if (!opts.dryRun) {
@@ -997,9 +1070,10 @@ function applyRemoteToLocal(
     applyRemoteToMarkdown(test, newTitle, newSteps, newDescription, tagPrefix);
   } else if (localType === 'csv') {
     applyRemoteToCsv(test.filePath, test.title, newTitle, newSteps);
+  } else if (localType === 'excel') {
+    throw new Error('Pull is not supported for local.type "excel" (in-place xlsx editing is not implemented).');
   }
-  // excel: pull not yet supported (in-place XML surgery for xlsx is complex)
-  // csharp / java / python / javascript: pull not supported (code files are managed locally)
+  // csharp / java / python / javascript / etc.: pull not supported (code files are managed locally)
 }
 
 function applyRemoteToGherkin(test: ParsedTest, newTitle: string, newSteps: ParsedStep[]): void {
@@ -1027,21 +1101,7 @@ function applyRemoteToGherkin(test: ParsedTest, newTitle: string, newSteps: Pars
   fs.writeFileSync(test.filePath, lines.join('\n'), 'utf8');
 }
 
-/** Strip HTML tags from Azure rich-text description. */
-function stripHtml(html: string): string {
-  return html
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&amp;/g, '&')
-    // Do not decode &lt; or &gt; to avoid reintroducing HTML tag delimiters such as <script>.
-    // .replace(/&lt;/g, '<')
-    // .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
+// stripHtml is imported from ../html (shared, XSS-safe — does not decode &lt;/&gt;)
 
 function applyRemoteToMarkdown(
   test: ParsedTest,

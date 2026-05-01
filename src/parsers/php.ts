@@ -21,6 +21,7 @@
 
 import * as fs from 'fs';
 
+import { buildMarkerTagPrefixPattern } from '../id-markers';
 import { LinkConfig, ParsedStep, ParsedTest } from '../types';
 import { extractLinkRefs, extractPathTags } from './shared';
 
@@ -66,7 +67,7 @@ interface PhpDocBlock {
 function extractDocBlockAbove(
   lines: string[],
   methodLineIdx: number,
-  tagPrefix: string
+  tagPrefix: string | string[]
 ): PhpDocBlock {
   const docLines: string[] = [];
   let azureId: number | undefined;
@@ -87,7 +88,7 @@ function extractDocBlockAbove(
 
   if (docEnd < 0) return { docLines, azureId, tags, hasTestAnnotation };
 
-  const idRe    = new RegExp(`@${tagPrefix}\\s+(\\d+)`);
+  const idRe    = new RegExp(`@(?:${buildMarkerTagPrefixPattern(tagPrefix)})\\s+(\\d+)`);
   const groupRe = /@group\s+(\w+)/;
 
   // Walk backward from docEnd to find /**
@@ -169,7 +170,7 @@ function parseSummary(
 
 export function parsePhpFile(
   filePath: string,
-  tagPrefix: string,
+  tagPrefix: string | string[],
   linkConfigs?: LinkConfig[]
 ): ParsedTest[] {
   const source = fs.readFileSync(filePath, 'utf8');
@@ -192,7 +193,7 @@ export function parsePhpFile(
     const allTags = [...new Set([...pathTags, ...docTags])];
     const { title, steps, titleIsHeuristic } = parseSummary(docLines, methodName);
 
-    const nsFormatted = ns.replace(/\\/g, '\\');
+    const nsFormatted = ns;
     const automatedTestName = [nsFormatted, cls, methodName].filter(Boolean).join('::');
 
     results.push({

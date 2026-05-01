@@ -21,6 +21,7 @@
 
 import * as fs from 'fs';
 
+import { buildMarkerTagPrefixPattern, normalizeMarkerTagPrefixes } from '../id-markers';
 import { LinkConfig, ParsedStep, ParsedTest } from '../types';
 import { extractLinkRefs, extractPathTags } from './shared';
 
@@ -76,7 +77,8 @@ interface TagsResult {
   azureId?: number;
 }
 
-function parseTagsRow(raw: string, tagPrefix: string): TagsResult {
+function parseTagsRow(raw: string, tagPrefix: string | string[]): TagsResult {
+  const markerTagPrefixes = normalizeMarkerTagPrefixes(tagPrefix);
   // Strip [Tags] / [tags] prefix and split on 2+ spaces or tab
   const withoutKey = raw.replace(/^\[tags\]\s*/i, '');
   const values = withoutKey.split(/\s{2,}|\t/).map((v) => v.trim()).filter(Boolean);
@@ -85,7 +87,7 @@ function parseTagsRow(raw: string, tagPrefix: string): TagsResult {
   let azureId: number | undefined;
 
   for (const v of values) {
-    const idMatch = v.match(new RegExp(`^${tagPrefix}:(\\d+)$`, 'i'));
+    const idMatch = v.match(new RegExp(`^(?:${buildMarkerTagPrefixPattern(markerTagPrefixes)}):(\\d+)$`, 'i'));
     if (idMatch) {
       if (azureId === undefined) azureId = parseInt(idMatch[1], 10);
     } else {
@@ -106,12 +108,13 @@ function keywordToStep(keyword: string): ParsedStep {
 
 export function parseRobotFile(
   filePath: string,
-  tagPrefix: string,
+  tagPrefix: string | string[],
   linkConfigs?: LinkConfig[]
 ): ParsedTest[] {
   const source = fs.readFileSync(filePath, 'utf8');
   const lines = source.split('\n');
   const pathTags = extractPathTags(filePath);
+  const markerTagPrefixes = normalizeMarkerTagPrefixes(tagPrefix);
   const results: ParsedTest[] = [];
 
   let inTestCases = false;
@@ -167,7 +170,7 @@ export function parseRobotFile(
     commentIdAbove = undefined;
   }
 
-  const commentIdRe = new RegExp(`#\\s*@${tagPrefix}:(\\d+)`);
+  const commentIdRe = new RegExp(`#\\s*@(?!tags?:)(?:${buildMarkerTagPrefixPattern(markerTagPrefixes)}):(\\d+)`);
 
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];

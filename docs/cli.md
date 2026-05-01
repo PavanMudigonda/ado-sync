@@ -246,6 +246,8 @@ ado-sync generate --story-ids 1234 --ai-provider azureai        --ai-url https:/
 ado-sync generate --story-ids 1234 --ai-provider github         --ai-model gpt-4o
 ado-sync generate --story-ids 1234 --ai-provider azureinference --ai-url https://myendpoint.inference.azure.com --ai-model gpt-4o --ai-key $AZURE_AI_KEY
 ado-sync generate --story-ids 1234 --ai-provider local          --ai-model ~/.cache/models/qwen2.5-coder-1.5b.gguf
+ado-sync generate --story-ids 1234 --ai-provider openai --ai-key $OPENAI_API_KEY \
+  --ai-context src/orders/** --ai-context tests/orders/**
 ```
 
 ### AI generate flags
@@ -257,6 +259,21 @@ ado-sync generate --story-ids 1234 --ai-provider local          --ai-model ~/.ca
 | `--ai-key` | API key (or `$ENV_VAR` reference) |
 | `--ai-url` | Base URL override (Ollama, Azure OpenAI full endpoint, OpenAI-compatible) |
 | `--ai-region` | AWS region for `bedrock` (default: `AWS_REGION` env or `us-east-1`) |
+| `--ai-context` | Additional context source for AI generation. Accepts a file, folder, or glob. Repeatable. |
+
+### AI generation context
+
+`generate` does not scan the entire workspace by default. For better AI-generated specs, pass a small set of relevant files or folders explicitly:
+
+```bash
+ado-sync generate --story-ids 1234 \
+  --ai-provider openai --ai-key $OPENAI_API_KEY \
+  --ai-context src/billing/** \
+  --ai-context tests/billing/** \
+  --ai-context docs/billing.md
+```
+
+Best results come from targeted context: relevant app code, existing automation, and feature docs. The CLI caps the number of files and total context size so prompts stay bounded and predictable.
 
 Without `--ai-provider`, `generate` uses the template scaffold (no AI required). With it, the AI reads the story's title, description, and acceptance criteria and produces realistic Given/When/Then steps.
 

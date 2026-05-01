@@ -31,6 +31,7 @@
 
 import * as fs from 'fs';
 
+import { buildMarkerTagPrefixPattern } from '../id-markers';
 import { LinkConfig, ParsedStep, ParsedTest } from '../types';
 import { extractAttachmentRefs, extractLinkRefs, extractPathTags, getAttachmentPrefixes } from './shared';
 
@@ -49,22 +50,22 @@ function stripBold(s: string): string {
 const SEPARATOR_RE = /^---+\s*$/;
 // Matches a tag line that starts with "@tc:12345" optionally followed by more @tags.
 // e.g.  "@tc:32845"  or  "@tc:32845 @smoke @regression"
-const mdTcTagRe = (prefix: string) => new RegExp(`^\\s*@${prefix}:(\\d+)((?:\\s+@\\S+)*)\\s*$`, 'm');
-const mdTcCommentRe = (prefix: string) =>
-  new RegExp(`<!--\\s*@?${prefix}\\s*:\\s*(\\d+)\\s*-->`, 'i');
-function findTcId(prefix: string, blockText: string): number | undefined {
-  const m = blockText.match(mdTcTagRe(prefix)) ?? blockText.match(new RegExp(`<!--\\s*@?${prefix}\\s*:\\s*(\\d+)\\s*-->`, 'im'));
+const mdTcTagRe = (prefix: string | string[]) => new RegExp(`^\\s*@(?!tags?:)(?:${buildMarkerTagPrefixPattern(prefix)}):(\\d+)((?:\\s+@\\S+)*)\\s*$`, 'm');
+const mdTcCommentRe = (prefix: string | string[]) =>
+  new RegExp(`<!--\\s*@?(?:${buildMarkerTagPrefixPattern(prefix)})\\s*:\\s*(\\d+)\\s*-->`, 'i');
+function findTcId(prefix: string | string[], blockText: string): number | undefined {
+  const m = blockText.match(mdTcTagRe(prefix)) ?? blockText.match(new RegExp(`<!--\\s*@?(?:${buildMarkerTagPrefixPattern(prefix)})\\s*:\\s*(\\d+)\\s*-->`, 'im'));
   return m ? parseInt(m[1], 10) : undefined;
 }
 /** Extract any extra @tags written on the same line as the tc ID, e.g. @tc:32845 @smoke → ['smoke'] */
-function extractTcLineTags(prefix: string, blockText: string): string[] {
+function extractTcLineTags(prefix: string | string[], blockText: string): string[] {
   const m = blockText.match(mdTcTagRe(prefix));
   if (!m || !m[2]) return [];
   return m[2].trim().split(/\s+/).filter(Boolean).map((t) => t.slice(1)); // strip leading '@'
 }
 /** A standalone tag line contains only @word tokens (no tc: ID prefix). e.g. "@smoke @regression" */
 const STANDALONE_TAG_LINE_RE = /^\s*(@[A-Za-z][\w-]*(\s+@[A-Za-z][\w-]*)*)\s*$/;
-function isStandaloneTagLine(prefix: string, line: string): boolean {
+function isStandaloneTagLine(prefix: string | string[], line: string): boolean {
   const t = line.trim();
   // Must look like all-@tags but NOT be a tc ID line
   return STANDALONE_TAG_LINE_RE.test(t) && !mdTcTagRe(prefix).test(t);
@@ -73,7 +74,7 @@ function isStandaloneTagLine(prefix: string, line: string): boolean {
 function parseStandaloneTagLine(line: string): string[] {
   return line.trim().split(/\s+/).filter((t) => t.startsWith('@')).map((t) => t.slice(1));
 }
-function isTcLine(prefix: string, line: string): boolean {
+function isTcLine(prefix: string | string[], line: string): boolean {
   const t = line.trim();
   return mdTcTagRe(prefix).test(t) || mdTcCommentRe(prefix).test(t);
 }
@@ -115,7 +116,7 @@ function splitIntoScenarios(lines: string[]): ScenarioBlock[] {
 function parseScenarioBlock(
   block: ScenarioBlock,
   filePath: string,
-  tagPrefix: string,
+  tagPrefix: string | string[],
   pathTags: string[],
   linkConfigs: LinkConfig[] | undefined,
   attachmentPrefixes: string[]
@@ -212,10 +213,13 @@ function parseScenarioBlock(
   }
 
   // Description: trim trailing blank lines
-  const description = descLines
-    .join('\n')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .trim() || undefined;
+  let tempDesc = descLines.join('\n');
+  let prevDesc: string;
+  do {
+    prevDesc = tempDesc;
+    tempDesc = tempDesc.replace(/<!--[\s\S]*?-->/g, '');
+  } while (tempDesc !== prevDesc);
+  const description = tempDesc.trim() || undefined;
 
   return {
     filePath,
@@ -232,7 +236,7 @@ function parseScenarioBlock(
 
 export function parseMarkdownFile(
   filePath: string,
-  tagPrefix: string,
+  tagPrefix: string | string[],
   linkConfigs?: LinkConfig[],
   attachmentsConfig?: { enabled: boolean; tagPrefixes?: string[] }
 ): ParsedTest[] {

@@ -25,6 +25,7 @@
 
 import * as fs from 'fs';
 
+import { buildMarkerTagPrefixPattern, normalizeMarkerTagPrefixes } from '../id-markers';
 import { LinkConfig, ParsedStep, ParsedTest } from '../types';
 import { extractLinkRefs, extractPathTags } from './shared';
 
@@ -161,14 +162,15 @@ interface PythonDecorators {
 function extractDecoratorsAbove(
   lines: string[],
   defLineIdx: number,
-  tagPrefix: string
+  tagPrefix: string | string[]
 ): PythonDecorators {
   const marks: string[] = [];
   let azureId: number | undefined;
+  const markerTagPrefixes = normalizeMarkerTagPrefixes(tagPrefix);
 
-  const idMarkRe   = new RegExp(`^@pytest\\.mark\\.${tagPrefix}\\((\\d+)\\)\\s*$`);
+  const idMarkRe   = new RegExp(`^@pytest\\.mark\\.(?:${buildMarkerTagPrefixPattern(markerTagPrefixes)})\\((\\d+)\\)\\s*$`);
   const markRe     = /^@pytest\.mark\.(\w+)(?:\s*\(.*)?$/;
-  const commentIdRe = new RegExp(`#\\s*@${tagPrefix}:(\\d+)`);
+  const commentIdRe = new RegExp(`#\\s*@(?!tags?:)(?:${buildMarkerTagPrefixPattern(markerTagPrefixes)}):(\\d+)`);
 
   let parenDepth = 0; // track open parens for multi-line decorators
 
@@ -211,7 +213,7 @@ function extractDecoratorsAbove(
       const markMatch = trimmed.match(markRe);
       if (markMatch) {
         const name = markMatch[1];
-        if (!PYTEST_BUILTINS.has(name) && name !== tagPrefix) marks.push(name);
+        if (!PYTEST_BUILTINS.has(name) && !markerTagPrefixes.includes(name)) marks.push(name);
         continue;
       }
 
@@ -270,7 +272,7 @@ function parseSummary(
 
 export function parsePythonFile(
   filePath: string,
-  tagPrefix: string,
+  tagPrefix: string | string[],
   linkConfigs?: LinkConfig[]
 ): ParsedTest[] {
   const source = fs.readFileSync(filePath, 'utf8');

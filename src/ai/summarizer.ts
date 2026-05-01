@@ -13,7 +13,7 @@
  *                dependencies, works fully offline.
  *
  *   ollama     — local LLM via Ollama REST API (http://localhost:11434).
- *                Model suggestion: qwen2.5-coder:7b.
+ *                Model suggestion: gemma-4-e4b-it.
  *
  *   openai     — OpenAI Chat Completions API (requires API key).
  *
@@ -22,7 +22,7 @@
  * Usage (engine.ts / CLI):
  *   const { title, description, steps } = await summarizeTest(test, localType, {
  *     provider: 'local',
- *     model: '/path/to/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf',
+ *     model: '/path/to/gemma-4-e4b-it-Q4_K_M.gguf',
  *   });
  *   test.title = title;
  *   test.description = description;
@@ -47,14 +47,137 @@ export type AiProvider =
   | 'github'
   | 'azureinference';
 
+/**
+ * Detect if we're running inside an AI assistant environment and return the
+ * best available AI provider + credentials automatically so users don't need
+ * to pass --ai-provider / --ai-key explicitly.
+ *
+ * Detection order (first match wins):
+ *   1. Explicit API keys in env          → use the matching provider directly
+ *   2. Known AI-tool session env vars    → heuristic (for summary flows only)
+ *   3. TERM_PROGRAM matches an AI editor → heuristic
+ *   4. Nothing detected                  → undefined (caller decides the fallback)
+ *
+ * Covered environments:
+ *   Claude Code, OpenAI Codex CLI, GitHub Copilot, Cursor, Windsurf,
+ *   Cline, Google Antigravity, Aider, Continue, Augment Code, Zed AI,
+ *   JetBrains AI, Roo Code, Trae, PearAI, Void, Amp, Amazon Q Developer.
+ */
+export function detectAiEnvironment(): Pick<AiSummaryOpts, 'provider' | 'apiKey'> | undefined {
+  // ── 1. Explicit API keys → use the corresponding provider directly ──────
+  if (process.env['ANTHROPIC_API_KEY']) {
+    return { provider: 'anthropic', apiKey: process.env['ANTHROPIC_API_KEY'] };
+  }
+  if (process.env['OPENAI_API_KEY']) {
+    return { provider: 'openai', apiKey: process.env['OPENAI_API_KEY'] };
+  }
+  if (process.env['GITHUB_TOKEN']) {
+    return { provider: 'github', apiKey: process.env['GITHUB_TOKEN'] };
+  }
+
+  // ── 2. Known AI assistant session env vars → heuristic ──────────────────
+  //    When one of these is set, an AI agent is orchestrating the commands —
+  //    ado-sync's own LLM call is redundant, so use fast heuristic mode.
+  const aiSessionSignals = [
+    // Claude Code (Anthropic CLI agent)
+    'CLAUDE_CODE',
+    'CLAUDE_CONTEXT',
+    // OpenAI Codex CLI
+    'CODEX',
+    'OPENAI_CODEX',
+    'CODEX_CLI',
+    // GitHub Copilot Agent Mode (VS Code)
+    'COPILOT_AGENT_MODE',
+    // Cursor (VS Code fork)
+    'CURSOR_SESSION_ID',
+    'CURSOR_TRACE_ID',
+    // Windsurf / Codeium (VS Code fork)
+    'WINDSURF_SESSION_ID',
+    // Cline (VS Code extension)
+    'CLINE_TASK_ID',
+    'CLINE_SESSION_ID',
+    // Google Antigravity (VS Code fork)
+    'ANTIGRAVITY_SESSION_ID',
+    // Aider (CLI agent)
+    'AIDER',
+    'AIDER_SESSION',
+    // Continue.dev (VS Code extension)
+    'CONTINUE_SESSION_ID',
+    // Augment Code (VS Code extension)
+    'AUGMENT_SESSION_ID',
+    // Roo Code (VS Code extension, formerly Roo Cline)
+    'ROO_CODE_SESSION_ID',
+    // Trae (ByteDance AI editor)
+    'TRAE_SESSION_ID',
+    // Amazon Q Developer
+    'AMAZON_Q_SESSION_ID',
+    'AWS_Q_SESSION_ID',
+    // Amp (Sourcegraph)
+    'AMP_SESSION_ID',
+  ];
+  for (const envVar of aiSessionSignals) {
+    if (process.env[envVar]) {
+      return { provider: 'heuristic' };
+    }
+  }
+
+  // ── 3. TERM_PROGRAM / editor detection (macOS, Linux, Windows) ────────
+  //    AI-native editors set TERM_PROGRAM (macOS/Linux) to their name.
+  //    On Windows, some set their own env vars or are detectable via PATH.
+  const termProgram = (process.env['TERM_PROGRAM'] ?? '').toLowerCase();
+  const aiTermPrograms = [
+    'cursor',           // Cursor
+    'windsurf',         // Windsurf (Codeium)
+    'antigravity',      // Google Antigravity
+    'zed',              // Zed (has built-in AI assistant)
+    'trae',             // Trae (ByteDance)
+    'pearai',           // PearAI (VS Code fork)
+    'void',             // Void (open-source AI editor)
+  ];
+  if (aiTermPrograms.includes(termProgram)) {
+    return { provider: 'heuristic' };
+  }
+
+  // ── 4. PATH-based detection for AI editors (all platforms) ──────────────
+  //    Works on macOS/Linux (PATH) and Windows (Path — Node normalises both).
+  //    Detects editors by their install directory appearing in the PATH.
+  const pathEnv = process.env['PATH'] ?? '';
+  const aiPathPatterns = [
+    /[/\\]\.antigravity[/\\]/i,      // Google Antigravity
+    /[/\\]cursor[/\\]/i,             // Cursor
+    /[/\\]windsurf[/\\]/i,           // Windsurf
+    /[/\\]trae[/\\]/i,               // Trae
+    /[/\\]pearai[/\\]/i,             // PearAI
+  ];
+  for (const pattern of aiPathPatterns) {
+    if (pattern.test(pathEnv)) {
+      return { provider: 'heuristic' };
+    }
+  }
+
+  // ── 5. JetBrains AI terminal (Linux/macOS + Windows) ────────────────────
+  //    Linux/macOS: TERMINAL_EMULATOR=JetBrains-JediTerm
+  //    Windows: IDEA_INITIAL_DIRECTORY or __INTELLIJ_COMMAND_HISTFILE__ set
+  const terminalEmulator = process.env['TERMINAL_EMULATOR'] ?? '';
+  if (/jetbrains/i.test(terminalEmulator)
+      || process.env['IDEA_INITIAL_DIRECTORY']
+      || process.env['__INTELLIJ_COMMAND_HISTFILE__']) {
+    return { provider: 'heuristic' };
+  }
+
+  // ── 6. MCP server always runs inside an AI agent (handled by caller) ────
+
+  return undefined;
+}
+
 export interface AiSummaryOpts {
   provider: AiProvider;
   /**
    * For `local`:       absolute path to a GGUF model file
-   * For `ollama`:      model tag, e.g. qwen2.5-coder:7b
+   * For `ollama`:      model tag, e.g. gemma-4-e4b-it
    * For `openai`:      model name, e.g. gpt-4o-mini
    * For `anthropic`:   model name, e.g. claude-haiku-4-5-20251001
-   * For `huggingface`: model id, e.g. mistralai/Mistral-7B-Instruct-v0.3
+   * For `huggingface`: model id, e.g. google/gemma-4-e4b-it
    * For `bedrock`:     model id, e.g. anthropic.claude-3-haiku-20240307-v1:0
    * For `azureai`:     deployment name, e.g. gpt-4o
    */
@@ -713,7 +836,7 @@ function parseAiResponse(
 
 // ─── Shared dynamic import helper ────────────────────────────────────────────
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 const esmImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
 
 // ─── Provider implementations ─────────────────────────────────────────────────
@@ -724,9 +847,9 @@ const esmImport = new Function('m', 'return import(m)') as (m: string) => Promis
 // slots and trigger "No sequences left" on later tests.
 
 interface LlamaSession {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   LlamaChatSession: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   model: any;
 }
 
@@ -739,9 +862,9 @@ async function getLlamaSession(modelPath: string): Promise<LlamaSession> {
   const promise = (async (): Promise<LlamaSession> => {
     // new Function bypasses TypeScript's CJS transform so the import() call is
     // emitted as a true ESM dynamic import at runtime, not as require().
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval, @typescript-eslint/no-explicit-any
+     
     const esmImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const llamaModule: any = await esmImport('node-llama-cpp');
 
     const { getLlama, LlamaChatSession } = llamaModule;
@@ -786,7 +909,7 @@ async function ollamaSummary(
   baseUrl: string,
   contextContent?: string
 ): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let Ollama: any;
   try {
     ({ Ollama } = await esmImport('ollama'));
@@ -809,7 +932,7 @@ async function openaiSummary(
   baseUrl?: string,
   contextContent?: string
 ): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let OpenAI: any;
   try {
     ({ OpenAI } = await esmImport('openai'));
@@ -837,7 +960,7 @@ async function anthropicSummary(
   baseUrl?: string,
   contextContent?: string
 ): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let Anthropic: any;
   try {
     ({ default: Anthropic } = await esmImport('@anthropic-ai/sdk'));
@@ -853,7 +976,7 @@ async function anthropicSummary(
     max_tokens: 2048,
     messages: [{ role: 'user', content: buildPrompt(code, contextContent) }],
   });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   return parseAiResponse((msg.content[0] as any)?.text ?? '', fallbackTitle);
 }
 
@@ -902,7 +1025,7 @@ export function warnIfNoBedrockCredentials(): void {
 /**
  * Invoke a Bedrock command with retry on ThrottlingException / ServiceUnavailableException.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 async function bedrockInvokeWithRetry(client: any, command: any, label = 'bedrock', maxRetries = 3, baseDelayMs = 5_000): Promise<any> {
   let attempt = 0;
   while (true) {
@@ -934,10 +1057,10 @@ async function bedrockSummary(
 ): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
   warnIfNoBedrockCredentials();
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let bedrockModule: any;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval, @typescript-eslint/no-explicit-any
+     
     const esmImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
     bedrockModule = await esmImport('@aws-sdk/client-bedrock-runtime');
   } catch {
@@ -963,7 +1086,7 @@ async function bedrockSummary(
   }), 'ai-summary');
 
   const text = new TextDecoder().decode(response.body);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const data = JSON.parse(text) as any;
   const raw: string =
     data.content?.[0]?.text ??
@@ -980,7 +1103,7 @@ async function azureaiSummary(
   baseUrl: string,
   contextContent?: string
 ): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let AzureOpenAI: any;
   try {
     ({ AzureOpenAI } = await esmImport('openai'));
@@ -1025,7 +1148,7 @@ async function azureinferenceSummary(
   endpoint: string,
   contextContent?: string
 ): Promise<{ title: string; description: string; steps: ParsedStep[] }> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let ModelClient: any, AzureKeyCredential: any;
   try {
     ({ default: ModelClient } = await esmImport('@azure-rest/ai-inference'));
@@ -1048,7 +1171,7 @@ async function azureinferenceSummary(
   if (response.status !== '200') {
     throw new Error(`Azure AI Inference ${response.status}: ${JSON.stringify(response.body)}`);
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   return parseAiResponse((response.body as any).choices?.[0]?.message?.content ?? '', fallbackTitle);
 }
 
@@ -1115,19 +1238,19 @@ export async function analyzeFailure(
     let raw = '';
     switch (opts.provider) {
       case 'ollama': {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         let OllamaFA: any;
         try { ({ Ollama: OllamaFA } = await esmImport('ollama')); } catch { throw new Error("ollama package not installed"); }
         const ollamaClient = new OllamaFA({ host: opts.baseUrl ?? 'http://localhost:11434' });
         const ollamaResp = await ollamaClient.chat({
-          model: opts.model ?? 'qwen2.5-coder:7b',
+          model: opts.model ?? 'gemma-4-e4b-it',
           messages: [{ role: 'user', content: prompt }],
         });
         raw = ollamaResp.message?.content ?? '';
         break;
       }
       case 'openai': {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         let OpenAI: any;
         try { ({ OpenAI } = await esmImport('openai')); } catch { throw new Error("openai package not installed"); }
         const openaiClient = new OpenAI({
@@ -1144,7 +1267,7 @@ export async function analyzeFailure(
         break;
       }
       case 'anthropic': {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         let Anthropic: any;
         try { ({ default: Anthropic } = await esmImport('@anthropic-ai/sdk')); } catch { throw new Error("@anthropic-ai/sdk package not installed"); }
         const anthropicClient = new Anthropic({
@@ -1156,13 +1279,13 @@ export async function analyzeFailure(
           max_tokens: 1024,
           messages: [{ role: 'user', content: prompt }],
         });
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         raw = (anthropicMsg.content[0] as any)?.text ?? '';
         break;
       }
       case 'huggingface': {
         // Hugging Face OpenAI-compatible endpoint via openai SDK
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         let OpenAIhf: any;
         try { ({ OpenAI: OpenAIhf } = await esmImport('openai')); } catch { throw new Error("openai package not installed"); }
         const hfClient = new OpenAIhf({
@@ -1179,7 +1302,7 @@ export async function analyzeFailure(
       }
       case 'bedrock': {
         warnIfNoBedrockCredentials();
-        // eslint-disable-next-line @typescript-eslint/no-implied-eval, @typescript-eslint/no-explicit-any
+         
         const esmImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
         const { BedrockRuntimeClient, InvokeModelCommand } = await esmImport('@aws-sdk/client-bedrock-runtime')
           .catch(() => { throw new Error('bedrock requires @aws-sdk/client-bedrock-runtime'); });
@@ -1201,7 +1324,7 @@ export async function analyzeFailure(
       }
       case 'azureai': {
         if (!opts.baseUrl) break;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         let AzureOpenAI: any;
         try { ({ AzureOpenAI } = await esmImport('openai')); } catch { throw new Error("openai package not installed"); }
         const azureClient = new AzureOpenAI({
@@ -1220,7 +1343,7 @@ export async function analyzeFailure(
         break;
       }
       case 'github': {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         let OpenAIgh: any;
         try { ({ OpenAI: OpenAIgh } = await esmImport('openai')); } catch { throw new Error("openai package not installed"); }
         const ghClient = new OpenAIgh({
@@ -1238,7 +1361,7 @@ export async function analyzeFailure(
       }
       case 'azureinference': {
         if (!opts.baseUrl) break;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         let ModelClientFA: any, AzureKeyCredentialFA: any;
         try {
           ({ default: ModelClientFA } = await esmImport('@azure-rest/ai-inference'));
@@ -1248,7 +1371,7 @@ export async function analyzeFailure(
         const aiResp = await aiClient.path('/chat/completions').post({
           body: { model: opts.model ?? 'gpt-4o', messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: 256 },
         });
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         raw = (aiResp.body as any).choices?.[0]?.message?.content ?? '';
         break;
       }
@@ -1308,7 +1431,7 @@ export async function summarizeTest(
       case 'ollama':
         return await ollamaSummary(
           body, fallbackTitle,
-          opts.model ?? 'qwen2.5-coder:7b',
+          opts.model ?? 'gemma-4-e4b-it',
           opts.baseUrl ?? 'http://localhost:11434',
           ctx
         );
