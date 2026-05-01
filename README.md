@@ -73,18 +73,18 @@ Minimum config:
 
 | Topic | Link |
 |-------|------|
-| CLI reference | [docs/cli.md](docs/cli.md) |
-| Configuration reference | [docs/configuration.md](docs/configuration.md) |
-| Capability roadmap | [docs/capability-roadmap.md](docs/capability-roadmap.md) |
-| Spec file formats | [docs/spec-formats.md](docs/spec-formats.md) |
-| Workflow examples (per framework + CI) | [docs/workflows.md](docs/workflows.md) |
-| Work item links | [docs/work-item-links.md](docs/work-item-links.md) |
-| Publishing test results | [docs/publish-test-results.md](docs/publish-test-results.md) |
-| Advanced features | [docs/advanced.md](docs/advanced.md) |
-| AI agent setup | [docs/agent-setup.md](docs/agent-setup.md) |
-| MCP Server | [docs/mcp-server.md](docs/mcp-server.md) |
-| VS Code Extension | [docs/vscode-extension.md](docs/vscode-extension.md) |
-| Troubleshooting | [docs/troubleshooting.md](docs/troubleshooting.md) |
+| CLI reference | [docs-site/docs/cli.md](docs-site/docs/cli.md) |
+| Configuration reference | [docs-site/docs/configuration.md](docs-site/docs/configuration.md) |
+| Capability roadmap | [docs-site/docs/capability-roadmap.md](docs-site/docs/capability-roadmap.md) |
+| Spec file formats | [docs-site/docs/spec-formats.md](docs-site/docs/spec-formats.md) |
+| Workflow examples (per framework + CI) | [docs-site/docs/workflows.md](docs-site/docs/workflows.md) |
+| Work item links | [docs-site/docs/work-item-links.md](docs-site/docs/work-item-links.md) |
+| Publishing test results | [docs-site/docs/publish-test-results.md](docs-site/docs/publish-test-results.md) |
+| Advanced features | [docs-site/docs/advanced.md](docs-site/docs/advanced.md) |
+| AI agent setup | [docs-site/docs/agent-setup.md](docs-site/docs/agent-setup.md) |
+| MCP Server | [docs-site/docs/mcp-server.md](docs-site/docs/mcp-server.md) |
+| VS Code Extension | [docs-site/docs/vscode-extension.md](docs-site/docs/vscode-extension.md) |
+| Troubleshooting | [docs-site/docs/troubleshooting.md](docs-site/docs/troubleshooting.md) |
 
 ---
 
@@ -145,8 +145,8 @@ Set once in `ado-sync.json` to apply to all commands:
 
 Detailed AI setup, local-model guidance, provider-specific examples, and generate-context recommendations are in the docs:
 
-- [docs/cli.md](docs/cli.md)
-- [docs/advanced.md](docs/advanced.md)
-- [docs/mcp-server.md](docs/mcp-server.md)
+- [docs-site/docs/cli.md](docs-site/docs/cli.md)
+- [docs-site/docs/advanced.md](docs-site/docs/advanced.md)
+- [docs-site/docs/mcp-server.md](docs-site/docs/mcp-server.md)
 
 > **LLM / AI crawlers:** [`llms.txt`](llms.txt) contains a single-file summary of the entire project — config schema, CLI flags, ID writeback formats, and the full doc index.

@@ -386,7 +386,7 @@ Use `sync.disableLocalChanges=true` in CI so the pipeline never commits ID write
 
 ### PR comment bot
 
-Copy [`.github/workflows/ado-sync-pr-check.yml`](../.github/workflows/ado-sync-pr-check.yml) into your repo. On every pull request it runs `ado-sync push --dry-run` and posts a comment showing:
+Copy the `ado-sync-pr-check.yml` workflow into your repo. On every pull request it runs `ado-sync push --dry-run` and posts a comment showing:
 
 - Unlinked specs that would be created in Azure DevOps
 - Specs with drift vs. existing Test Cases
@@ -398,7 +398,7 @@ Requires one secret: `ADO_PAT` (Azure DevOps PAT with Test Management read/write
 
 ### Coverage gate + AC gate
 
-Copy [`.github/workflows/ado-sync-coverage-gate.yml`](../.github/workflows/ado-sync-coverage-gate.yml) into your repo. Runs three checks on push/PR to main:
+Copy the `ado-sync-coverage-gate.yml` workflow into your repo. Runs three checks on push/PR to main:
 
 ```
 Step 1 — Spec coverage gate
