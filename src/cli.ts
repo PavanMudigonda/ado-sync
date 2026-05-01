@@ -21,7 +21,7 @@ import pkg from '../package.json';
 import { AiSummaryOpts, detectAiEnvironment } from './ai/summarizer';
 import { AzureClient } from './azure/client';
 import { applyOverrides, CONFIG_TEMPLATE_JSON, CONFIG_TEMPLATE_YAML, loadConfig, resolveConfigPath } from './config';
-import { coverageReport, detectStaleTestCases, pull, push, status } from './sync/engine';
+import { coverageReport, detectStaleTestCases, pull, push, status, validatePushModeOptions } from './sync/engine';
 import { generateSpecs, loadGenerateContextContent } from './sync/generate';
 import { generateManifests } from './sync/manifest';
 import { publishTestResults } from './sync/publish-results';
@@ -68,6 +68,11 @@ function handleError(err: unknown): never {
 /** Collect repeatable option values into an array. */
 function collect(value: string, previous: string[]): string[] {
   return [...previous, value];
+}
+
+function normalizeSourceFilesForCli(sourceFiles: string[] | undefined, configDir: string): string[] | undefined {
+  if (!sourceFiles?.length) return undefined;
+  return sourceFiles.map((filePath) => path.normalize(path.resolve(configDir, filePath)));
 }
 
 // ─── AI summary helper ────────────────────────────────────────────────────────
@@ -236,7 +241,11 @@ program
   .command('push')
   .description('Push local test specs to Azure DevOps (create or update test cases)')
   .option('--dry-run', 'Show what would change without making any modifications')
+  .option('--create-only', 'Only create test cases for unlinked local specs; skip linked items and removed-case detection')
+  .option('--link-only', 'Only restore local IDs by linking unlinked specs to uniquely matching existing test cases in the current scope')
+  .option('--update-only', 'Only update linked test cases; skip unlinked specs and removed-case detection')
   .option('--tags <expression>', 'Only sync scenarios matching this tag expression (e.g. "@smoke and not @wip")')
+  .option('--source-file <path>', 'Restrict the operation to a specific local file (repeatable)', collect, [])
   .option('--config-override <path=value>', 'Override a config value (repeatable, e.g. --config-override sync.tagPrefix=mytag)', collect, [])
   .option('--ai-provider <provider>', 'AI provider: local (node-llama-cpp), heuristic, ollama, docker, openai, anthropic, huggingface, bedrock, azureai, none (disable)')
   .option('--ai-model <model>', 'local: GGUF path; ollama/docker: model tag; openai/anthropic/huggingface/bedrock/azureai: model name or id')
@@ -250,6 +259,7 @@ program
       const configPath = resolveConfigPath(globalOpts.config);
       const config = loadConfig(configPath);
       if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
+      validatePushModeOptions(opts);
       const configDir = path.dirname(configPath);
 
       console.log(chalk.bold('ado-sync push'));
@@ -257,7 +267,11 @@ program
       console.log(chalk.dim(`Project: ${config.project}`));
       console.log(chalk.dim(`Plan:    ${config.testPlan.id}`));
       if (opts.dryRun) console.log(chalk.yellow('Dry run — no changes will be made'));
+      if (opts.createOnly) console.log(chalk.dim('Mode:    create-only'));
+      if (opts.linkOnly) console.log(chalk.dim('Mode:    link-only'));
+      if (opts.updateOnly) console.log(chalk.dim('Mode:    update-only'));
       if (opts.tags) console.log(chalk.dim(`Tags:    ${opts.tags}`));
+      if (opts.sourceFile?.length) console.log(chalk.dim(`Files:   ${opts.sourceFile.join(', ')}`));
       if (opts.configOverride?.length) console.log(chalk.dim(`Overrides: ${opts.configOverride.join(', ')}`));
       console.log('');
 
@@ -266,7 +280,7 @@ program
       const outputFormat = program.opts().output;
       const onProgress = outputFormat === 'json' ? undefined : createProgressCallback(isTTY);
       const onAiProgress = outputFormat === 'json' ? undefined : createAiProgressCallback(isTTY);
-      const results = await push(config, configDir, { dryRun: opts.dryRun, tags: opts.tags, onProgress, onAiProgress, aiSummary });
+      const results = await push(config, configDir, { dryRun: opts.dryRun, createOnly: opts.createOnly, linkOnly: opts.linkOnly, updateOnly: opts.updateOnly, tags: opts.tags, sourceFiles: opts.sourceFile, onProgress, onAiProgress, aiSummary });
       if (isTTY && outputFormat !== 'json') clearProgressLine();
       printResults(results, config.toolSettings?.outputLevel, outputFormat);
     } catch (err: unknown) {
@@ -281,6 +295,7 @@ program
   .description('Pull updates from Azure DevOps into local spec files')
   .option('--dry-run', 'Show what would change without modifying local files')
   .option('--tags <expression>', 'Only sync scenarios matching this tag expression (e.g. "@smoke and not @wip")')
+  .option('--source-file <path>', 'Restrict the operation to a specific local file (repeatable)', collect, [])
   .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
   .action(async (opts) => {
     const globalOpts = program.opts();
@@ -294,12 +309,13 @@ program
       console.log(chalk.dim(`Config:  ${configPath}`));
       if (opts.dryRun) console.log(chalk.yellow('Dry run — no changes will be made'));
       if (opts.tags) console.log(chalk.dim(`Tags:    ${opts.tags}`));
+      if (opts.sourceFile?.length) console.log(chalk.dim(`Files:   ${opts.sourceFile.join(', ')}`));
       console.log('');
 
       const isTTY = process.stdout.isTTY ?? false;
       const outputFormat = program.opts().output;
       const onProgress = outputFormat === 'json' ? undefined : createProgressCallback(isTTY);
-      const results = await pull(config, configDir, { dryRun: opts.dryRun, tags: opts.tags, onProgress });
+      const results = await pull(config, configDir, { dryRun: opts.dryRun, tags: opts.tags, sourceFiles: opts.sourceFile, onProgress });
       if (isTTY && outputFormat !== 'json') clearProgressLine();
       printResults(results, config.toolSettings?.outputLevel, outputFormat);
     } catch (err: unknown) {
@@ -313,6 +329,7 @@ program
   .command('status')
   .description('Show diff between local specs and Azure DevOps without making changes')
   .option('--tags <expression>', 'Only check scenarios matching this tag expression')
+  .option('--source-file <path>', 'Restrict the operation to a specific local file (repeatable)', collect, [])
   .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
   .option('--ai-provider <provider>', 'AI provider: local (node-llama-cpp), heuristic, ollama, docker, openai, anthropic, huggingface, bedrock, azureai, none (disable)')
   .option('--ai-model <model>', 'local: GGUF path; ollama/docker: model tag; openai/anthropic/huggingface/bedrock/azureai: model name or id')
@@ -331,6 +348,7 @@ program
       console.log(chalk.bold('ado-sync status'));
       console.log(chalk.dim(`Config: ${configPath}`));
       if (opts.tags) console.log(chalk.dim(`Tags:   ${opts.tags}`));
+      if (opts.sourceFile?.length) console.log(chalk.dim(`Files:  ${opts.sourceFile.join(', ')}`));
       console.log('');
 
       const aiSummary = buildAiOpts(opts, config, configDir);
@@ -338,7 +356,7 @@ program
       const outputFormat = program.opts().output;
       const onProgress = outputFormat === 'json' ? undefined : createProgressCallback(isTTY);
       const onAiProgress = outputFormat === 'json' ? undefined : createAiProgressCallback(isTTY);
-      const results = await status(config, configDir, { tags: opts.tags, onProgress, onAiProgress, aiSummary });
+      const results = await status(config, configDir, { tags: opts.tags, sourceFiles: opts.sourceFile, onProgress, onAiProgress, aiSummary });
       if (isTTY && outputFormat !== 'json') clearProgressLine();
       printResults(results, config.toolSettings?.outputLevel, outputFormat);
     } catch (err: unknown) {
@@ -464,6 +482,7 @@ program
 const ACTION_SYMBOL: Record<string, string> = {
   created:  chalk.green('+'),
   updated:  chalk.blue('~'),
+  linked:   chalk.green('↔'),
   pulled:   chalk.cyan('↓'),
   skipped:  chalk.dim('='),
   conflict: chalk.yellow('!'),
@@ -534,8 +553,10 @@ function printResults(results: SyncResult[], outputLevel?: string, outputFormat?
     process.stdout.write(JSON.stringify(results, null, 2) + '\n');
     return;
   }
-  const counts = { created: 0, updated: 0, pulled: 0, skipped: 0, conflict: 0, removed: 0, error: 0 };
+  const counts = { created: 0, updated: 0, linked: 0, pulled: 0, skipped: 0, conflict: 0, removed: 0, error: 0 };
   const quiet = outputLevel === 'quiet';
+  const verbose = outputLevel === 'verbose';
+  const diagnostic = outputLevel === 'diagnostic';
 
   for (const r of results) {
     counts[r.action]++;
@@ -555,6 +576,9 @@ function printResults(results: SyncResult[], outputLevel?: string, outputFormat?
       case 'updated':
         console.log(`${chalk.blue('~')} ${filePart} ${r.title}${idStr}`);
         break;
+      case 'linked':
+        console.log(`${chalk.green('↔')} ${filePart} ${r.title}${idStr}${detailStr}`);
+        break;
       case 'pulled':
         console.log(`${chalk.cyan('↓')} ${filePart} ${r.title}${idStr}${detailStr}`);
         break;
@@ -571,12 +595,26 @@ function printResults(results: SyncResult[], outputLevel?: string, outputFormat?
         console.log(`${chalk.red('✗')} ${filePart} ${r.title}${idStr}${chalk.red(detailStr)}`);
         break;
     }
+
+    if (r.targetSuitePath && (r.action === 'created' || r.action === 'updated' || r.action === 'conflict' || verbose || diagnostic)) {
+      console.log(chalk.dim(`    target suite: ${r.targetSuitePath}`));
+    }
+    if (r.previousSuitePath && (r.action === 'updated' || r.action === 'conflict' || diagnostic)) {
+      console.log(chalk.dim(`    previous suite: ${r.previousSuitePath}`));
+    }
+    if (diagnostic && r.changedFields?.length) {
+      console.log(chalk.dim(`    changed fields: ${r.changedFields.join(', ')}`));
+    }
+    if (diagnostic && r.detail && r.action !== 'linked' && r.action !== 'pulled' && r.action !== 'error') {
+      console.log(chalk.dim(`    detail: ${r.detail}`));
+    }
   }
 
   console.log('');
   const summary = [
     counts.created   && chalk.green(`${counts.created} created`),
     counts.updated   && chalk.blue(`${counts.updated} updated`),
+    counts.linked    && chalk.green(`${counts.linked} linked`),
     counts.pulled    && chalk.cyan(`${counts.pulled} pulled`),
     counts.skipped   && chalk.dim(`${counts.skipped} skipped`),
     counts.conflict  && chalk.yellow(`${counts.conflict} conflicts`),
@@ -658,6 +696,7 @@ program
   .command('diff')
   .description('Show field-level diff between local specs and Azure DevOps')
   .option('--tags <expression>', 'Only check scenarios matching this tag expression')
+  .option('--source-file <path>', 'Restrict the operation to a specific local file (repeatable)', collect, [])
   .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
   .option('--format <fmt>', 'Output format: text (default) or json')
   .option('--fail-on-drift', 'Exit with code 1 when any differences are found (useful as a CI quality gate)')
@@ -676,21 +715,24 @@ program
       console.log(chalk.bold('ado-sync diff'));
       console.log(chalk.dim(`Config: ${configPath}`));
       if (opts.tags) console.log(chalk.dim(`Tags:   ${opts.tags}`));
+      if (opts.sourceFile?.length) console.log(chalk.dim(`Files:  ${opts.sourceFile.join(', ')}`));
       console.log('');
 
       const aiSummary = buildAiOpts(opts, config, configDir);
-      const results = await status(config, configDir, { tags: opts.tags, aiSummary });
+      const results = await status(config, configDir, { tags: opts.tags, sourceFiles: opts.sourceFile, aiSummary });
 
       // --format json or global --output json
       const outputFormat = opts.format ?? program.opts().output;
       if (outputFormat === 'json') {
         const diffs = results
-          .filter((r) => r.action === 'updated' || r.action === 'conflict')
+          .filter((r) => r.action === 'created' || r.action === 'updated' || r.action === 'conflict')
           .map((r) => ({
             action: r.action,
             azureId: r.azureId,
             title: r.title,
             filePath: r.filePath ? path.relative(process.cwd(), r.filePath) : '',
+            targetSuitePath: r.targetSuitePath,
+            previousSuitePath: r.previousSuitePath,
             changedFields: r.changedFields ?? [],
             diffDetail: r.diffDetail ?? [],
           }));
@@ -701,12 +743,18 @@ program
 
       let anyDiff = false;
       for (const r of results) {
-        if (r.action !== 'updated' && r.action !== 'conflict') continue;
+        if (r.action !== 'created' && r.action !== 'updated' && r.action !== 'conflict') continue;
         anyDiff = true;
         const idStr = r.azureId ? chalk.dim(` [#${r.azureId}]`) : '';
         const filePart = r.filePath ? chalk.dim(path.relative(process.cwd(), r.filePath) + ':') : '';
-        const symbol = r.action === 'conflict' ? chalk.yellow('!') : chalk.blue('~');
+        const symbol = r.action === 'conflict' ? chalk.yellow('!') : r.action === 'created' ? chalk.green('+') : chalk.blue('~');
         console.log(`${symbol} ${filePart} ${r.title}${idStr}`);
+        if (r.targetSuitePath) {
+          console.log(chalk.dim(`    target suite: ${r.targetSuitePath}`));
+        }
+        if (r.previousSuitePath) {
+          console.log(chalk.dim(`    previous suite: ${r.previousSuitePath}`));
+        }
         if (r.changedFields?.length) {
           console.log(chalk.dim(`    changed fields: ${r.changedFields.join(', ')}`));
         }
@@ -1242,7 +1290,11 @@ program
   .command('watch')
   .description('Watch local spec files for changes and auto-push on save')
   .option('--dry-run', 'Show what would change without making any modifications')
+  .option('--create-only', 'Only create test cases for unlinked local specs during each watched push')
+  .option('--link-only', 'Only restore local IDs during each watched push')
+  .option('--update-only', 'Only update linked test cases during each watched push')
   .option('--tags <expression>', 'Only sync scenarios matching this tag expression')
+  .option('--source-file <path>', 'Restrict watch and push to a specific local file (repeatable)', collect, [])
   .option('--debounce <ms>', 'Debounce delay in milliseconds before running push (default: 800)', '800')
   .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
   .option('--ai-provider <provider>', 'AI provider for test step generation')
@@ -1255,7 +1307,9 @@ program
       const configPath = resolveConfigPath(globalOpts.config);
       const config = loadConfig(configPath);
       if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
+      validatePushModeOptions(opts);
       const configDir = path.dirname(configPath);
+      const sourceFiles = normalizeSourceFilesForCli(opts.sourceFile, configDir);
       const debounceMs = parseInt(opts.debounce ?? '800', 10);
 
       console.log(chalk.bold('ado-sync watch'));
@@ -1263,7 +1317,11 @@ program
       console.log(chalk.dim(`Project: ${config.project}`));
       console.log(chalk.dim(`Plan:    ${config.testPlan.id}`));
       if (opts.dryRun) console.log(chalk.yellow('Dry run — no changes will be made'));
+      if (opts.createOnly) console.log(chalk.dim('Mode:    create-only'));
+      if (opts.linkOnly) console.log(chalk.dim('Mode:    link-only'));
+      if (opts.updateOnly) console.log(chalk.dim('Mode:    update-only'));
       if (opts.tags) console.log(chalk.dim(`Tags:    ${opts.tags}`));
+      if (sourceFiles?.length) console.log(chalk.dim(`Files:   ${sourceFiles.join(', ')}`));
       console.log('');
       console.log(chalk.dim(`Watching ${configDir} for changes... (Ctrl+C to stop)`));
       console.log('');
@@ -1283,7 +1341,11 @@ program
           const onProgress = createProgressCallback(isTTY);
           const results = await push(config, configDir, {
             dryRun: opts.dryRun,
+            createOnly: opts.createOnly,
+            linkOnly: opts.linkOnly,
+            updateOnly: opts.updateOnly,
             tags: opts.tags,
+            sourceFiles,
             onProgress,
             aiSummary,
           });
@@ -1307,6 +1369,11 @@ program
         // Only react to spec file changes, not the cache or config file itself
         const skipPatterns = ['.ado-sync-cache.json', 'ado-sync.json', 'ado-sync.yml', 'node_modules'];
         if (skipPatterns.some((p) => filename.includes(p))) return;
+
+        if (sourceFiles?.length) {
+          const changedFilePath = path.normalize(path.resolve(configDir, filename));
+          if (!sourceFiles.includes(changedFilePath)) return;
+        }
         onChange();
       });
 

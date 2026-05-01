@@ -4,6 +4,53 @@ import * as path from 'path';
 
 import { SyncConfig } from './types';
 
+function validateHierarchyConfig(
+  hierarchy: SyncConfig['testPlan']['hierarchy'] | undefined,
+  pathLabel: string,
+  err: (message: string) => never
+): void {
+  if (!hierarchy) return;
+  if (hierarchy.mode !== 'byFolder' && hierarchy.mode !== 'byFile' && hierarchy.mode !== 'byTag' && hierarchy.mode !== 'byLevels') {
+    err(`${pathLabel}.mode must be one of: byFolder, byFile, byTag, byLevels (got "${(hierarchy as { mode?: string }).mode}")`);
+  }
+  if (hierarchy.rootSuite !== undefined && !hierarchy.rootSuite.trim()) {
+    err(`${pathLabel}.rootSuite must be a non-empty string when provided`);
+  }
+  if (hierarchy.mode === 'byTag' && !hierarchy.tagPrefix?.trim()) {
+    err(`${pathLabel}.tagPrefix is required when mode is "byTag"`);
+  }
+  if (hierarchy.tagPrefix !== undefined && !hierarchy.tagPrefix.trim()) {
+    err(`${pathLabel}.tagPrefix must be a non-empty string when provided`);
+  }
+  if (hierarchy.valueSeparator !== undefined && hierarchy.valueSeparator.length === 0) {
+    err(`${pathLabel}.valueSeparator must be a non-empty string when provided`);
+  }
+  if (hierarchy.mode === 'byLevels') {
+    if (!hierarchy.levels?.length) {
+      err(`${pathLabel}.levels must contain at least one rule when mode is "byLevels"`);
+    }
+    hierarchy.levels?.forEach((level, index) => {
+      if (level.source === 'folder') {
+        if (!Number.isInteger(level.index) || level.index < 0) {
+          err(`${pathLabel}.levels[${index}].index must be a non-negative integer for folder rules`);
+        }
+      } else if (level.source === 'tag') {
+        if (!level.tagPrefix?.trim()) {
+          err(`${pathLabel}.levels[${index}].tagPrefix is required for tag rules`);
+        }
+        if (level.valueSeparator !== undefined && level.valueSeparator.length === 0) {
+          err(`${pathLabel}.levels[${index}].valueSeparator must be a non-empty string when provided`);
+        }
+      } else if (level.source !== 'file') {
+        err(`${pathLabel}.levels[${index}].source must be one of: folder, file, tag`);
+      }
+    });
+  }
+  if (hierarchy.cleanupEmptySuites !== undefined && typeof hierarchy.cleanupEmptySuites !== 'boolean') {
+    err(`${pathLabel}.cleanupEmptySuites must be a boolean when provided`);
+  }
+}
+
 const CONFIG_FILENAMES = ['ado-sync.json', 'ado-sync.yml', 'ado-sync.yaml'];
 
 export function resolveConfigPath(explicitPath?: string): string {
@@ -176,6 +223,7 @@ function validateConfig(cfg: SyncConfig, filePath: string): void {
   if (cfg.testPlans) {
     cfg.testPlans.forEach((p, i) => {
       if (!p.id) err(`testPlans[${i}] must have an "id" field`);
+      validateHierarchyConfig(p.hierarchy, `testPlans[${i}].hierarchy`, err);
       if (p.suiteRouting) {
         p.suiteRouting.forEach((r, j) => {
           if (r.suite === undefined) err(`testPlans[${i}].suiteRouting[${j}] must have a "suite" field`);
@@ -189,11 +237,27 @@ function validateConfig(cfg: SyncConfig, filePath: string): void {
     });
   }
 
+  validateHierarchyConfig(cfg.testPlan?.hierarchy, 'testPlan.hierarchy', err);
+
   // suiteRouting entries must have a suite field
   if (cfg.testPlan?.suiteRouting) {
     cfg.testPlan.suiteRouting.forEach((r, i) => {
       if (r.suite === undefined) err(`testPlan.suiteRouting[${i}] must have a "suite" field`);
     });
+  }
+
+  if (cfg.syncTarget) {
+    if (cfg.syncTarget.mode === 'tagged') {
+      if (!cfg.syncTarget.tag?.trim() && !cfg.configurationKey?.trim()) {
+        err('syncTarget.mode "tagged" requires either "syncTarget.tag" or "configurationKey"');
+      }
+    } else if (cfg.syncTarget.mode === 'query') {
+      if (!cfg.syncTarget.wiql?.trim()) {
+        err('syncTarget.mode "query" requires a non-empty "syncTarget.wiql"');
+      }
+    } else if (cfg.syncTarget.mode !== 'suite') {
+      err(`syncTarget.mode must be one of: suite, tagged, query (got "${(cfg.syncTarget as { mode?: string }).mode}")`);
+    }
   }
 
   // sync.suiteConditions entries must have a suite field
@@ -234,7 +298,7 @@ function validateConfig(cfg: SyncConfig, filePath: string): void {
   }
 
   // outputLevel valid values
-  const validOutputLevels = ['normal', 'verbose', 'quiet'];
+  const validOutputLevels = ['normal', 'verbose', 'quiet', 'diagnostic'];
   if (cfg.toolSettings?.outputLevel && !validOutputLevels.includes(cfg.toolSettings.outputLevel)) {
     err(`toolSettings.outputLevel must be one of: ${validOutputLevels.join(', ')} (got "${cfg.toolSettings.outputLevel}")`);
   }
@@ -295,6 +359,14 @@ const CONFIG_TEMPLATE_OBJECT = {
   orgUrl: 'https://dev.azure.com/YOUR_ORG',
   project: 'YOUR_PROJECT',
   configurationKey: '',
+  // syncTarget examples:
+  //   { mode: 'suite' }
+  //   { mode: 'tagged' }
+  //   { mode: 'tagged', tag: 'ado-sync-owner:smoke_suite' }
+  //   { mode: 'query', wiql: "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND [System.WorkItemType] = 'Test Case'" }
+  syncTarget: {
+    mode: 'suite',
+  },
   auth: {
     type: 'pat',
     token: '$AZURE_DEVOPS_TOKEN',
@@ -302,6 +374,9 @@ const CONFIG_TEMPLATE_OBJECT = {
   testPlan: {
     id: 0,
     suiteId: 0,
+    // hierarchy: { mode: 'byFolder', rootSuite: 'Generated Specs', cleanupEmptySuites: true },
+    // hierarchy: { mode: 'byTag', tagPrefix: 'suite', rootSuite: 'Generated Specs' },
+    // hierarchy: { mode: 'byLevels', rootSuite: 'Generated Specs', levels: [{ source: 'folder', index: 0 }, { source: 'tag', tagPrefix: 'suite' }] },
     // suiteMapping options:
     //   'flat'     — all tests go to suiteId (default)
     //   'byFolder' — mirror folder hierarchy as nested suites

@@ -267,7 +267,28 @@ Generated files use the format matching `local.type` (`.feature` for Gherkin, `.
 
 ## Suite hierarchy
 
-By default, all Test Cases go into a single flat suite (`suiteMapping: "flat"`). Two additional modes mirror local structure as child suites in Azure.
+By default, all Test Cases go into a single flat suite (`suiteMapping: "flat"`). For generated suite trees, prefer `testPlan.hierarchy`; the older `suiteMapping` setting remains available as a compatibility shortcut.
+
+### Declarative hierarchy generation
+
+Use `testPlan.hierarchy` when you want suite generation to read like a real configuration object instead of a single enum toggle.
+
+```json
+{
+  "testPlan": {
+    "id": 1234,
+    "suiteId": 5678,
+    "hierarchy": {
+      "mode": "byFolder",
+      "rootSuite": "Generated Specs"
+    }
+  }
+}
+```
+
+`mode: "byFolder"` mirrors the relative folder path. `mode: "byFile"` mirrors folders and then adds one more suite named after the spec file. `mode: "byTag"` reads the first matching tag with the configured `tagPrefix` and treats the tag value as the generated suite path. `mode: "byLevels"` builds the path from explicit folder, file, and tag rules. When `rootSuite` is set, ado-sync creates that suite under `suiteId` or the plan root and anchors the generated tree beneath it.
+
+Set `cleanupEmptySuites: true` when you want ado-sync to prune empty generated suites left behind by hierarchy-managed moves. This cleanup is opt-in because deleting suites is a stronger action than creating or reusing them.
 
 ### `byFolder` — mirror folder structure
 
@@ -311,7 +332,58 @@ specs/
 
 With `byFile`, each spec file gets its own dedicated child suite named after the file (without extension). The folder hierarchy is still reflected as parent suites. All Test Cases from the same file land in the same leaf suite.
 
+### `byTag` — derive the generated path from tags
+
+```json
+{
+  "testPlan": {
+    "id": 1234,
+    "suiteId": 5678,
+    "hierarchy": {
+      "mode": "byTag",
+      "tagPrefix": "suite",
+      "rootSuite": "Generated Specs"
+    }
+  }
+}
+```
+
+```
+### Login case
+@suite:mobile/auth
+
+→ suite "Generated Specs / mobile / auth"
+```
+
+`byTag` uses the first tag that matches `tagPrefix:`. The tag value is split on `/` by default, so `@suite:mobile/auth` creates the path `mobile / auth`. Set `valueSeparator` when your tag values use a different delimiter.
+
+### `byLevels` — build the path from explicit rules
+
+```json
+{
+  "testPlan": {
+    "id": 1234,
+    "suiteId": 5678,
+    "hierarchy": {
+      "mode": "byLevels",
+      "rootSuite": "Generated Specs",
+      "levels": [
+        { "source": "folder", "index": 1 },
+        { "source": "tag", "tagPrefix": "suite" },
+        { "source": "file" }
+      ]
+    }
+  }
+}
+```
+
+For a file at `specs/auth/login.md` with `<!-- tags: @suite:mobile -->`, the config above produces `Generated Specs / auth / mobile / login`.
+
+Use `folder` rules to pick a specific relative directory segment by zero-based index, `tag` rules to append segments from a tag value, and `file` to append the spec file name without its extension.
+
 Child suites are created automatically if they do not exist. The suite hierarchy is re-used across runs.
+
+When a linked spec file or its hierarchy-driving tag changes to a different generated path, the next `push` adds the Test Case to the new generated suite and removes it from the previous generated suite membership. If `cleanupEmptySuites` is enabled, ado-sync also deletes empty generated suites left behind on the old branch.
 
 ---
 

@@ -11,6 +11,9 @@ Config files can be JSON (`.json`) or YAML (`.yml` / `.yaml`). Run `ado-sync ini
   "orgUrl": "https://dev.azure.com/YOUR_ORG",
   "project": "YOUR_PROJECT",
   "configurationKey": "my-repo-smoke",
+  "syncTarget": {
+    "mode": "tagged"
+  },
 
   "auth": {
     "type": "pat",
@@ -20,7 +23,11 @@ Config files can be JSON (`.json`) or YAML (`.yml` / `.yaml`). Run `ado-sync ini
   "testPlan": {
     "id": 1234,
     "suiteId": 5678,
-    "suiteMapping": "flat",
+    "hierarchy": {
+      "mode": "byFolder",
+      "rootSuite": "Generated Specs",
+      "cleanupEmptySuites": true
+    },
     "suiteRouting": [
       { "tags": "@smoke", "suite": "Smoke" },
       { "tags": "@regression", "suite": "Regression" },
@@ -131,6 +138,77 @@ Azure DevOps project name.
 
 *(Optional)* A unique string identifying this config within the ADO project. Used to prevent conflicts when multiple ado-sync configs push into the same Test Plan (e.g. `"smoke-suite"`, `"regression-suite"`). When set, ID writeback tags are namespaced so that one config's tags don't collide with another's.
 
+When `syncTarget.mode` is `tagged`, `configurationKey` also provides the default ownership tag. For example, `"Smoke Suite"` becomes the Azure tag `ado-sync-owner:smoke_suite` unless you override it with `syncTarget.tag`.
+
+---
+
+### `syncTarget`
+
+*(Optional)* Defines which remote Azure DevOps test cases this config owns. If omitted, ado-sync keeps the existing suite-scoped behavior.
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `mode` | `"suite"` | Ownership mode: `"suite"` · `"tagged"` · `"query"` |
+| `suiteId` | `testPlan.suiteId` or plan root | Optional explicit suite scope for `"suite"` and `"tagged"` modes. |
+| `tag` | derived from `configurationKey` | Optional explicit Azure tag for `"tagged"` mode. |
+| `wiql` | *(required for `"query"`)* | WIQL query used to select owned remote test cases. |
+
+#### `syncTarget.mode: "suite"`
+
+Uses the configured suite or plan root as the remote ownership boundary. This matches ado-sync's historical behavior.
+
+```json
+{
+  "syncTarget": {
+    "mode": "suite",
+    "suiteId": 5678
+  }
+}
+```
+
+#### `syncTarget.mode: "tagged"`
+
+Scopes remote enumeration to test cases carrying an ownership tag. On create and update, ado-sync ensures that ownership tag is present on the Azure test case.
+
+```json
+{
+  "configurationKey": "my-repo-smoke",
+  "syncTarget": {
+    "mode": "tagged"
+  }
+}
+```
+
+With the config above, ado-sync derives the Azure tag `ado-sync-owner:my_repo_smoke` automatically.
+
+To use an explicit Azure tag instead of the derived one:
+
+```json
+{
+  "syncTarget": {
+    "mode": "tagged",
+    "tag": "ado-sync-owner:shared-smoke"
+  }
+}
+```
+
+`tagged` mode requires either `configurationKey` or `syncTarget.tag`.
+
+#### `syncTarget.mode: "query"`
+
+Scopes remote enumeration to the work items returned by a WIQL query. Only Azure DevOps `Test Case` work items returned by the query are considered.
+
+```json
+{
+  "syncTarget": {
+    "mode": "query",
+    "wiql": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND [System.WorkItemType] = 'Test Case' AND [System.AreaPath] UNDER 'MyProject\\Smoke'"
+  }
+}
+```
+
+When used with `testPlans`, the same query ownership scope is applied independently to each effective per-plan sync run.
+
 ---
 
 ### `auth`
@@ -151,8 +229,11 @@ Azure DevOps project name.
 |-------|---------|-------------|
 | `id` | *(required)* | ID of the Azure DevOps Test Plan. |
 | `suiteId` | plan root | ID of the Test Suite within the plan. Defaults to the plan's root suite. |
+| `hierarchy` | *(none)* | Declarative hierarchy generation for this plan. `{"mode":"byFolder"}` mirrors folders. `{"mode":"byFile"}` mirrors folders and adds a suite per spec file. `{"mode":"byTag","tagPrefix":"suite"}` uses the first matching tag value like `@suite:mobile/auth` as the generated suite path. `{"mode":"byLevels","levels":[{"source":"folder","index":0},{"source":"tag","tagPrefix":"suite"}]}` builds the path from explicit folder/file/tag rules. Optional `rootSuite` anchors the generated tree under a named child suite. Optional `cleanupEmptySuites: true` prunes empty generated suites left behind by hierarchy-managed moves. |
 | `suiteMapping` | `"flat"` | `"flat"` — all TCs go into one suite. `"byFolder"` — folder hierarchy mirrored as nested child suites. `"byFile"` — each spec file gets its own child suite named after the file. |
 | `suiteRouting` | *(none)* | Tag-condition-based primary suite routing. Routes are evaluated in order; first match wins. See [Multi-suite routing](advanced.md#multi-suite-routing). |
+
+`testPlan.hierarchy` is the preferred form for generated suite trees. `suiteMapping` remains supported as a compatibility shortcut for the legacy flat, folder, and file modes.
 
 ---
 
@@ -167,6 +248,7 @@ Use `testPlans` instead of `testPlan` to sync one repo against multiple Test Pla
       "id": 1001,
       "suiteId": 2001,
       "include": "specs/smoke/**/*.feature",
+      "hierarchy": { "mode": "byFolder", "rootSuite": "Smoke Specs", "cleanupEmptySuites": true },
       "suiteRouting": [
         { "tags": "@critical", "suite": "Critical" },
         { "suite": "Smoke" }
@@ -181,6 +263,7 @@ Use `testPlans` instead of `testPlan` to sync one repo against multiple Test Pla
 |-------|-------------|
 | `id` | Test Plan ID |
 | `suiteId` | *(Optional)* Target suite ID |
+| `hierarchy` | *(Optional)* Declarative hierarchy generation for this plan entry. Overrides base `testPlan.hierarchy`. Supports `byFolder`, `byFile`, `byTag`, and `byLevels`, plus `cleanupEmptySuites` for opt-in pruning of empty generated suites. |
 | `suiteMapping` | *(Optional)* `"flat"`, `"byFolder"`, or `"byFile"` |
 | `include` | *(Optional)* Override `local.include` for this plan |
 | `exclude` | *(Optional)* Override `local.exclude` for this plan |
@@ -206,7 +289,7 @@ Use `testPlans` instead of `testPlan` to sync one repo against multiple Test Pla
 |-------|---------|-------------|
 | `parentConfig` | *(none)* | Relative path to a parent config file. Child values override parent values (deep merge). Circular references are detected and rejected. |
 | `ignoreParentConfig` | `false` | When `true`, the `parentConfig` reference is ignored. Useful to opt a child config out of inheritance temporarily. |
-| `outputLevel` | `"normal"` | `"normal"` — show all results per-line. `"quiet"` — suppress `skipped` lines, show only actionable results. `"verbose"` — reserved for future detailed output. |
+| `outputLevel` | `"normal"` | `"normal"` — show all results per-line. `"quiet"` — suppress `skipped` lines, show only actionable results. `"verbose"` — show extra suite-preview lines. `"diagnostic"` — show detail strings, changed fields, and suite previews consistently across push, pull, and status. |
 
 ---
 
@@ -254,6 +337,10 @@ Configuration for the `publish-test-results` command. See [Publishing test resul
 ```yaml
 orgUrl: https://dev.azure.com/my-org
 project: MyProject
+configurationKey: my-repo-smoke
+
+syncTarget:
+  mode: tagged
 
 auth:
   type: pat

@@ -16,43 +16,7 @@ ado-sync already delivers a solid base:
 - test result publishing with multiple input formats
 - higher-level workflows such as stale detection, coverage, trend analysis, AI-assisted generation, and editor integration
 
-The roadmap below focuses on gaps that limit scale, predictability, or user trust.
-
----
-
-## Phase 1: Introduce scoped synchronization
-
-### Problem to solve
-
-Today the model is centered on a plan, optional suite mapping, and local filters. That works for smaller installations, but it does not give teams a strong way to define which remote inventory a configuration owns.
-
-### Product direction
-
-Add a first-class sync target model that tells ado-sync exactly which remote set belongs to a configuration. This should be original to ado-sync, not a copy of anyone else's schema.
-
-### Proposed design direction
-
-Introduce a new top-level concept such as `syncTarget` or `ownership` with selectable modes:
-
-- `tagged` for test cases carrying a generated ownership tag
-- `suite` for test cases managed through a designated suite root
-- `query` for test cases matched by an Azure DevOps query or rule set
-
-This model should work alongside `configurationKey`, not replace it.
-
-### Main files
-
-- `src/types.ts`
-- `src/config.ts`
-- `src/sync/engine.ts`
-- `src/cli.ts`
-- `docs-site/docs/configuration.md`
-
-### Exit criteria
-
-- push, pull, stale detection, and status all use the same ownership boundary
-- removing a local scenario does not risk touching unrelated remote items
-- multiple configurations can target the same project without collisions
+The roadmap below focuses only on the remaining gaps that limit scale, predictability, or user trust.
 
 ---
 
@@ -60,19 +24,15 @@ This model should work alongside `configurationKey`, not replace it.
 
 ### Problem to solve
 
-Current suite support is useful but narrow. It covers basic mapping and conditional routing, but not richer hierarchy construction, cleanup rules, or multiple parallel views of the same inventory.
+Current suite support is no longer limited to the old enum-based mapping, but the hierarchy model still needs to grow beyond the current generated folder, file, tag-driven, and explicit level-rule trees.
 
 ### Product direction
 
-Create named hierarchy definitions that can materialize test suites from local structure, tags, or explicit routing rules.
+Create named hierarchy definitions that can materialize test suites from local structure or explicit routing rules.
 
 ### Proposed capabilities
 
-- folder-based hierarchy generation
-- file-based hierarchy generation
-- tag-driven hierarchy generation
-- explicit level rules for multi-level suite trees
-- cleanup policies for stale nodes and stale memberships
+- broader cleanup policies for stale nodes and stale memberships beyond move-driven pruning
 - optional multiple hierarchy outputs from the same local corpus
 
 ### Main files
@@ -85,9 +45,14 @@ Create named hierarchy definitions that can materialize test suites from local s
 
 ### Exit criteria
 
-- hierarchy definitions are declarative and testable
-- hierarchy sync can add, move, and prune memberships safely
+- hierarchy definitions support richer models than the current generated folder, file, tag-driven, and explicit level-rule trees
+- hierarchy sync can add, move, and prune memberships safely across richer models
 - teams can maintain more than one suite view without duplicating specs
+
+Remaining follow-up:
+
+- expand cleanup beyond move-driven pruning into broader stale-node and stale-membership policies
+- support multiple parallel hierarchy outputs from the same local corpus
 
 ---
 
@@ -95,14 +60,14 @@ Create named hierarchy definitions that can materialize test suites from local s
 
 ### Problem to solve
 
-The current command line is clean, but it is missing a few control points that matter in large repositories and CI pipelines.
+The current command line is stronger than it was before, but larger repositories and CI pipelines still need a few additional control points and consistency improvements.
 
 ### Priority work
 
-1. Add source-file filters for push and pull.
-2. Add operation modes such as create-only, link-only, and update-only where applicable.
-3. Add consistent diagnostic controls across commands.
-4. Allow temporary auth and routing overrides in a controlled way.
+1. Extend the diagnostic model beyond push, pull, and status into result publication and other admin workflows.
+2. Allow temporary auth and routing overrides in a controlled way.
+3. Decide whether any of the new constrained modes should extend beyond push/watch.
+4. Keep command docs aligned with the shipped control surface as new flags land.
 
 ### Main files
 
@@ -220,14 +185,12 @@ Introduce a narrow extension model for parser registration, result ingestion, cu
 
 ## Recommended implementation order
 
-1. Phase 1: scoped synchronization model
-2. Phase 3: command-surface improvements needed to operate the new scope model
-3. Phase 2: hierarchy engine
-4. Phase 5: deeper automation and result-routing behavior
-5. Phase 4: configuration ergonomics and shared profiles
-6. Phase 6: extension model
+1. Phase 2: remaining hierarchy extensions
+2. Phase 5: deeper automation and result-routing behavior
+3. Phase 4: configuration ergonomics and shared profiles
+4. Phase 6: extension model
 
-This order hardens ownership boundaries first, then adds the operational controls and routing depth needed for larger installations.
+This order builds on the already-delivered ownership and command-surface foundations, then adds the routing depth, publishing depth, and configuration ergonomics needed for larger installations.
 
 ---
 
@@ -235,10 +198,9 @@ This order hardens ownership boundaries first, then adds the operational control
 
 If the goal is to start implementation immediately, the highest-value first batch is:
 
-1. design `syncTarget` ownership schema in `src/types.ts`
-2. wire ownership filtering into `status`, `push`, `pull`, and `stale`
-3. add `--source-file`, `--create-only`, and `--link-only` style command controls
-4. design declarative hierarchy definitions that can coexist with `syncTarget`
-5. tighten result-routing rules for suite-aware publication at scale
+1. add migration guidance for teams adopting `syncTarget.tagged` from older suite-scoped configs
+2. extend the diagnostic model into result publication and other non-sync commands
+3. extend hierarchy definitions beyond current generated trees into parallel-output models
+4. keep package-boundary validation in CI as the artifact surface evolves
 
-That batch reduces operational risk, hardens ownership boundaries, and lays the foundation for the larger roadmap.
+That batch reduces operational risk, hardens ownership boundaries, and keeps the release artifact aligned with the product surface.

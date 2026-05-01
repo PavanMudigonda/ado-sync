@@ -43,11 +43,32 @@ export interface SuiteRoute {
   suite: string | number;
 }
 
+export interface SuiteHierarchyConfig {
+  /** Mirrors the local directory path as nested suites, ending at folders, files, or a tagged suite path. */
+  mode: 'byFolder' | 'byFile' | 'byTag' | 'byLevels';
+  /** Optional named root suite created under suiteId or the plan root before the generated path. */
+  rootSuite?: string;
+  /** Required for byTag. Matches tags like @suite:mobile/auth when tagPrefix is "suite". */
+  tagPrefix?: string;
+  /** Optional separator for byTag values. Default: '/'. */
+  valueSeparator?: string;
+  /** Required for byLevels. Explicit level rules used to build the generated suite path. */
+  levels?: Array<
+    | { source: 'folder'; index: number }
+    | { source: 'file' }
+    | { source: 'tag'; tagPrefix: string; valueSeparator?: string }
+  >;
+  /** When true, delete empty generated suites along the old hierarchy path after a move. */
+  cleanupEmptySuites?: boolean;
+}
+
 export interface TestPlanEntry {
   id: number;
   suiteId?: number;
   /** 'flat' (default), 'byFolder' to mirror folder hierarchy, or 'byFile' to give each spec file its own suite */
   suiteMapping?: 'flat' | 'byFolder' | 'byFile';
+  /** Declarative hierarchy definition. When set, this takes precedence over suiteMapping. */
+  hierarchy?: SuiteHierarchyConfig;
   /** Override local.include for this plan */
   include?: string | string[];
   /** Override local.exclude for this plan */
@@ -285,11 +306,32 @@ export interface PublishTestResultsConfig {
 export interface ToolSettings {
   licensePath?: string;
   disableStats?: boolean;
-  outputLevel?: 'normal' | 'verbose' | 'quiet';
+  outputLevel?: 'normal' | 'verbose' | 'quiet' | 'diagnostic';
   /** Path to a parent config file for hierarchical configuration. */
   parentConfig?: string;
   ignoreParentConfig?: boolean;
 }
+
+export type SyncTarget =
+  | {
+      /** Current behaviour: scope remote enumeration to a suite/root suite. */
+      mode: 'suite';
+      /** Optional explicit suite scope. Defaults to testPlan.suiteId or plan root. */
+      suiteId?: number;
+    }
+  | {
+      /** Scope remote enumeration to test cases tagged as owned by this config. */
+      mode: 'tagged';
+      /** Optional explicit Azure tag. Defaults to a deterministic tag derived from configurationKey. */
+      tag?: string;
+      /** Optional suite scope used for enumeration and new test-case placement. */
+      suiteId?: number;
+    }
+  | {
+      /** Scope remote enumeration to the work items returned by a WIQL query. */
+      mode: 'query';
+      wiql: string;
+    };
 
 // ─── Main config ─────────────────────────────────────────────────────────────
 
@@ -300,6 +342,8 @@ export interface SyncConfig {
   project: string;
   /** A unique identifier for this config within the ADO project. Prevents multi-config conflicts. */
   configurationKey?: string;
+  /** Defines which remote test cases are considered owned by this config. */
+  syncTarget?: SyncTarget;
   /** Authentication */
   auth: {
     type: AuthType;
@@ -313,6 +357,8 @@ export interface SyncConfig {
     id: number;
     /** Root suite to create new test cases under. Defaults to plan root suite. */
     suiteId?: number;
+    /** Declarative hierarchy definition. When set, this takes precedence over suiteMapping. */
+    hierarchy?: SuiteHierarchyConfig;
     /**
      * 'flat' (default): all tests go to suiteId (or plan root).
      * 'byFolder': mirrors the folder hierarchy as nested suites.
@@ -571,7 +617,7 @@ export interface AzureStep {
 
 // ─── Sync result ─────────────────────────────────────────────────────────────
 
-export type SyncAction = 'created' | 'updated' | 'skipped' | 'conflict' | 'pulled' | 'removed' | 'error';
+export type SyncAction = 'created' | 'updated' | 'linked' | 'skipped' | 'conflict' | 'pulled' | 'removed' | 'error';
 
 export interface DiffDetail {
   field: string;
@@ -585,6 +631,10 @@ export interface SyncResult {
   title: string;
   azureId?: number;
   detail?: string;
+  /** Resolved generated suite path for hierarchy-managed configs. */
+  targetSuitePath?: string;
+  /** Previous generated suite path when a hierarchy-managed test moved. */
+  previousSuitePath?: string;
   /** Fields that changed (used by `diff` command and conflict reporting). */
   changedFields?: string[];
   /** Per-field diff details for richer `diff` output. */
