@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import { AzureClient } from '../azure/client';
 import { updateTestCase } from '../azure/test-cases';
+import { detectAiEnvironment } from '../ai/summarizer';
 import { getPreferredMarkerTagPrefix } from '../id-markers';
 import { parseGherkinFile } from '../parsers/gherkin';
 import { parseJavaScriptFile } from '../parsers/javascript';
@@ -36,6 +37,62 @@ function makeParsedTest(overrides: Partial<ParsedTest> = {}): ParsedTest {
     line: 1,
     ...overrides,
   };
+}
+
+function withTemporaryEnv(vars: Record<string, string | undefined>, fn: () => void): void {
+  const previous: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(vars)) {
+    previous[key] = process.env[key];
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+
+  try {
+    fn();
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+function withCleanAiDetectionEnv(vars: Record<string, string | undefined>, fn: () => void): void {
+  withTemporaryEnv({
+    ANTHROPIC_API_KEY: undefined,
+    OPENAI_API_KEY: undefined,
+    GITHUB_TOKEN: undefined,
+    CLAUDE_CODE: undefined,
+    CLAUDE_CONTEXT: undefined,
+    CODEX: undefined,
+    OPENAI_CODEX: undefined,
+    CODEX_CLI: undefined,
+    VISUAL_STUDIO_AGENT_MODE: undefined,
+    VISUAL_STUDIO_COPILOT_AGENT_MODE: undefined,
+    VS_COPILOT_AGENT_MODE: undefined,
+    COPILOT_AGENT_MODE: undefined,
+    CURSOR_SESSION_ID: undefined,
+    CURSOR_TRACE_ID: undefined,
+    WINDSURF_SESSION_ID: undefined,
+    CLINE_TASK_ID: undefined,
+    CLINE_SESSION_ID: undefined,
+    ANTIGRAVITY_SESSION_ID: undefined,
+    AIDER: undefined,
+    AIDER_SESSION: undefined,
+    CONTINUE_SESSION_ID: undefined,
+    AUGMENT_SESSION_ID: undefined,
+    ROO_CODE_SESSION_ID: undefined,
+    TRAE_SESSION_ID: undefined,
+    AMAZON_Q_SESSION_ID: undefined,
+    AWS_Q_SESSION_ID: undefined,
+    AMP_SESSION_ID: undefined,
+    TERM_PROGRAM: undefined,
+    TERMINAL_EMULATOR: undefined,
+    IDEA_INITIAL_DIRECTORY: undefined,
+    __INTELLIJ_COMMAND_HISTFILE__: undefined,
+    PATH: '/usr/bin:/bin',
+    ...vars,
+  }, fn);
 }
 
 test('buildPushDiff flags expected-result-only step changes', () => {
@@ -413,4 +470,22 @@ test('configurationKey marker prefixes parse namespaced and legacy JavaScript ID
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
+});
+
+test('detectAiEnvironment returns heuristic when Visual Studio Agent mode env is set', () => {
+  withCleanAiDetectionEnv({
+    VISUAL_STUDIO_AGENT_MODE: '1',
+  }, () => {
+    const detected = detectAiEnvironment();
+    assert.equal(detected?.provider, 'heuristic');
+  });
+});
+
+test('detectAiEnvironment returns heuristic when Codex env signal is set', () => {
+  withCleanAiDetectionEnv({
+    CODEX_CLI: '1',
+  }, () => {
+    const detected = detectAiEnvironment();
+    assert.equal(detected?.provider, 'heuristic');
+  });
 });

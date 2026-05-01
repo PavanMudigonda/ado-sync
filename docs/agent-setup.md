@@ -157,7 +157,7 @@ Add `AZURE_DEVOPS_TOKEN` to the repository's GitHub secrets (Settings → Secret
 
 ## Step 8 — (Optional) Register the MCP server
 
-If the user is using Claude Code, Cursor, or VS Code with GitHub Copilot, register the MCP server so the AI can manage sync operations directly without CLI invocations.
+If the user is using Claude Code, Cursor, VS Code with GitHub Copilot, Visual Studio Agent Application, or Codex, register the MCP server so the AI can manage sync operations directly without CLI invocations.
 
 **Claude Code** — add to `~/.claude/claude_desktop_config.json`:
 ```json
@@ -174,7 +174,7 @@ If the user is using Claude Code, Cursor, or VS Code with GitHub Copilot, regist
 }
 ```
 
-See [mcp-server.md](mcp-server.md) for VS Code and Cursor instructions.
+See [mcp-server.md](mcp-server.md) for Visual Studio Agent Application, Codex, VS Code, and Cursor instructions.
 
 ---
 
