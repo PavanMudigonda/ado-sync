@@ -501,6 +501,56 @@ To completely remove the Test Case from Azure, delete it manually in Test Plans 
 
 ---
 
+## Glob-based scope filtering
+
+Use `--include` to restrict operations to files matching a glob pattern relative to the config directory. Unlike `--source-file` (exact paths), `--include` uses glob syntax:
+
+```bash
+ado-sync push --include 'src/payments/**'
+ado-sync status --include '**/*.feature' --include '**/*.spec.ts'
+ado-sync watch --include 'tests/unit/**'
+```
+
+Multiple `--include` flags combine with OR logic. When combined with `--source-file`, both filters apply (AND).
+
+---
+
+## Environment variable overrides
+
+ado-sync supports a systematic `ADO_SYNC_*` environment variable convention. Env vars override config file values but are themselves overridden by CLI flags.
+
+Well-known aliases:
+
+| Variable | Config path |
+|----------|-------------|
+| `ADO_SYNC_PAT` | `auth.token` |
+| `ADO_SYNC_ORG` | `orgUrl` |
+| `ADO_SYNC_PROJECT` | `project` |
+| `ADO_SYNC_TEST_PLAN_ID` | `testPlan.id` |
+
+Generic pattern: any `ADO_SYNC_` prefixed var maps to a nested config path via `__` (dot separator) and lowercasing. Values `"true"`/`"false"` are parsed as booleans; numeric strings become numbers.
+
+```bash
+ADO_SYNC_PAT="$TOKEN" ADO_SYNC_ORG="https://dev.azure.com/acme" ado-sync push
+```
+
+---
+
+## Config resolution order
+
+Values are resolved in this precedence order (highest wins):
+
+1. CLI flags (`--pat-override`, `--org-override`, `--config-override`)
+2. `ADO_SYNC_*` environment variables
+3. Personal overlay (`.ado-sync.local.json`)
+4. Child config (the file you point to with `-c`)
+5. Parent config (`toolSettings.parentConfig`)
+6. Remote profile (`"extends": "profile-name"`)
+
+Use `ado-sync config show` to see the final resolved config.
+
+---
+
 ## AI auto-summary for code tests
 
 When pushing code-based test types (`java`, `csharp`, `python`, `javascript`, `playwright`), ado-sync reads each test function body and automatically generates a TC **title**, **description**, and numbered **steps**.

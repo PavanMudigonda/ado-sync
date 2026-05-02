@@ -836,8 +836,47 @@ Results can also be configured in the config file under `publishTestResults`:
 | `testRunSettings.runType` | `"Automated"` *(default)* · `"Manual"`. |
 | `testResultSettings.comment` | Comment applied to every test result. |
 | `publishAttachmentsForPassingTests` | `"none"` *(default)* · `"files"` · `"all"`. |
+| `destinations` | Array of `{ suite, testPlan?, suiteId? }` for multi-destination publishing. |
+| `automationRules` | Classification rules array (see below). |
 
 When `testSuite` is configured, ado-sync creates a planned run and binds each published result to the matching test point in that suite. If a suite contains multiple configurations for the same test case, set `testConfiguration.id` or `testConfiguration.name` so the target point can be resolved unambiguously.
+
+### Multi-destination publishing
+
+Route results to multiple suites simultaneously using `destinations`:
+
+```json
+{
+  "publishTestResults": {
+    "destinations": [
+      { "suite": "Regression Suite", "testPlan": 1234 },
+      { "suite": "Nightly Suite", "testPlan": 1234 }
+    ]
+  }
+}
+```
+
+When `destinations` is set, it takes precedence over `testSuite`. Each destination creates a separate planned run.
+
+### Automation classification rules
+
+Replace the blanket `sync.markAutomated` toggle with per-test classification:
+
+```json
+{
+  "publishTestResults": {
+    "automationRules": [
+      { "match": { "tags": ["@manual"] }, "classification": "manual" },
+      { "match": { "path": "tests/regression/**" }, "classification": "automated" },
+      { "match": { "default": true }, "classification": "automated" }
+    ]
+  }
+}
+```
+
+Rules evaluate top-to-bottom; first match wins. Each rule can optionally include `destinations` to route matching tests to specific suites.
+
+Use `ado-sync publish --dry-run` to see which rule matches each test.
 
 ---
 

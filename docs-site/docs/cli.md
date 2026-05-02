@@ -6,12 +6,17 @@ ado-sync [options] [command]
 Options:
   -c, --config <path>     Path to config file (default: ado-sync.json)
   --output <format>       Output format: text (default) or json
+  --pat-override <token>  Override auth.token for this invocation
+  --org-override <url>    Override orgUrl for this invocation
   -V, --version           Print version
   -h, --help              Show help
 
 Commands:
   init                    Generate a starter config file (interactive wizard)
   validate                Check config and Azure DevOps connectivity
+  config show             Display fully resolved configuration
+  extensions list         List registered extensions
+  extensions validate     Check extension compatibility
   push                    Push local specs to Azure DevOps
   pull                    Pull updates from Azure DevOps into local files
   status                  Show diff without making changes
@@ -80,6 +85,8 @@ ado-sync push --update-only
 ado-sync push --tags "@smoke and not @wip"
 ado-sync push --source-file specs/login.feature
 ado-sync push --source-file specs/login.feature --source-file specs/checkout.feature
+ado-sync push --include 'src/payments/**'
+ado-sync push --include '**/*.feature' --include '**/*.spec.ts'
 ado-sync push --config-override testPlan.id=9999
 
 # AI-generated test steps for code files
@@ -544,6 +551,9 @@ Set `toolSettings.outputLevel` to `diagnostic` when you want `stale` to also pri
 # List stale TCs (unchanged behaviour)
 ado-sync stale
 
+# Report orphaned suite memberships (respects stalenessPolicy config)
+ado-sync stale --suites
+
 # Preview what --retire would do
 ado-sync stale --retire --dry-run
 
@@ -558,6 +568,7 @@ Options:
 
 | Flag | Description |
 |------|-------------|
+| `--suites` | Report orphaned suite memberships (affected by `stalenessPolicy` config) |
 | `--retire` | Transition stale TCs to the target state and add `ado-sync:retired` tag |
 | `--retire-state <state>` | Target state (default: `Closed`) |
 | `--dry-run` | Preview without making changes |
@@ -635,6 +646,7 @@ Watch local spec files and rerun `push` automatically when files change.
 ado-sync watch
 ado-sync watch --dry-run
 ado-sync watch --source-file specs/login.feature
+ado-sync watch --include 'src/payments/**'
 ado-sync watch --source-file specs/login.feature --update-only
 ado-sync watch --tags "@smoke" --debounce 1200
 ado-sync watch --create-only
@@ -644,6 +656,7 @@ ado-sync watch --link-only
 `watch` forwards the same constrained push modes that `push` supports:
 
 - `--source-file` limits both the watched files and the push scope.
+- `--include` limits to files matching a glob pattern (relative to config dir).
 - `--create-only` creates only unlinked local specs on each run.
 - `--link-only` restores local IDs by unique exact-title match without remote mutations.
 - `--update-only` updates only already linked specs.
@@ -651,6 +664,35 @@ ado-sync watch --link-only
 The mode flags are mutually exclusive in `watch` just as they are in `push`.
 
 Use `watch` when you want the normal push feedback loop after each save, but still need the safety boundaries from the explicit push modes.
+
+---
+
+## `config show`
+
+Display the fully resolved configuration after parent merge, env var overrides, personal overlays, and profile inheritance. The auth token is redacted.
+
+```bash
+ado-sync config show
+ado-sync config show --config-override sync.tagPrefix=mytag
+```
+
+---
+
+## `extensions list`
+
+List extensions registered in the config file.
+
+```bash
+ado-sync extensions list
+```
+
+## `extensions validate`
+
+Load all registered extensions and verify version compatibility with the current ado-sync core.
+
+```bash
+ado-sync extensions validate
+```
 
 ---
 
@@ -689,3 +731,22 @@ Key repository variables:
 | `ADO_SYNC_TREND_DAYS` | `30` | Days of history for trend report |
 | `ADO_SYNC_TREND_WEBHOOK` | | Webhook URL for trend summary |
 | `ADO_SYNC_TREND_WEBHOOK_TYPE` | `slack` | `slack`, `teams`, or `generic` |
+
+---
+
+## Environment variable overrides
+
+All config values can be overridden via `ADO_SYNC_` prefixed environment variables. Env vars take precedence over the config file but are overridden by explicit CLI flags (`--pat-override`, `--org-override`).
+
+| Env var | Overrides |
+|---------|-----------|
+| `ADO_SYNC_PAT` | `auth.token` |
+| `ADO_SYNC_ORG` | `orgUrl` |
+| `ADO_SYNC_PROJECT` | `project` |
+| `ADO_SYNC_TEST_PLAN_ID` | `testPlan.id` |
+
+For nested keys, use double underscores for dot separators and single underscores for camelCase removal:
+
+```bash
+ADO_SYNC_PAT="$TOKEN" ADO_SYNC_ORG="https://dev.azure.com/my-org" ado-sync push
+```
