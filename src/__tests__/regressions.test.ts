@@ -7,6 +7,7 @@ import test from 'node:test';
 import { detectAiEnvironment } from '../ai/summarizer';
 import { AzureClient } from '../azure/client';
 import { getOrCreateSuiteForFile, getTestCasesInSuite, updateTestCase } from '../azure/test-cases';
+import { getAcGateDiagnosticItems, getCoverageDiagnosticItems, getStaleDiagnosticItems, getTrendDiagnosticItems, getValidateDiagnosticItems } from '../cli-diagnostics';
 import { loadConfig } from '../config';
 import { getSyncTargetOwnershipTag } from '../id-markers';
 import { getPreferredMarkerTagPrefix } from '../id-markers';
@@ -311,6 +312,144 @@ test('loadConfig accepts level-rule hierarchy definitions and diagnostic output'
   }
 });
 
+test('getValidateDiagnosticItems summarizes effective validate context', () => {
+  assert.deepEqual(
+    getValidateDiagnosticItems({
+      authType: 'pat',
+      localType: 'gherkin',
+      syncTargetMode: 'query',
+      planIds: [7, 9],
+      overrideCount: 2,
+    }),
+    [
+      { label: 'Auth type', value: 'pat' },
+      { label: 'Local type', value: 'gherkin' },
+      { label: 'Sync target', value: 'query' },
+      { label: 'Plan IDs', value: '7, 9' },
+      { label: 'Overrides', value: '2' },
+    ],
+  );
+});
+
+test('getStaleDiagnosticItems summarizes stale detection context', () => {
+  assert.deepEqual(
+    getStaleDiagnosticItems({
+      syncTargetMode: 'tagged',
+      planIds: [5],
+      markerPrefix: 'tc',
+      ownershipTag: 'ado-sync:smoke-suite',
+      tagExpression: '@smoke',
+      staleCount: 3,
+      retireState: 'Closed',
+      dryRun: true,
+      overrideCount: 1,
+    }),
+    [
+      { label: 'Sync target', value: 'tagged' },
+      { label: 'Plan ID', value: '5' },
+      { label: 'Marker prefix', value: 'tc' },
+      { label: 'Ownership tag', value: 'ado-sync:smoke-suite' },
+      { label: 'Tag filter', value: '@smoke' },
+      { label: 'Stale candidates', value: '3' },
+      { label: 'Retire state', value: 'Closed' },
+      { label: 'Dry run', value: 'yes' },
+      { label: 'Overrides', value: '1' },
+    ],
+  );
+});
+
+test('getCoverageDiagnosticItems summarizes coverage context', () => {
+  assert.deepEqual(
+    getCoverageDiagnosticItems({
+      localType: 'markdown',
+      syncTargetMode: 'suite',
+      tagExpression: '@smoke',
+      totalLocalSpecs: 12,
+      linkedSpecs: 9,
+      unlinkedSpecs: 3,
+      storiesReferenced: 5,
+      storiesCovered: 4,
+      storyPrefix: 'story',
+      failBelow: 80,
+      overrideCount: 1,
+    }),
+    [
+      { label: 'Local type', value: 'markdown' },
+      { label: 'Sync target', value: 'suite' },
+      { label: 'Tag filter', value: '@smoke' },
+      { label: 'Total specs', value: '12' },
+      { label: 'Linked specs', value: '9' },
+      { label: 'Unlinked specs', value: '3' },
+      { label: 'Story prefix', value: 'story' },
+      { label: 'Stories referenced', value: '5' },
+      { label: 'Stories covered', value: '4' },
+      { label: 'Fail-below gate', value: '80%' },
+      { label: 'Overrides', value: '1' },
+    ],
+  );
+});
+
+test('getTrendDiagnosticItems summarizes trend context', () => {
+  assert.deepEqual(
+    getTrendDiagnosticItems({
+      days: 14,
+      maxRuns: 25,
+      topN: 7,
+      runNameFilter: 'nightly',
+      webhookType: 'teams',
+      failOnFlaky: true,
+      failBelow: 85,
+      runsAnalyzed: 12,
+      totalResults: 240,
+      flakyCount: 3,
+      failingCount: 7,
+      overrideCount: 2,
+    }),
+    [
+      { label: 'Days', value: '14' },
+      { label: 'Max runs', value: '25' },
+      { label: 'Top-N', value: '7' },
+      { label: 'Run-name filter', value: 'nightly' },
+      { label: 'Webhook', value: 'teams' },
+      { label: 'Fail on flaky', value: 'yes' },
+      { label: 'Fail-below gate', value: '85%' },
+      { label: 'Runs analyzed', value: '12' },
+      { label: 'Results analyzed', value: '240' },
+      { label: 'Flaky tests', value: '3' },
+      { label: 'Top failing tests', value: '7' },
+      { label: 'Overrides', value: '2' },
+    ],
+  );
+});
+
+test('getAcGateDiagnosticItems summarizes ac-gate context', () => {
+  assert.deepEqual(
+    getAcGateDiagnosticItems({
+      selectorMode: 'area-path',
+      selectorValue: 'Project\\QA',
+      failMode: 'no-ac-only',
+      totalStories: 9,
+      passed: 6,
+      failed: 3,
+      noAc: 2,
+      noTc: 1,
+      overrideCount: 1,
+    }),
+    [
+      { label: 'Selector mode', value: 'area-path' },
+      { label: 'Selector value', value: 'Project\\QA' },
+      { label: 'States', value: 'n/a' },
+      { label: 'Fail mode', value: 'no-ac-only' },
+      { label: 'Stories selected', value: '9' },
+      { label: 'Passed', value: '6' },
+      { label: 'Failed', value: '3' },
+      { label: 'Missing AC', value: '2' },
+      { label: 'Missing TCs', value: '1' },
+      { label: 'Overrides', value: '1' },
+    ],
+  );
+});
+
 test('getOrCreateSuiteForFile anchors generated hierarchy under a named root suite', async () => {
   const createdSuites: Array<{ name: string; parentSuiteId: number }> = [];
   let nextSuiteId = 100;
@@ -427,6 +566,8 @@ test('publishTestResults resolves test configuration names before creating the r
     const summary = await publishTestResults(config, tempDir);
     assert.equal(summary.runId, 77);
     assert.deepEqual(createRunModel.configurationIds, [9]);
+    assert.equal(summary.diagnostics?.configurationId, 9);
+    assert.equal(summary.diagnostics?.sources[0]?.format, 'junit');
   } finally {
     (AzureClient as any).create = originalCreate;
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -490,6 +631,7 @@ test('publishTestResults binds planned runs to configured suites and points', as
     assert.equal(addedResultsPayload[0].testPlan.id, '12');
     assert.equal(addedResultsPayload[0].testCaseRevision, 7);
     assert.equal(addedResultsPayload[0].configuration.id, '9');
+    assert.deepEqual(summary.diagnostics?.plannedRun, { planId: 12, suiteId: 34, pointCount: 1 });
   } finally {
     (AzureClient as any).create = originalCreate;
     fs.rmSync(tempDir, { recursive: true, force: true });

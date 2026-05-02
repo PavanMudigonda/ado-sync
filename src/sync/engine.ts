@@ -5,6 +5,7 @@
 import parseTagExpression from '@cucumber/tag-expressions';
 import * as fs from 'fs';
 import { glob } from 'glob';
+import { minimatch } from 'minimatch';
 import * as os from 'os';
 import * as path from 'path';
 
@@ -50,7 +51,7 @@ import { parseRubyFile } from '../parsers/ruby';
 import { parseRustFile } from '../parsers/rust';
 import { parseSwiftFile } from '../parsers/swift';
 import { parseTestCafeFile } from '../parsers/testcafe';
-import { AzureTestCase, ParsedStep, ParsedTest, SuiteRoute, SyncConfig, SyncResult, TestPlanEntry } from '../types';
+import { AzureTestCase, ClassificationRule, ParsedStep, ParsedTest, StalenessPolicy, SuiteRoute, SyncConfig, SyncResult, TestPlanEntry } from '../types';
 import { hashSteps, hashString, loadCache, saveCache, SyncCache } from './cache';
 import { writebackDocComment, writebackId } from './writeback';
 
@@ -342,6 +343,8 @@ export interface SyncOpts {
   tags?: string;
   /** Restrict the operation to explicit local source files. */
   sourceFiles?: string[];
+  /** Restrict the operation to files matching glob patterns (resolved relative to configDir). */
+  includePatterns?: string[];
   /** Only create new test cases for unlinked local specs; skip linked items. */
   createOnly?: boolean;
   /** Only link unlinked local specs to existing remote test cases; do not create or update remote items. */
@@ -370,11 +373,23 @@ export function validatePushModeOptions(opts: Pick<SyncOpts, 'createOnly' | 'lin
   }
 }
 
-function filterDiscoveredFiles(filePaths: string[], sourceFiles?: string[]): string[] {
-  if (!sourceFiles?.length) return filePaths;
+function filterDiscoveredFiles(filePaths: string[], sourceFiles?: string[], includePatterns?: string[], configDir?: string): string[] {
+  let filtered = filePaths;
 
-  const requested = new Set(sourceFiles.map((filePath) => path.normalize(path.resolve(filePath))));
-  return filePaths.filter((filePath) => requested.has(path.normalize(filePath)));
+  if (sourceFiles?.length) {
+    const requested = new Set(sourceFiles.map((filePath) => path.normalize(path.resolve(filePath))));
+    filtered = filtered.filter((filePath) => requested.has(path.normalize(filePath)));
+  }
+
+  if (includePatterns?.length && configDir) {
+    const resolvedDir = path.resolve(configDir);
+    filtered = filtered.filter((filePath) => {
+      const relative = path.relative(resolvedDir, filePath);
+      return includePatterns.some((pattern) => minimatch(relative, pattern, { dot: true }));
+    });
+  }
+
+  return filtered;
 }
 
 function formatSuitePreview(pathKey?: string): string | undefined {
@@ -481,7 +496,7 @@ export async function push(
       const entryConfig = configForPlanEntry(config, entry);
       const files = filterDiscoveredFiles(
         await discoverFiles(entryConfig.local.include, entryConfig.local.exclude, configDir),
-        opts.sourceFiles
+        opts.sourceFiles, opts.includePatterns, configDir
       );
       const parsed = await parseLocalFiles(files, entryConfig, opts.tags);
       parseFailures.push(...parsed.failures);
@@ -531,7 +546,7 @@ async function pushSingle(
   if (!opts._preloadedTests) {
     const files = filterDiscoveredFiles(
       await discoverFiles(config.local.include, config.local.exclude, configDir),
-      opts.sourceFiles
+      opts.sourceFiles, opts.includePatterns, configDir
     );
     const parsed = await parseLocalFiles(files, config, opts.tags);
     resolvedTests = parsed.tests;
@@ -1064,7 +1079,7 @@ async function pullSingle(
 ): Promise<SyncResult[]> {
   const files = filterDiscoveredFiles(
     await discoverFiles(config.local.include, config.local.exclude, configDir),
-    opts.sourceFiles
+    opts.sourceFiles, opts.includePatterns, configDir
   );
   const parsed = await parseLocalFiles(files, config, opts.tags);
   failOnParseErrors('pull', parsed.failures);
@@ -1230,12 +1245,13 @@ async function pullSingle(
 export async function status(
   config: SyncConfig,
   configDir: string,
-  opts: Pick<SyncOpts, 'tags' | 'sourceFiles' | 'onProgress' | 'onAiProgress' | 'aiSummary'> = {}
+  opts: Pick<SyncOpts, 'tags' | 'sourceFiles' | 'includePatterns' | 'onProgress' | 'onAiProgress' | 'aiSummary'> = {}
 ): Promise<SyncResult[]> {
   return push(config, configDir, {
     dryRun: true,
     tags: opts.tags,
     sourceFiles: opts.sourceFiles,
+    includePatterns: opts.includePatterns,
     onProgress: opts.onProgress,
     onAiProgress: opts.onAiProgress,
     aiSummary: opts.aiSummary,
@@ -1515,12 +1531,78 @@ function buildPullMarkdownContent(tc: AzureTestCase, tagPrefix: string): string 
   return lines.join('\n');
 }
 
+// ─── Automation classification rules ─────────────────────────────────────────
+
+export interface ClassificationResult {
+  classification: 'automated' | 'manual';
+  matchedRule: ClassificationRule;
+  destinations?: string[];
+}
+
+export function evaluateClassificationRules(
+  rules: ClassificationRule[],
+  testTags: string[],
+  testPath: string
+): ClassificationResult | undefined {
+  for (const rule of rules) {
+    if (rule.match.default) {
+      return { classification: rule.classification, matchedRule: rule, destinations: rule.destinations };
+    }
+    if (rule.match.tags?.length) {
+      const normalizedTags = testTags.map((t) => t.startsWith('@') ? t : `@${t}`);
+      const matchTags = rule.match.tags.map((t) => t.startsWith('@') ? t : `@${t}`);
+      if (matchTags.some((mt) => normalizedTags.includes(mt))) {
+        return { classification: rule.classification, matchedRule: rule, destinations: rule.destinations };
+      }
+    }
+    if (rule.match.path) {
+      if (minimatch(testPath, rule.match.path, { dot: true })) {
+        return { classification: rule.classification, matchedRule: rule, destinations: rule.destinations };
+      }
+    }
+  }
+  return undefined;
+}
+
+// ─── Staleness policy helpers ────────────────────────────────────────────────
+
+export function parseDuration(duration: string): number {
+  const match = duration.match(/^(\d+)\s*(d|h|m|w)$/i);
+  if (!match) throw new Error(`Invalid duration format: "${duration}". Expected format: 30d, 24h, 7w, etc.`);
+  const value = parseInt(match[1], 10);
+  const unit = match[2].toLowerCase();
+  const ms: Record<string, number> = { m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 };
+  return value * ms[unit];
+}
+
+export function enforceStalenessPolicy(
+  staleCases: StaleTestCase[],
+  policy: StalenessPolicy | undefined
+): { prunable: StaleTestCase[]; exceeded: boolean } {
+  if (!policy) return { prunable: staleCases, exceeded: false };
+
+  let prunable = staleCases;
+
+  if (policy.maxAge) {
+    const maxAgeMs = parseDuration(policy.maxAge);
+    const cutoff = Date.now() - maxAgeMs;
+    prunable = prunable.filter((tc) => {
+      if (!tc.lastSyncDate) return true;
+      return new Date(tc.lastSyncDate).getTime() < cutoff;
+    });
+  }
+
+  const exceeded = policy.maxPruneCount !== undefined && prunable.length > policy.maxPruneCount;
+  return { prunable, exceeded };
+}
+
 // ─── Stale test case detection ────────────────────────────────────────────────
 
 export interface StaleTestCase {
   id: number;
   title: string;
   tags: string[];
+  lastSyncDate?: string;
 }
 
 /**
@@ -1532,11 +1614,11 @@ export interface StaleTestCase {
 export async function detectStaleTestCases(
   config: SyncConfig,
   configDir: string,
-  opts: { tags?: string; sourceFiles?: string[] } = {}
+  opts: { tags?: string; sourceFiles?: string[]; includePatterns?: string[] } = {}
 ): Promise<StaleTestCase[]> {
   const files = filterDiscoveredFiles(
     await discoverFiles(config.local.include, config.local.exclude, configDir),
-    opts.sourceFiles
+    opts.sourceFiles, opts.includePatterns, configDir
   );
   const parsed = await parseLocalFiles(files, config, opts.tags);
   failOnParseErrors('stale test case detection', parsed.failures);
@@ -1594,11 +1676,11 @@ export interface CoverageReport {
 export async function coverageReport(
   config: SyncConfig,
   configDir: string,
-  opts: { tags?: string; sourceFiles?: string[] } = {}
+  opts: { tags?: string; sourceFiles?: string[]; includePatterns?: string[] } = {}
 ): Promise<CoverageReport> {
   const files = filterDiscoveredFiles(
     await discoverFiles(config.local.include, config.local.exclude, configDir),
-    opts.sourceFiles
+    opts.sourceFiles, opts.includePatterns, configDir
   );
   const parsed = await parseLocalFiles(files, config, opts.tags);
   failOnParseErrors('coverage report', parsed.failures);

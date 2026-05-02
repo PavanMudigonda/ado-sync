@@ -63,6 +63,8 @@ Output:
 All checks passed.
 ```
 
+Set `toolSettings.outputLevel` to `diagnostic` when you want `validate` to also print the effective auth type, local parser type, sync-target mode, tested plan IDs, and runtime override count.
+
 ---
 
 ## `push`
@@ -208,7 +210,7 @@ ado-sync pull --ai-provider azureinference --ai-url https://myendpoint.inference
 
 `--source-file` limits pull to the selected local files. When pull-create is enabled in config, ado-sync skips pull-create for source-file-limited runs because a partial local slice cannot safely infer which unlinked remote test cases should become new files.
 
-Set `toolSettings.outputLevel` to `diagnostic` when you want push, pull, and status to print per-result detail strings, changed-field summaries, and generated suite previews consistently during troubleshooting.
+Set `toolSettings.outputLevel` to `diagnostic` when you want push, pull, status, and validate to print richer troubleshooting detail consistently during troubleshooting.
 
 ---
 
@@ -417,6 +419,8 @@ ado-sync publish-test-results \
 
 See [publish-test-results.md](publish-test-results.md) for full reference including config-based setup.
 
+Set `toolSettings.outputLevel` to `diagnostic` when you want `publish-test-results` to print resolved result sources, configuration ID, planned-run bindings, attachment counts, and AI-analysis counts in addition to the normal publish summary.
+
 ---
 
 ## `find-tagged`
@@ -512,6 +516,8 @@ Options:
 | `--query <wiql>` | WIQL query to select stories |
 | `--states <states>` | Story states to include (default: `Active,Resolved,Closed`) |
 
+Set `toolSettings.outputLevel` to `diagnostic` when you want `ac-gate` to also print the story-selection mode, selector value, state scope, fail mode, and pass/fail bucket counts.
+
 **Outcomes per story:**
 - `pass` — has AC and at least one linked TC
 - `no-ac` — missing Acceptance Criteria
@@ -531,6 +537,8 @@ Options:
 ## `stale --retire`
 
 The `stale` command now supports automatically retiring orphaned Azure Test Cases rather than just listing them.
+
+Set `toolSettings.outputLevel` to `diagnostic` when you want `stale` to also print the effective sync target mode, plan scope, marker prefix, ownership tag, tag filter, stale candidate count, and retire settings.
 
 ```bash
 # List stale TCs (unchanged behaviour)
@@ -555,6 +563,8 @@ Options:
 | `--dry-run` | Preview without making changes |
 
 ---
+
+Set `toolSettings.outputLevel` to `diagnostic` when you want `coverage` to also print the effective local parser type, sync target mode, tag filter, story-link prefix, raw linked and unlinked counts, and fail-below gate.
 
 ## `trend`
 
@@ -601,6 +611,8 @@ Options:
 | `--webhook-type <type>` | `slack` (default), `teams`, or `generic` |
 | `--fail-on-flaky` | Exit 1 when any flaky tests are found |
 | `--fail-below <percent>` | Exit 1 when overall pass rate is below threshold |
+
+Set `toolSettings.outputLevel` to `diagnostic` when you want `trend` to also print the effective date window, max-run cap, top-N cap, run-name filter, webhook mode, fail gates, and analyzed run/result counts.
 
 **Flaky test definition:** a test that both passed and failed at least once in the sampled period.
 

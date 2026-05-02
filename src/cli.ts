@@ -20,7 +20,9 @@ import * as readline from 'readline';
 import pkg from '../package.json';
 import { AiSummaryOpts, detectAiEnvironment } from './ai/summarizer';
 import { AzureClient } from './azure/client';
+import { getAcGateDiagnosticItems, getCoverageDiagnosticItems, getStaleDiagnosticItems, getTrendDiagnosticItems, getValidateDiagnosticItems, ValidateDiagnostics } from './cli-diagnostics';
 import { applyOverrides, CONFIG_TEMPLATE_JSON, CONFIG_TEMPLATE_YAML, loadConfig, resolveConfigPath } from './config';
+import { getPreferredMarkerTagPrefix, getSyncTargetOwnershipTag } from './id-markers';
 import { coverageReport, detectStaleTestCases, pull, push, status, validatePushModeOptions } from './sync/engine';
 import { generateSpecs, loadGenerateContextContent } from './sync/generate';
 import { generateManifests } from './sync/manifest';
@@ -39,6 +41,16 @@ program
 // Global options
 program.option('-c, --config <path>', 'Path to config file (default: ado-sync.json)');
 program.option('--output <format>', 'Output format: text (default) or json');
+program.option('--pat-override <token>', 'Override auth.token for this invocation (not persisted to config)');
+program.option('--org-override <url>', 'Override orgUrl for this invocation (not persisted to config)');
+
+function loadConfigWithOverrides(configPath: string): SyncConfig {
+  const config = loadConfig(configPath);
+  const globalOpts = program.opts();
+  if (globalOpts.patOverride) config.auth.token = globalOpts.patOverride;
+  if (globalOpts.orgOverride) config.orgUrl = globalOpts.orgOverride;
+  return config;
+}
 
 // ─── Error formatting (L) ─────────────────────────────────────────────────────
 
@@ -73,6 +85,13 @@ function collect(value: string, previous: string[]): string[] {
 function normalizeSourceFilesForCli(sourceFiles: string[] | undefined, configDir: string): string[] | undefined {
   if (!sourceFiles?.length) return undefined;
   return sourceFiles.map((filePath) => path.normalize(path.resolve(configDir, filePath)));
+}
+
+function printDiagnosticItems(items: Array<{ label: string; value: string }>): void {
+  console.log(chalk.bold('Diagnostics:'));
+  for (const item of items) {
+    console.log(chalk.dim(`  ${item.label}: ${item.value}`));
+  }
 }
 
 // ─── AI summary helper ────────────────────────────────────────────────────────
@@ -235,6 +254,88 @@ async function runInitWizard(isYaml: boolean): Promise<string> {
   return JSON.stringify(cfg, null, 2) + '\n';
 }
 
+// ─── config ───────────────────────────────────────────────────────────────────
+
+const configCmd = program
+  .command('config')
+  .description('Configuration inspection and management');
+
+configCmd
+  .command('show')
+  .description('Display the fully resolved configuration (after parent merge, env vars, and overrides)')
+  .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
+  .action(async (opts) => {
+    const globalOpts = program.opts();
+    try {
+      const configPath = resolveConfigPath(globalOpts.config);
+      const config = loadConfigWithOverrides(configPath);
+      if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
+      const redacted = { ...config, auth: { ...config.auth, token: config.auth?.token ? '***' : undefined } };
+      process.stdout.write(JSON.stringify(redacted, null, 2) + '\n');
+    } catch (err: unknown) {
+      handleError(err);
+    }
+  });
+
+// ─── extensions ───────────────────────────────────────────────────────────────
+
+const extCmd = program
+  .command('extensions')
+  .description('Manage ado-sync extensions');
+
+extCmd
+  .command('list')
+  .description('List registered extensions from config')
+  .action(async () => {
+    const globalOpts = program.opts();
+    try {
+      const configPath = resolveConfigPath(globalOpts.config);
+      const config = loadConfigWithOverrides(configPath);
+      const extensions = config.extensions ?? [];
+      if (extensions.length === 0) {
+        console.log(chalk.dim('No extensions configured.'));
+        return;
+      }
+      for (const ext of extensions) {
+        console.log(`${chalk.bold(ext.name)} ${chalk.dim(`(${ext.type})`)} — ${ext.package}`);
+        if (ext.filePatterns?.length) {
+          console.log(chalk.dim(`  patterns: ${ext.filePatterns.join(', ')}`));
+        }
+      }
+    } catch (err: unknown) {
+      handleError(err);
+    }
+  });
+
+extCmd
+  .command('validate')
+  .description('Validate extension compatibility and loading')
+  .action(async () => {
+    const globalOpts = program.opts();
+    try {
+      const configPath = resolveConfigPath(globalOpts.config);
+      const config = loadConfigWithOverrides(configPath);
+      const configDir = path.dirname(configPath);
+      const extensions = config.extensions ?? [];
+      if (extensions.length === 0) {
+        console.log(chalk.dim('No extensions configured.'));
+        return;
+      }
+      const { loadExtensions, validateExtensions } = await import('./extensions');
+      const loaded = await loadExtensions(extensions, configDir);
+      const errors = validateExtensions(loaded, pkg.version);
+      if (errors.length) {
+        for (const err of errors) console.log(chalk.red(`  ✗ ${err}`));
+        process.exit(1);
+      }
+      for (const ext of loaded) {
+        console.log(chalk.green(`  ✓ ${ext.config.name}`) + chalk.dim(` v${ext.manifest.version} (${ext.manifest.type})`));
+      }
+    } catch (err: unknown) {
+      handleError(err);
+    }
+  });
+
 // ─── push ─────────────────────────────────────────────────────────────────────
 
 program
@@ -246,6 +347,7 @@ program
   .option('--update-only', 'Only update linked test cases; skip unlinked specs and removed-case detection')
   .option('--tags <expression>', 'Only sync scenarios matching this tag expression (e.g. "@smoke and not @wip")')
   .option('--source-file <path>', 'Restrict the operation to a specific local file (repeatable)', collect, [])
+  .option('--include <pattern>', 'Restrict the operation to files matching a glob pattern relative to config dir (repeatable)', collect, [])
   .option('--config-override <path=value>', 'Override a config value (repeatable, e.g. --config-override sync.tagPrefix=mytag)', collect, [])
   .option('--ai-provider <provider>', 'AI provider: local (node-llama-cpp), heuristic, ollama, docker, openai, anthropic, huggingface, bedrock, azureai, none (disable)')
   .option('--ai-model <model>', 'local: GGUF path; ollama/docker: model tag; openai/anthropic/huggingface/bedrock/azureai: model name or id')
@@ -257,7 +359,7 @@ program
     const globalOpts = program.opts();
     try {
       const configPath = resolveConfigPath(globalOpts.config);
-      const config = loadConfig(configPath);
+      const config = loadConfigWithOverrides(configPath);
       if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
       validatePushModeOptions(opts);
       const configDir = path.dirname(configPath);
@@ -272,6 +374,7 @@ program
       if (opts.updateOnly) console.log(chalk.dim('Mode:    update-only'));
       if (opts.tags) console.log(chalk.dim(`Tags:    ${opts.tags}`));
       if (opts.sourceFile?.length) console.log(chalk.dim(`Files:   ${opts.sourceFile.join(', ')}`));
+      if (opts.include?.length) console.log(chalk.dim(`Include: ${opts.include.join(', ')}`));
       if (opts.configOverride?.length) console.log(chalk.dim(`Overrides: ${opts.configOverride.join(', ')}`));
       console.log('');
 
@@ -280,7 +383,7 @@ program
       const outputFormat = program.opts().output;
       const onProgress = outputFormat === 'json' ? undefined : createProgressCallback(isTTY);
       const onAiProgress = outputFormat === 'json' ? undefined : createAiProgressCallback(isTTY);
-      const results = await push(config, configDir, { dryRun: opts.dryRun, createOnly: opts.createOnly, linkOnly: opts.linkOnly, updateOnly: opts.updateOnly, tags: opts.tags, sourceFiles: opts.sourceFile, onProgress, onAiProgress, aiSummary });
+      const results = await push(config, configDir, { dryRun: opts.dryRun, createOnly: opts.createOnly, linkOnly: opts.linkOnly, updateOnly: opts.updateOnly, tags: opts.tags, sourceFiles: opts.sourceFile, includePatterns: opts.include?.length ? opts.include : undefined, onProgress, onAiProgress, aiSummary });
       if (isTTY && outputFormat !== 'json') clearProgressLine();
       printResults(results, config.toolSettings?.outputLevel, outputFormat);
     } catch (err: unknown) {
@@ -296,12 +399,13 @@ program
   .option('--dry-run', 'Show what would change without modifying local files')
   .option('--tags <expression>', 'Only sync scenarios matching this tag expression (e.g. "@smoke and not @wip")')
   .option('--source-file <path>', 'Restrict the operation to a specific local file (repeatable)', collect, [])
+  .option('--include <pattern>', 'Restrict the operation to files matching a glob pattern relative to config dir (repeatable)', collect, [])
   .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
   .action(async (opts) => {
     const globalOpts = program.opts();
     try {
       const configPath = resolveConfigPath(globalOpts.config);
-      const config = loadConfig(configPath);
+      const config = loadConfigWithOverrides(configPath);
       if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
       const configDir = path.dirname(configPath);
 
@@ -310,12 +414,13 @@ program
       if (opts.dryRun) console.log(chalk.yellow('Dry run — no changes will be made'));
       if (opts.tags) console.log(chalk.dim(`Tags:    ${opts.tags}`));
       if (opts.sourceFile?.length) console.log(chalk.dim(`Files:   ${opts.sourceFile.join(', ')}`));
+      if (opts.include?.length) console.log(chalk.dim(`Include: ${opts.include.join(', ')}`));
       console.log('');
 
       const isTTY = process.stdout.isTTY ?? false;
       const outputFormat = program.opts().output;
       const onProgress = outputFormat === 'json' ? undefined : createProgressCallback(isTTY);
-      const results = await pull(config, configDir, { dryRun: opts.dryRun, tags: opts.tags, sourceFiles: opts.sourceFile, onProgress });
+      const results = await pull(config, configDir, { dryRun: opts.dryRun, tags: opts.tags, sourceFiles: opts.sourceFile, includePatterns: opts.include?.length ? opts.include : undefined, onProgress });
       if (isTTY && outputFormat !== 'json') clearProgressLine();
       printResults(results, config.toolSettings?.outputLevel, outputFormat);
     } catch (err: unknown) {
@@ -330,6 +435,7 @@ program
   .description('Show diff between local specs and Azure DevOps without making changes')
   .option('--tags <expression>', 'Only check scenarios matching this tag expression')
   .option('--source-file <path>', 'Restrict the operation to a specific local file (repeatable)', collect, [])
+  .option('--include <pattern>', 'Restrict the operation to files matching a glob pattern relative to config dir (repeatable)', collect, [])
   .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
   .option('--ai-provider <provider>', 'AI provider: local (node-llama-cpp), heuristic, ollama, docker, openai, anthropic, huggingface, bedrock, azureai, none (disable)')
   .option('--ai-model <model>', 'local: GGUF path; ollama/docker: model tag; openai/anthropic/huggingface/bedrock/azureai: model name or id')
@@ -341,7 +447,7 @@ program
     const globalOpts = program.opts();
     try {
       const configPath = resolveConfigPath(globalOpts.config);
-      const config = loadConfig(configPath);
+      const config = loadConfigWithOverrides(configPath);
       if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
       const configDir = path.dirname(configPath);
 
@@ -349,6 +455,7 @@ program
       console.log(chalk.dim(`Config: ${configPath}`));
       if (opts.tags) console.log(chalk.dim(`Tags:   ${opts.tags}`));
       if (opts.sourceFile?.length) console.log(chalk.dim(`Files:  ${opts.sourceFile.join(', ')}`));
+      if (opts.include?.length) console.log(chalk.dim(`Include: ${opts.include.join(', ')}`));
       console.log('');
 
       const aiSummary = buildAiOpts(opts, config, configDir);
@@ -356,7 +463,7 @@ program
       const outputFormat = program.opts().output;
       const onProgress = outputFormat === 'json' ? undefined : createProgressCallback(isTTY);
       const onAiProgress = outputFormat === 'json' ? undefined : createAiProgressCallback(isTTY);
-      const results = await status(config, configDir, { tags: opts.tags, sourceFiles: opts.sourceFile, onProgress, onAiProgress, aiSummary });
+      const results = await status(config, configDir, { tags: opts.tags, sourceFiles: opts.sourceFile, includePatterns: opts.include?.length ? opts.include : undefined, onProgress, onAiProgress, aiSummary });
       if (isTTY && outputFormat !== 'json') clearProgressLine();
       printResults(results, config.toolSettings?.outputLevel, outputFormat);
     } catch (err: unknown) {
@@ -395,7 +502,7 @@ program
     const globalOpts = program.opts();
     try {
       const configPath = resolveConfigPath(globalOpts.config);
-      const config = loadConfig(configPath);
+      const config = loadConfigWithOverrides(configPath);
       const cliPublishOverrides = [
         ...(opts.testConfiguration ? [/^\d+$/.test(opts.testConfiguration)
           ? `publishTestResults.testConfiguration.id=${opts.testConfiguration}`
@@ -455,6 +562,28 @@ program
       if (result.runId) {
         console.log(chalk.dim(`Run ID: ${result.runId}`));
         console.log(chalk.dim(`URL: ${result.runUrl}`));
+      }
+      if (config.toolSettings?.outputLevel === 'diagnostic' && result.diagnostics) {
+        console.log('');
+        console.log(chalk.bold('Diagnostics:'));
+        if (result.diagnostics.sources.length) {
+          console.log(chalk.dim('  Sources:'));
+          for (const source of result.diagnostics.sources) {
+            console.log(chalk.dim(`    ${path.relative(process.cwd(), source.filePath)} (${source.format})`));
+          }
+        }
+        if (result.diagnostics.configurationId) {
+          console.log(chalk.dim(`  Configuration ID: ${result.diagnostics.configurationId}`));
+        }
+        if (result.diagnostics.plannedRun) {
+          console.log(chalk.dim(`  Planned run: plan ${result.diagnostics.plannedRun.planId}, suite ${result.diagnostics.plannedRun.suiteId}, ${result.diagnostics.plannedRun.pointCount} point(s)`));
+        }
+        if (result.diagnostics.attachments) {
+          console.log(chalk.dim(`  Attachments: ${result.diagnostics.attachments.resultCount} result-level, ${result.diagnostics.attachments.runCount} run-level`));
+        }
+        if (result.diagnostics.analyzedFailures) {
+          console.log(chalk.dim(`  AI analyses: ${result.diagnostics.analyzedFailures}`));
+        }
       }
 
       if (result.issuesSummary) {
@@ -640,9 +769,18 @@ program
 
     // 1. Load config
     let config: SyncConfig;
+    let validateDiagnostics: ValidateDiagnostics | undefined;
     try {
       config = loadConfig(configPath);
       if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
+      const plans = config.testPlans ?? [config.testPlan];
+      validateDiagnostics = {
+        authType: config.auth.type,
+        localType: config.local.type,
+        syncTargetMode: config.syncTarget?.mode ?? 'suite',
+        planIds: plans.map((plan) => plan.id),
+        overrideCount: opts.configOverride?.length ?? 0,
+      };
       console.log(chalk.green('  ✓ Config is valid'));
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -657,6 +795,10 @@ program
       console.log(chalk.green(`  ✓ Azure connection established (${config.orgUrl})`));
     } catch (err: unknown) {
       console.log(chalk.red(`  ✗ Azure connection failed: ${formatError(err)}`));
+      if (config.toolSettings?.outputLevel === 'diagnostic' && validateDiagnostics) {
+        console.log('');
+        printDiagnosticItems(getValidateDiagnosticItems(validateDiagnostics));
+      }
       process.exit(1);
     }
 
@@ -668,6 +810,10 @@ program
       console.log(chalk.green(`  ✓ Project "${config.project}" found`));
     } catch (err: unknown) {
       console.log(chalk.red(`  ✗ Project "${config.project}" not found: ${formatError(err)}`));
+      if (config.toolSettings?.outputLevel === 'diagnostic' && validateDiagnostics) {
+        console.log('');
+        printDiagnosticItems(getValidateDiagnosticItems(validateDiagnostics));
+      }
       process.exit(1);
     }
 
@@ -685,6 +831,11 @@ program
       }
     }
 
+    if (config.toolSettings?.outputLevel === 'diagnostic' && validateDiagnostics) {
+      console.log('');
+      printDiagnosticItems(getValidateDiagnosticItems(validateDiagnostics));
+    }
+
     if (!allPlansOk) process.exit(1);
     console.log('');
     console.log(chalk.green('All checks passed.'));
@@ -697,6 +848,7 @@ program
   .description('Show field-level diff between local specs and Azure DevOps')
   .option('--tags <expression>', 'Only check scenarios matching this tag expression')
   .option('--source-file <path>', 'Restrict the operation to a specific local file (repeatable)', collect, [])
+  .option('--include <pattern>', 'Restrict the operation to files matching a glob pattern relative to config dir (repeatable)', collect, [])
   .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
   .option('--format <fmt>', 'Output format: text (default) or json')
   .option('--fail-on-drift', 'Exit with code 1 when any differences are found (useful as a CI quality gate)')
@@ -708,7 +860,7 @@ program
     const globalOpts = program.opts();
     try {
       const configPath = resolveConfigPath(globalOpts.config);
-      const config = loadConfig(configPath);
+      const config = loadConfigWithOverrides(configPath);
       if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
       const configDir = path.dirname(configPath);
 
@@ -716,10 +868,11 @@ program
       console.log(chalk.dim(`Config: ${configPath}`));
       if (opts.tags) console.log(chalk.dim(`Tags:   ${opts.tags}`));
       if (opts.sourceFile?.length) console.log(chalk.dim(`Files:  ${opts.sourceFile.join(', ')}`));
+      if (opts.include?.length) console.log(chalk.dim(`Include: ${opts.include.join(', ')}`));
       console.log('');
 
       const aiSummary = buildAiOpts(opts, config, configDir);
-      const results = await status(config, configDir, { tags: opts.tags, sourceFiles: opts.sourceFile, aiSummary });
+      const results = await status(config, configDir, { tags: opts.tags, sourceFiles: opts.sourceFile, includePatterns: opts.include?.length ? opts.include : undefined, aiSummary });
 
       // --format json or global --output json
       const outputFormat = opts.format ?? program.opts().output;
@@ -801,7 +954,7 @@ program
     const globalOpts = program.opts();
     try {
       const configPath = resolveConfigPath(globalOpts.config);
-      const config = loadConfig(configPath);
+      const config = loadConfigWithOverrides(configPath);
       if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
       const configDir = path.dirname(configPath);
       const outputFormat = globalOpts.output;
@@ -934,7 +1087,7 @@ program
     const globalOpts = program.opts();
     try {
       const configPath = resolveConfigPath(globalOpts.config);
-      const config = loadConfig(configPath);
+      const config = loadConfigWithOverrides(configPath);
       if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
 
       const { AzureClient } = await import('./azure/client');
@@ -988,7 +1141,7 @@ program
     const globalOpts = program.opts();
     try {
       const configPath = resolveConfigPath(globalOpts.config);
-      const config = loadConfig(configPath);
+      const config = loadConfigWithOverrides(configPath);
       if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
 
       const { AzureClient } = await import('./azure/client');
@@ -996,15 +1149,23 @@ program
       const client = await AzureClient.create(config);
 
       let storyIds: number[] = [];
+      let selectorMode: 'story-ids' | 'query' | 'area-path' | 'default-states' = 'default-states';
+      let selectorValue = opts.states ?? 'Active,Resolved,Closed';
 
       if (opts.query) {
         const stories = await getWorkItemsByQuery(client, config.project, opts.query);
         storyIds = stories.map((s: any) => s.id);
+        selectorMode = 'query';
+        selectorValue = opts.query;
       } else if (opts.areaPath) {
         const stories = await getWorkItemsByAreaPath(client, config.project, opts.areaPath);
         storyIds = stories.map((s: any) => s.id);
+        selectorMode = 'area-path';
+        selectorValue = opts.areaPath;
       } else if (opts.storyIds) {
         storyIds = opts.storyIds.split(',').map((s: string) => parseInt(s.trim(), 10)).filter(Boolean);
+        selectorMode = 'story-ids';
+        selectorValue = opts.storyIds;
       } else {
         // Default: all active stories in project
         const states = opts.states ?? 'Active,Resolved,Closed';
@@ -1012,6 +1173,7 @@ program
         const wiql = `SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = '${config.project.replace(/'/g, "''")}' AND [System.WorkItemType] = 'User Story' AND [System.State] IN (${stateList}) ORDER BY [System.Id]`;
         const stories = await getWorkItemsByQuery(client, config.project, wiql);
         storyIds = stories.map((s: any) => s.id);
+        selectorValue = states;
       }
 
       if (storyIds.length === 0) {
@@ -1025,6 +1187,23 @@ program
       console.log('');
 
       const report = await acGate(client, config.project, storyIds, config.orgUrl);
+      if (config.toolSettings?.outputLevel === 'diagnostic') {
+        const noAc = report.failed.filter((r) => r.outcome === 'no-ac').length;
+        const noTc = report.failed.filter((r) => r.outcome === 'no-tc').length;
+        printDiagnosticItems(getAcGateDiagnosticItems({
+          selectorMode,
+          selectorValue,
+          states: selectorMode === 'default-states' ? selectorValue : undefined,
+          failMode: opts.failOnNoAc ? 'no-ac-only' : 'all-failures',
+          totalStories: storyIds.length,
+          passed: report.passed.length,
+          failed: report.failed.length,
+          noAc,
+          noTc,
+          overrideCount: opts.configOverride?.length ?? 0,
+        }));
+        console.log('');
+      }
 
       const outputFormat = globalOpts.output;
       if (outputFormat === 'json') {
@@ -1063,6 +1242,7 @@ program
   .command('stale')
   .description('List Azure DevOps Test Cases that have no corresponding local spec')
   .option('--tags <expression>', 'Only consider local specs matching this tag expression')
+  .option('--suites', 'Report orphaned suite memberships (affected by stalenessPolicy config)')
   .option('--retire', 'Automatically transition stale Test Cases to Closed state and tag ado-sync:retired')
   .option('--retire-state <state>', 'Target state when retiring (default: Closed)', 'Closed')
   .option('--dry-run', 'Show what --retire would do without making changes')
@@ -1071,7 +1251,7 @@ program
     const globalOpts = program.opts();
     try {
       const configPath = resolveConfigPath(globalOpts.config);
-      const config = loadConfig(configPath);
+      const config = loadConfigWithOverrides(configPath);
       if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
       const configDir = path.dirname(configPath);
 
@@ -1082,6 +1262,23 @@ program
       console.log('');
 
       const staleCases = await detectStaleTestCases(config, configDir, { tags: opts.tags });
+      if (config.toolSettings?.outputLevel === 'diagnostic') {
+        console.log(chalk.bold('Diagnostics:'));
+        for (const item of getStaleDiagnosticItems({
+          syncTargetMode: config.syncTarget?.mode ?? 'suite',
+          planIds: (config.testPlans?.length ? config.testPlans : [config.testPlan]).map((plan) => plan.id),
+          markerPrefix: getPreferredMarkerTagPrefix(config),
+          ownershipTag: getSyncTargetOwnershipTag(config),
+          tagExpression: opts.tags,
+          staleCount: staleCases.length,
+          retireState: opts.retire ? opts.retireState : undefined,
+          dryRun: Boolean(opts.dryRun),
+          overrideCount: opts.configOverride?.length ?? 0,
+        })) {
+          console.log(chalk.dim(`  ${item.label}: ${item.value}`));
+        }
+        console.log('');
+      }
 
       const outputFormat = globalOpts.output;
       if (outputFormat === 'json') {
@@ -1148,7 +1345,7 @@ program
     const globalOpts = program.opts();
     try {
       const configPath = resolveConfigPath(globalOpts.config);
-      const config = loadConfig(configPath);
+      const config = loadConfigWithOverrides(configPath);
       if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
       const configDir = path.dirname(configPath);
 
@@ -1158,6 +1355,24 @@ program
       console.log('');
 
       const report = await coverageReport(config, configDir, { tags: opts.tags });
+      const threshold = opts.failBelow ? parseInt(opts.failBelow, 10) : undefined;
+
+      if (config.toolSettings?.outputLevel === 'diagnostic') {
+        printDiagnosticItems(getCoverageDiagnosticItems({
+          localType: config.local.type,
+          syncTargetMode: config.syncTarget?.mode ?? 'suite',
+          tagExpression: opts.tags,
+          totalLocalSpecs: report.totalLocalSpecs,
+          linkedSpecs: report.linkedSpecs,
+          unlinkedSpecs: report.unlinkedSpecs,
+          storiesReferenced: report.storiesReferenced.length,
+          storiesCovered: report.storiesCovered.length,
+          storyPrefix: config.sync?.links?.find((link) => link.prefix === 'story')?.prefix ?? 'story',
+          failBelow: threshold,
+          overrideCount: opts.configOverride?.length ?? 0,
+        }));
+        console.log('');
+      }
 
       const outputFormat = globalOpts.output;
       if (outputFormat === 'json') {
@@ -1184,7 +1399,6 @@ program
         }
       }
 
-      const threshold = opts.failBelow ? parseInt(opts.failBelow, 10) : undefined;
       if (threshold !== undefined && report.specLinkRate < threshold) {
         console.error(chalk.red(`\nSpec link rate ${report.specLinkRate}% is below threshold ${threshold}%`));
         process.exit(1);
@@ -1212,7 +1426,7 @@ program
     const globalOpts = program.opts();
     try {
       const configPath = resolveConfigPath(globalOpts.config);
-      const config = loadConfig(configPath);
+      const config = loadConfigWithOverrides(configPath);
       if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
 
       const { trendReport, postTrendToWebhook } = await import('./azure/test-runs');
@@ -1228,6 +1442,25 @@ program
         topN:          parseInt(opts.top,     10),
         runNameFilter: opts.runName,
       });
+      const threshold = opts.failBelow ? parseInt(opts.failBelow, 10) : undefined;
+
+      if (config.toolSettings?.outputLevel === 'diagnostic') {
+        printDiagnosticItems(getTrendDiagnosticItems({
+          days: parseInt(opts.days, 10),
+          maxRuns: parseInt(opts.maxRuns, 10),
+          topN: parseInt(opts.top, 10),
+          runNameFilter: opts.runName,
+          webhookType: opts.webhookUrl ? (opts.webhookType ?? 'slack') : undefined,
+          failOnFlaky: Boolean(opts.failOnFlaky),
+          failBelow: threshold,
+          runsAnalyzed: report.runsAnalyzed,
+          totalResults: report.totalResults,
+          flakyCount: report.flakyTests.length,
+          failingCount: report.topFailingTests.length,
+          overrideCount: opts.configOverride?.length ?? 0,
+        }));
+        console.log('');
+      }
 
       const outputFormat = globalOpts.output;
       if (outputFormat === 'json') {
@@ -1274,7 +1507,6 @@ program
         process.exit(1);
       }
 
-      const threshold = opts.failBelow ? parseInt(opts.failBelow, 10) : undefined;
       if (threshold !== undefined && report.overallPassRate < threshold) {
         console.error(chalk.red(`\nOverall pass rate ${report.overallPassRate}% is below threshold ${threshold}%`));
         process.exit(1);
@@ -1295,6 +1527,7 @@ program
   .option('--update-only', 'Only update linked test cases during each watched push')
   .option('--tags <expression>', 'Only sync scenarios matching this tag expression')
   .option('--source-file <path>', 'Restrict watch and push to a specific local file (repeatable)', collect, [])
+  .option('--include <pattern>', 'Restrict the operation to files matching a glob pattern relative to config dir (repeatable)', collect, [])
   .option('--debounce <ms>', 'Debounce delay in milliseconds before running push (default: 800)', '800')
   .option('--config-override <path=value>', 'Override a config value (repeatable)', collect, [])
   .option('--ai-provider <provider>', 'AI provider for test step generation')
@@ -1305,7 +1538,7 @@ program
     const globalOpts = program.opts();
     try {
       const configPath = resolveConfigPath(globalOpts.config);
-      const config = loadConfig(configPath);
+      const config = loadConfigWithOverrides(configPath);
       if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
       validatePushModeOptions(opts);
       const configDir = path.dirname(configPath);
@@ -1322,6 +1555,7 @@ program
       if (opts.updateOnly) console.log(chalk.dim('Mode:    update-only'));
       if (opts.tags) console.log(chalk.dim(`Tags:    ${opts.tags}`));
       if (sourceFiles?.length) console.log(chalk.dim(`Files:   ${sourceFiles.join(', ')}`));
+      if (opts.include?.length) console.log(chalk.dim(`Include: ${opts.include.join(', ')}`));
       console.log('');
       console.log(chalk.dim(`Watching ${configDir} for changes... (Ctrl+C to stop)`));
       console.log('');
@@ -1346,6 +1580,7 @@ program
             updateOnly: opts.updateOnly,
             tags: opts.tags,
             sourceFiles,
+            includePatterns: opts.include?.length ? opts.include : undefined,
             onProgress,
             aiSummary,
           });
@@ -1406,7 +1641,7 @@ program
     const globalOpts = program.opts();
     try {
       const configPath = resolveConfigPath(globalOpts.config);
-      const config = loadConfig(configPath);
+      const config = loadConfigWithOverrides(configPath);
       if (opts.configOverride?.length) applyOverrides(config, opts.configOverride);
 
       if (!opts.hours && !opts.days) {

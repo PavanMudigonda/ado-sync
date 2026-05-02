@@ -289,7 +289,7 @@ Use `testPlans` instead of `testPlan` to sync one repo against multiple Test Pla
 |-------|---------|-------------|
 | `parentConfig` | *(none)* | Relative path to a parent config file. Child values override parent values (deep merge). Circular references are detected and rejected. |
 | `ignoreParentConfig` | `false` | When `true`, the `parentConfig` reference is ignored. Useful to opt a child config out of inheritance temporarily. |
-| `outputLevel` | `"normal"` | `"normal"` — show all results per-line. `"quiet"` — suppress `skipped` lines, show only actionable results. `"verbose"` — show extra suite-preview lines. `"diagnostic"` — show detail strings, changed fields, and suite previews consistently across push, pull, and status. |
+| `outputLevel` | `"normal"` | `"normal"` — show all results per-line. `"quiet"` — suppress `skipped` lines, show only actionable results. `"verbose"` — show extra suite-preview lines. `"diagnostic"` — show richer troubleshooting detail across push, pull, status, validate, stale, coverage, trend, ac-gate, and publish-test-results, including changed fields, suite previews, resolved publish inputs, validate context, stale-detection scope, coverage inputs, trend controls, and AC-gate scope. |
 
 ---
 

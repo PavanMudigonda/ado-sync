@@ -1272,6 +1272,20 @@ export interface PublishResult {
   other: number;
   /** Summary of issues filed for failures. Present only when createIssuesOnFailure is configured. */
   issuesSummary?: CreateIssuesResult;
+  diagnostics?: {
+    sources: Array<{ filePath: string; format: string }>;
+    configurationId?: number;
+    plannedRun?: {
+      planId: number;
+      suiteId: number;
+      pointCount: number;
+    };
+    attachments?: {
+      resultCount: number;
+      runCount: number;
+    };
+    analyzedFailures?: number;
+  };
 }
 
 function pageItems<T>(page: any): T[] {
@@ -1535,6 +1549,29 @@ async function resolvePlannedRunContext(
   };
 }
 
+export interface ResolvedDestination {
+  suite: { name?: string; id?: number; testPlan?: string | number };
+}
+
+export function getPublishDestinations(config: SyncConfig): ResolvedDestination[] {
+  const pubConfig = config.publishTestResults;
+  if (!pubConfig) return [];
+
+  const destinations: ResolvedDestination[] = [];
+
+  if (pubConfig.destinations?.length) {
+    for (const dest of pubConfig.destinations) {
+      destinations.push({
+        suite: { name: dest.suite, id: dest.suiteId, testPlan: dest.testPlan },
+      });
+    }
+  } else if (pubConfig.testSuite) {
+    destinations.push({ suite: pubConfig.testSuite });
+  }
+
+  return destinations;
+}
+
 export async function publishTestResults(
   config: SyncConfig,
   configDir: string,
@@ -1605,6 +1642,7 @@ export async function publishTestResults(
   // Parse all result files
   const allResults: ParsedResult[] = [];
   const treatInconclusiveAs = pubConfig?.treatInconclusiveAs;
+  const resolvedSources: Array<{ filePath: string; format: string }> = [];
 
   for (const src of sources) {
     if (!fs.existsSync(src.filePath)) {
@@ -1613,6 +1651,7 @@ export async function publishTestResults(
     const content = fs.readFileSync(src.filePath, 'utf8');
     const format = src.format ?? detectFormat(src.filePath, content);
     const fileDir = path.dirname(src.filePath);
+    resolvedSources.push({ filePath: src.filePath, format });
 
     switch (format) {
       case 'trx':
@@ -1676,7 +1715,18 @@ export async function publishTestResults(
           /* dryRun */ true,
         )
       : undefined;
-    return { runId: 0, runUrl: '', totalResults: effectiveResults.length, passed, failed, other, issuesSummary };
+    return {
+      runId: 0,
+      runUrl: '',
+      totalResults: effectiveResults.length,
+      passed,
+      failed,
+      other,
+      issuesSummary,
+      diagnostics: {
+        sources: resolvedSources,
+      },
+    };
   }
 
   const client = await AzureClient.create(config);
@@ -1763,6 +1813,8 @@ export async function publishTestResults(
   // Scan an optional folder for additional screenshots/videos/logs
   let folderResultAtts = new Map<number, TestAttachment[]>();
   let folderRunAtts: TestAttachment[] = [];
+  let uploadedResultAttachmentCount = 0;
+  let uploadedRunAttachmentCount = 0;
 
   const attCfg  = pubConfig?.attachments;
   const attFolder = opts.attachmentsFolder
@@ -1800,6 +1852,7 @@ export async function publishTestResults(
         { attachmentType: att.attachmentType, fileName: att.fileName, stream: att.data.toString('base64') },
         config.project, runId, addedResult.id
       );
+      uploadedResultAttachmentCount++;
     }
   }
 
@@ -1809,6 +1862,7 @@ export async function publishTestResults(
       { attachmentType: att.attachmentType, fileName: att.fileName, stream: att.data.toString('base64') },
       config.project, runId
     );
+    uploadedRunAttachmentCount++;
   }
 
   // ── AI failure analysis ───────────────────────────────────────────────────
@@ -1820,6 +1874,7 @@ export async function publishTestResults(
       : configAi?.analyzeFailures && configAi.provider && configAi.provider !== 'none' && configAi.provider !== 'heuristic' && configAi.provider !== 'local'
         ? { provider: configAi.provider as AiSummaryOpts['provider'], model: configAi.model, baseUrl: configAi.baseUrl, apiKey: configAi.apiKey }
         : undefined;
+  let analyzedFailures = 0;
 
   if (effectiveAiOpts) {
     for (let i = 0; i < effectiveResults.length; i++) {
@@ -1836,6 +1891,7 @@ export async function publishTestResults(
       ).catch(() => null);
 
       if (analysis) {
+        analyzedFailures++;
         const comment = `**Root cause:** ${analysis.rootCause}\n\n**Suggestion:** ${analysis.suggestion}`;
         try {
           await (testApi as any).updateTestResults(
@@ -1869,5 +1925,63 @@ export async function publishTestResults(
     );
   }
 
-  return { runId, runUrl, totalResults: effectiveResults.length, passed, failed, other, issuesSummary };
+  return finalizePublishResult({
+    config,
+    runId,
+    runUrl,
+    totalResults: effectiveResults.length,
+    passed,
+    failed,
+    other,
+    issuesSummary,
+    resolvedSources,
+    resolvedConfigurationId,
+    plannedRunContext,
+    uploadedResultAttachmentCount,
+    uploadedRunAttachmentCount,
+    analyzedFailures,
+  });
+}
+
+function finalizePublishResult(input: {
+  config: SyncConfig;
+  runId: number;
+  runUrl: string;
+  totalResults: number;
+  passed: number;
+  failed: number;
+  other: number;
+  issuesSummary?: CreateIssuesResult;
+  resolvedSources: Array<{ filePath: string; format: string }>;
+  resolvedConfigurationId?: number;
+  plannedRunContext?: PlannedRunContext;
+  uploadedResultAttachmentCount: number;
+  uploadedRunAttachmentCount: number;
+  analyzedFailures?: number;
+}): PublishResult {
+  return {
+    runId: input.runId,
+    runUrl: input.runUrl,
+    totalResults: input.totalResults,
+    passed: input.passed,
+    failed: input.failed,
+    other: input.other,
+    issuesSummary: input.issuesSummary,
+    diagnostics: {
+      sources: input.resolvedSources,
+      configurationId: input.resolvedConfigurationId,
+      plannedRun: input.plannedRunContext
+        ? {
+            planId: input.plannedRunContext.planId,
+            suiteId: input.plannedRunContext.suiteId,
+            pointCount: input.plannedRunContext.pointIds.length,
+          }
+        : undefined,
+      attachments: {
+        resultCount: input.uploadedResultAttachmentCount,
+        runCount: input.uploadedRunAttachmentCount,
+      },
+      analyzedFailures: input.analyzedFailures,
+    },
+  };
 }
