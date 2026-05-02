@@ -772,15 +772,15 @@ A: A parser extension — a package exporting a `parse(filePath): TestSpec[]` fu
 
 | Error code | Phase | Message | Resolution |
 |------------|-------|---------|------------|
-| `E_STALE_THRESHOLD` | 2 | "Pruning would remove {n}; exceeds maxPruneCount" | Review with `--dry-run`, then increase threshold |
-| `E_SCOPE_EMPTY` | 3 | "No specs matched the --include pattern" | Verify pattern with `ado-sync list --include '...'` |
-| `E_AUTH_OVERRIDE` | 3 | "PAT override failed authentication" | Verify PAT scopes |
-| `E_JSONC_PARSE` | 4 | "Config parse error at line {n}" | Check for malformed JSON (comments are fine, trailing commas are not) |
-| `E_PROFILE_NOT_FOUND` | 4 | "Profile '{name}' not found" | Create at `~/.config/ado-sync/profiles/{name}.json` |
-| `E_CLASSIFY_AMBIGUOUS` | 5 | "Multiple rules matched with equal priority" | Add explicit priority or make patterns mutually exclusive |
-| `E_PUBLISH_PARTIAL` | 5 | "Published to 1 of 2 destinations" | Check suite permissions; re-run to retry |
-| `E_EXT_VERSION` | 6 | "Extension requires core ≥{v}" | Upgrade ado-sync or downgrade extension |
-| `E_EXT_LOAD` | 6 | "Failed to load extension '{pkg}'" | Run `npm ls {pkg}`; check `extensions validate` |
+| `E_STALE_THRESHOLD` | 2 | `Pruning would remove {n}; exceeds maxPruneCount` | Review with `--dry-run`, then increase threshold |
+| `E_SCOPE_EMPTY` | 3 | `No specs matched the --include pattern` | Verify pattern with `ado-sync list --include '...'` |
+| `E_AUTH_OVERRIDE` | 3 | `PAT override failed authentication` | Verify PAT scopes |
+| `E_JSONC_PARSE` | 4 | `Config parse error at line {n}` | Check for malformed JSON (comments are fine, trailing commas are not) |
+| `E_PROFILE_NOT_FOUND` | 4 | `Profile '{name}' not found` | Create at `~/.config/ado-sync/profiles/{name}.json` |
+| `E_CLASSIFY_AMBIGUOUS` | 5 | `Multiple rules matched with equal priority` | Add explicit priority or make patterns mutually exclusive |
+| `E_PUBLISH_PARTIAL` | 5 | `Published to 1 of 2 destinations` | Check suite permissions; re-run to retry |
+| `E_EXT_VERSION` | 6 | `Extension requires core ≥{v}` | Upgrade ado-sync or downgrade extension |
+| `E_EXT_LOAD` | 6 | `Failed to load extension '{pkg}'` | Run `npm ls {pkg}`; check `extensions validate` |
 
 ---
 
