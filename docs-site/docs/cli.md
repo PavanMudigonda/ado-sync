@@ -6,12 +6,17 @@ ado-sync [options] [command]
 Options:
   -c, --config <path>     Path to config file (default: ado-sync.json)
   --output <format>       Output format: text (default) or json
+  --pat-override <token>  Override auth.token for this invocation
+  --org-override <url>    Override orgUrl for this invocation
   -V, --version           Print version
   -h, --help              Show help
 
 Commands:
   init                    Generate a starter config file (interactive wizard)
   validate                Check config and Azure DevOps connectivity
+  config show             Display fully resolved configuration
+  extensions list         List registered extensions
+  extensions validate     Check extension compatibility
   push                    Push local specs to Azure DevOps
   pull                    Pull updates from Azure DevOps into local files
   status                  Show diff without making changes
@@ -63,6 +68,8 @@ Output:
 All checks passed.
 ```
 
+Set `toolSettings.outputLevel` to `diagnostic` when you want `validate` to also print the effective auth type, local parser type, sync-target mode, tested plan IDs, and runtime override count.
+
 ---
 
 ## `push`
@@ -78,6 +85,8 @@ ado-sync push --update-only
 ado-sync push --tags "@smoke and not @wip"
 ado-sync push --source-file specs/login.feature
 ado-sync push --source-file specs/login.feature --source-file specs/checkout.feature
+ado-sync push --include 'src/payments/**'
+ado-sync push --include '**/*.feature' --include '**/*.spec.ts'
 ado-sync push --config-override testPlan.id=9999
 
 # AI-generated test steps for code files
@@ -208,7 +217,7 @@ ado-sync pull --ai-provider azureinference --ai-url https://myendpoint.inference
 
 `--source-file` limits pull to the selected local files. When pull-create is enabled in config, ado-sync skips pull-create for source-file-limited runs because a partial local slice cannot safely infer which unlinked remote test cases should become new files.
 
-Set `toolSettings.outputLevel` to `diagnostic` when you want push, pull, and status to print per-result detail strings, changed-field summaries, and generated suite previews consistently during troubleshooting.
+Set `toolSettings.outputLevel` to `diagnostic` when you want push, pull, status, and validate to print richer troubleshooting detail consistently during troubleshooting.
 
 ---
 
@@ -417,6 +426,8 @@ ado-sync publish-test-results \
 
 See [publish-test-results.md](publish-test-results.md) for full reference including config-based setup.
 
+Set `toolSettings.outputLevel` to `diagnostic` when you want `publish-test-results` to print resolved result sources, configuration ID, planned-run bindings, attachment counts, and AI-analysis counts in addition to the normal publish summary.
+
 ---
 
 ## `find-tagged`
@@ -512,6 +523,8 @@ Options:
 | `--query <wiql>` | WIQL query to select stories |
 | `--states <states>` | Story states to include (default: `Active,Resolved,Closed`) |
 
+Set `toolSettings.outputLevel` to `diagnostic` when you want `ac-gate` to also print the story-selection mode, selector value, state scope, fail mode, and pass/fail bucket counts.
+
 **Outcomes per story:**
 - `pass` — has AC and at least one linked TC
 - `no-ac` — missing Acceptance Criteria
@@ -532,9 +545,14 @@ Options:
 
 The `stale` command now supports automatically retiring orphaned Azure Test Cases rather than just listing them.
 
+Set `toolSettings.outputLevel` to `diagnostic` when you want `stale` to also print the effective sync target mode, plan scope, marker prefix, ownership tag, tag filter, stale candidate count, and retire settings.
+
 ```bash
 # List stale TCs (unchanged behaviour)
 ado-sync stale
+
+# Report orphaned suite memberships (respects stalenessPolicy config)
+ado-sync stale --suites
 
 # Preview what --retire would do
 ado-sync stale --retire --dry-run
@@ -550,11 +568,14 @@ Options:
 
 | Flag | Description |
 |------|-------------|
+| `--suites` | Report orphaned suite memberships (affected by `stalenessPolicy` config) |
 | `--retire` | Transition stale TCs to the target state and add `ado-sync:retired` tag |
 | `--retire-state <state>` | Target state (default: `Closed`) |
 | `--dry-run` | Preview without making changes |
 
 ---
+
+Set `toolSettings.outputLevel` to `diagnostic` when you want `coverage` to also print the effective local parser type, sync target mode, tag filter, story-link prefix, raw linked and unlinked counts, and fail-below gate.
 
 ## `trend`
 
@@ -602,6 +623,8 @@ Options:
 | `--fail-on-flaky` | Exit 1 when any flaky tests are found |
 | `--fail-below <percent>` | Exit 1 when overall pass rate is below threshold |
 
+Set `toolSettings.outputLevel` to `diagnostic` when you want `trend` to also print the effective date window, max-run cap, top-N cap, run-name filter, webhook mode, fail gates, and analyzed run/result counts.
+
 **Flaky test definition:** a test that both passed and failed at least once in the sampled period.
 
 **CI usage:**
@@ -623,6 +646,7 @@ Watch local spec files and rerun `push` automatically when files change.
 ado-sync watch
 ado-sync watch --dry-run
 ado-sync watch --source-file specs/login.feature
+ado-sync watch --include 'src/payments/**'
 ado-sync watch --source-file specs/login.feature --update-only
 ado-sync watch --tags "@smoke" --debounce 1200
 ado-sync watch --create-only
@@ -632,6 +656,7 @@ ado-sync watch --link-only
 `watch` forwards the same constrained push modes that `push` supports:
 
 - `--source-file` limits both the watched files and the push scope.
+- `--include` limits to files matching a glob pattern (relative to config dir).
 - `--create-only` creates only unlinked local specs on each run.
 - `--link-only` restores local IDs by unique exact-title match without remote mutations.
 - `--update-only` updates only already linked specs.
@@ -639,6 +664,35 @@ ado-sync watch --link-only
 The mode flags are mutually exclusive in `watch` just as they are in `push`.
 
 Use `watch` when you want the normal push feedback loop after each save, but still need the safety boundaries from the explicit push modes.
+
+---
+
+## `config show`
+
+Display the fully resolved configuration after parent merge, env var overrides, personal overlays, and profile inheritance. The auth token is redacted.
+
+```bash
+ado-sync config show
+ado-sync config show --config-override sync.tagPrefix=mytag
+```
+
+---
+
+## `extensions list`
+
+List extensions registered in the config file.
+
+```bash
+ado-sync extensions list
+```
+
+## `extensions validate`
+
+Load all registered extensions and verify version compatibility with the current ado-sync core.
+
+```bash
+ado-sync extensions validate
+```
 
 ---
 
@@ -677,3 +731,22 @@ Key repository variables:
 | `ADO_SYNC_TREND_DAYS` | `30` | Days of history for trend report |
 | `ADO_SYNC_TREND_WEBHOOK` | | Webhook URL for trend summary |
 | `ADO_SYNC_TREND_WEBHOOK_TYPE` | `slack` | `slack`, `teams`, or `generic` |
+
+---
+
+## Environment variable overrides
+
+All config values can be overridden via `ADO_SYNC_` prefixed environment variables. Env vars take precedence over the config file but are overridden by explicit CLI flags (`--pat-override`, `--org-override`).
+
+| Env var | Overrides |
+|---------|-----------|
+| `ADO_SYNC_PAT` | `auth.token` |
+| `ADO_SYNC_ORG` | `orgUrl` |
+| `ADO_SYNC_PROJECT` | `project` |
+| `ADO_SYNC_TEST_PLAN_ID` | `testPlan.id` |
+
+For nested keys, use double underscores for dot separators and single underscores for camelCase removal:
+
+```bash
+ADO_SYNC_PAT="$TOKEN" ADO_SYNC_ORG="https://dev.azure.com/my-org" ado-sync push
+```

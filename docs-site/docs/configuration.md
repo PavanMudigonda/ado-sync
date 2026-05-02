@@ -289,7 +289,7 @@ Use `testPlans` instead of `testPlan` to sync one repo against multiple Test Pla
 |-------|---------|-------------|
 | `parentConfig` | *(none)* | Relative path to a parent config file. Child values override parent values (deep merge). Circular references are detected and rejected. |
 | `ignoreParentConfig` | `false` | When `true`, the `parentConfig` reference is ignored. Useful to opt a child config out of inheritance temporarily. |
-| `outputLevel` | `"normal"` | `"normal"` — show all results per-line. `"quiet"` — suppress `skipped` lines, show only actionable results. `"verbose"` — show extra suite-preview lines. `"diagnostic"` — show detail strings, changed fields, and suite previews consistently across push, pull, and status. |
+| `outputLevel` | `"normal"` | `"normal"` — show all results per-line. `"quiet"` — suppress `skipped` lines, show only actionable results. `"verbose"` — show extra suite-preview lines. `"diagnostic"` — show richer troubleshooting detail across push, pull, status, validate, stale, coverage, trend, ac-gate, and publish-test-results, including changed fields, suite previews, resolved publish inputs, validate context, stale-detection scope, coverage inputs, trend controls, and AC-gate scope. |
 
 ---
 
@@ -407,3 +407,160 @@ Child config:
 Child values override parent values using a deep merge (arrays are replaced, not concatenated). Circular references are detected and throw an error.
 
 Set `toolSettings.ignoreParentConfig: true` in any child to opt out of inheritance for that config without editing the parent.
+
+---
+
+## JSONC support
+
+Config files can use the `.jsonc` extension (or plain `.json`) with JavaScript-style comments and trailing commas:
+
+```jsonc
+{
+  // Organization settings
+  "orgUrl": "https://dev.azure.com/myorg",
+  "project": "MyProject",
+  "auth": {
+    "type": "pat",
+    "token": "$ADO_PAT", // expanded from environment
+  }
+}
+```
+
+Auto-detected config filenames: `ado-sync.json`, `ado-sync.jsonc`, `ado-sync.yml`, `ado-sync.yaml`.
+
+---
+
+## Personal config overlays
+
+Place a `.ado-sync.local.json` (or `.local.jsonc`, `.local.yml`, `.local.yaml`) file next to your main config to override values without modifying the shared file. This overlay is deep-merged on top of the resolved config.
+
+```
+repo/
+  ado-sync.json              ← shared, committed
+  .ado-sync.local.json       ← personal (add to .gitignore)
+```
+
+Example overlay:
+```json
+{
+  "auth": { "token": "$MY_PERSONAL_PAT" }
+}
+```
+
+---
+
+## Remote profiles (extends)
+
+Reference a shared profile from `~/.config/ado-sync/profiles/` to inherit org-level connection settings:
+
+```json
+{
+  "extends": "acme-corp",
+  "testPlan": { "id": 1234 },
+  "local": { "type": "gherkin", "include": "specs/**/*.feature" }
+}
+```
+
+Profile file at `~/.config/ado-sync/profiles/acme-corp.json`:
+```json
+{
+  "orgUrl": "https://dev.azure.com/acme",
+  "project": "Engineering",
+  "auth": { "type": "pat", "token": "$ADO_PAT" }
+}
+```
+
+Profile values serve as the lowest-priority base layer (profile < parent < child < overlay < env vars < CLI flags).
+
+---
+
+## Staleness policies
+
+Configure per-plan staleness policies to automatically detect and limit pruning of stale test case memberships:
+
+```jsonc
+{
+  "testPlans": [{
+    "id": 1234,
+    "hierarchy": { "mode": "byFolder" },
+    "stalenessPolicy": {
+      "maxAge": "30d",
+      "pruneBranches": ["merged", "deleted"],
+      "maxPruneCount": 50
+    }
+  }]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `maxAge` | Duration (e.g. `30d`, `24h`, `7w`) after which unsynced TCs are considered stale |
+| `pruneBranches` | Branch states to consider for pruning |
+| `maxPruneCount` | Safety cap — if more TCs would be pruned, abort with an error |
+
+---
+
+## Automation classification rules
+
+Replace the blanket `sync.markAutomated` toggle with fine-grained rules:
+
+```jsonc
+{
+  "publishTestResults": {
+    "automationRules": [
+      { "match": { "tags": ["@manual", "@exploratory"] }, "classification": "manual" },
+      { "match": { "path": "tests/regression/**" }, "classification": "automated", "destinations": ["Regression Suite", "Nightly Suite"] },
+      { "match": { "default": true }, "classification": "automated" }
+    ]
+  }
+}
+```
+
+Rules are evaluated top-to-bottom; first match wins.
+
+---
+
+## Multi-destination publishing
+
+Route test results to multiple suites simultaneously:
+
+```jsonc
+{
+  "publishTestResults": {
+    "destinations": [
+      { "suite": "Regression Suite", "testPlan": 1234 },
+      { "suite": "Nightly Suite", "testPlan": 1234 }
+    ]
+  }
+}
+```
+
+When `destinations` is set, it takes precedence over the legacy single `testSuite` field.
+
+---
+
+## Extensions
+
+Register extensions for custom parsers, routing policies, or result ingestion:
+
+```jsonc
+{
+  "extensions": [
+    {
+      "name": "robot-framework-parser",
+      "type": "parser",
+      "package": "@acme/ado-sync-robot",
+      "filePatterns": ["**/*.robot"]
+    },
+    {
+      "name": "service-catalog-router",
+      "type": "routing-policy",
+      "package": "@acme/ado-sync-catalog-router"
+    }
+  ]
+}
+```
+
+Extension types: `parser`, `routing-policy`, `result-ingestion`, `field-transform`.
+
+Validate with `ado-sync extensions validate`.

@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as yaml from 'js-yaml';
+import * as os from 'os';
 import * as path from 'path';
 
 import { SyncConfig } from './types';
@@ -51,7 +52,7 @@ function validateHierarchyConfig(
   }
 }
 
-const CONFIG_FILENAMES = ['ado-sync.json', 'ado-sync.yml', 'ado-sync.yaml'];
+const CONFIG_FILENAMES = ['ado-sync.json', 'ado-sync.jsonc', 'ado-sync.yml', 'ado-sync.yaml'];
 
 export function resolveConfigPath(explicitPath?: string): string {
   if (explicitPath) {
@@ -93,19 +94,73 @@ function deepMerge(target: Record<string, any>, source: Record<string, any>): Re
   return result;
 }
 
+function stripJsonComments(text: string): string {
+  let result = '';
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === '"') {
+      const start = i;
+      i++;
+      while (i < text.length && text[i] !== '"') {
+        if (text[i] === '\\') i++;
+        i++;
+      }
+      i++;
+      result += text.slice(start, i);
+    } else if (text[i] === '/' && text[i + 1] === '/') {
+      while (i < text.length && text[i] !== '\n') i++;
+    } else if (text[i] === '/' && text[i + 1] === '*') {
+      i += 2;
+      while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) i++;
+      i += 2;
+    } else {
+      result += text[i];
+      i++;
+    }
+  }
+  // Remove trailing commas before } or ]
+  return result.replace(/,\s*([}\]])/g, '$1');
+}
+
 /**
- * Load a config file (JSON or YAML) and return the raw parsed object.
+ * Load a config file (JSON/JSONC or YAML) and return the raw parsed object.
  */
 function loadRawConfig(configPath: string): Record<string, any> {
   const raw = fs.readFileSync(configPath, 'utf8');
   const ext = path.extname(configPath).toLowerCase();
-  if (ext === '.json') {
-    return JSON.parse(raw);
+  if (ext === '.json' || ext === '.jsonc') {
+    return JSON.parse(stripJsonComments(raw));
   }
   return yaml.load(raw) as Record<string, any>;
 }
 
 const MAX_CONFIG_DEPTH = 10;
+
+const PROFILE_EXTENSIONS = ['.json', '.jsonc', '.yml', '.yaml'];
+
+function resolveProfilePath(profileName: string): string | undefined {
+  const profileDir = path.join(os.homedir(), '.config', 'ado-sync', 'profiles');
+  for (const ext of PROFILE_EXTENSIONS) {
+    const candidate = path.join(profileDir, profileName + ext);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+function applyExtendsProfile(config: Record<string, any>): Record<string, any> {
+  const extendsName = config.extends;
+  if (!extendsName || typeof extendsName !== 'string') return config;
+
+  const profilePath = resolveProfilePath(extendsName);
+  if (!profilePath) {
+    throw new Error(
+      `Profile "${extendsName}" not found. Expected at ~/.config/ado-sync/profiles/${extendsName}.{json,jsonc,yml,yaml}`
+    );
+  }
+  const profile = loadRawConfig(profilePath);
+  const { extends: _, ...configWithoutExtends } = config;
+  return deepMerge(profile, configWithoutExtends);
+}
 
 /**
  * Resolve hierarchical configuration by loading parent configs recursively.
@@ -139,16 +194,76 @@ function resolveHierarchicalConfig(
       throw new Error(`Parent config file not found: ${resolvedParent} (referenced from ${absPath})`);
     }
     const parentConfig = resolveHierarchicalConfig(resolvedParent, visited, depth + 1);
-    // Child overrides parent
-    return deepMerge(parentConfig, parsed);
+    const merged = deepMerge(parentConfig, parsed);
+    return applyExtendsProfile(merged);
   }
 
-  return parsed;
+  return applyExtendsProfile(parsed);
+}
+
+const ENV_PREFIX = 'ADO_SYNC_';
+
+const ENV_ALIASES: Record<string, (cfg: SyncConfig, value: string) => void> = {
+  ADO_SYNC_PAT: (cfg, v) => { cfg.auth = cfg.auth ?? { type: 'pat', token: '' }; cfg.auth.token = v; },
+  ADO_SYNC_ORG: (cfg, v) => { cfg.orgUrl = v; },
+  ADO_SYNC_PROJECT: (cfg, v) => { cfg.project = v; },
+  ADO_SYNC_TEST_PLAN_ID: (cfg, v) => { cfg.testPlan = cfg.testPlan ?? { id: 0 } as any; cfg.testPlan.id = parseInt(v, 10); },
+};
+
+function applyEnvVarOverrides(cfg: SyncConfig): void {
+  for (const [envKey, apply] of Object.entries(ENV_ALIASES)) {
+    const val = process.env[envKey];
+    if (val !== undefined && val !== '') {
+      apply(cfg, val);
+    }
+  }
+
+  for (const [key, val] of Object.entries(process.env)) {
+    if (!key.startsWith(ENV_PREFIX) || !val || ENV_ALIASES[key]) continue;
+    const configPath = key.slice(ENV_PREFIX.length).toLowerCase().replace(/__/g, '.').replace(/_/g, '');
+    setNestedValue(cfg as Record<string, any>, configPath, val);
+  }
+}
+
+function setNestedValue(obj: Record<string, any>, dotPath: string, value: string): void {
+  const parts = dotPath.split('.');
+  let current = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (current[parts[i]] === undefined || current[parts[i]] === null) {
+      current[parts[i]] = {};
+    }
+    current = current[parts[i]];
+  }
+  const leaf = parts[parts.length - 1];
+  const numVal = Number(value);
+  if (value === 'true') current[leaf] = true;
+  else if (value === 'false') current[leaf] = false;
+  else if (!isNaN(numVal) && value.trim() !== '') current[leaf] = numVal;
+  else current[leaf] = value;
+}
+
+const LOCAL_OVERLAY_NAMES = ['.ado-sync.local.json', '.ado-sync.local.jsonc', '.ado-sync.local.yml', '.ado-sync.local.yaml'];
+
+function findLocalOverlay(configDir: string): string | undefined {
+  for (const name of LOCAL_OVERLAY_NAMES) {
+    const candidate = path.join(configDir, name);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return undefined;
 }
 
 export function loadConfig(configPath: string): SyncConfig {
   const parsed = resolveHierarchicalConfig(configPath);
-  const cfg = parsed as SyncConfig;
+
+  // Apply personal overlay (.ado-sync.local.json / .ado-sync.local.yaml)
+  const configDir = path.dirname(path.resolve(configPath));
+  const localOverlay = findLocalOverlay(configDir);
+  const merged = localOverlay ? deepMerge(parsed, loadRawConfig(localOverlay)) : parsed;
+
+  const cfg = merged as SyncConfig;
+
+  // Apply ADO_SYNC_* env var overrides (env > config file, but CLI flags > env)
+  applyEnvVarOverrides(cfg);
 
   // Expand env var tokens like "$MY_TOKEN"
   if (cfg.auth?.token?.startsWith('$')) {

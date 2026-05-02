@@ -53,6 +53,7 @@
     "glob": "^13.0.6",
     "js-yaml": "^4.1.1",
     "jszip": "^3.10.1",
+    "minimatch": "^10.2.5",
     "node-llama-cpp": "^3.18.1"
   },
   "devDependencies": {

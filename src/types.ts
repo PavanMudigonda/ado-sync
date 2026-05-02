@@ -62,6 +62,12 @@ export interface SuiteHierarchyConfig {
   cleanupEmptySuites?: boolean;
 }
 
+export interface StalenessPolicy {
+  maxAge?: string;
+  pruneBranches?: string[];
+  maxPruneCount?: number;
+}
+
 export interface TestPlanEntry {
   id: number;
   suiteId?: number;
@@ -93,6 +99,7 @@ export interface TestPlanEntry {
    * matching suite in addition to the primary suite.
    */
   suiteConditions?: SuiteCondition[];
+  stalenessPolicy?: StalenessPolicy;
 }
 
 // ─── State configuration ─────────────────────────────────────────────────────
@@ -242,6 +249,12 @@ export interface TestResultSource {
   format?: string;
 }
 
+export interface PublishDestination {
+  suite: string;
+  testPlan?: string | number;
+  suiteId?: number;
+}
+
 export interface PublishTestResultsConfig {
   testResult?: {
     sources: TestResultSource[];
@@ -259,6 +272,7 @@ export interface PublishTestResultsConfig {
     id?: number;
     testPlan?: string | number;
   };
+  destinations?: PublishDestination[];
   testRunSettings?: {
     name?: string;
     comment?: string;
@@ -299,6 +313,17 @@ export interface PublishTestResultsConfig {
      */
     matchByTestName?: boolean;
   };
+  automationRules?: ClassificationRule[];
+}
+
+export interface ClassificationRule {
+  match: {
+    tags?: string[];
+    path?: string;
+    default?: boolean;
+  };
+  classification: 'automated' | 'manual';
+  destinations?: string[];
 }
 
 // ─── Tool settings configuration ─────────────────────────────────────────────
@@ -403,6 +428,8 @@ export interface SyncConfig {
   customizations?: CustomizationsConfig;
   /** Publish test results configuration */
   publishTestResults?: PublishTestResultsConfig;
+  /** Registered extensions */
+  extensions?: ExtensionConfig[];
   /** Sync behaviour */
   sync?: {
     /** Prefix used in tags/comments to store the Azure test case ID. Default: 'tc' */
@@ -639,4 +666,33 @@ export interface SyncResult {
   changedFields?: string[];
   /** Per-field diff details for richer `diff` output. */
   diffDetail?: DiffDetail[];
+}
+
+// ─── Extension system ────────────────────────────────────────────────────────
+
+export type ExtensionType = 'parser' | 'routing-policy' | 'result-ingestion' | 'field-transform';
+
+export interface ExtensionConfig {
+  name: string;
+  type: ExtensionType;
+  package: string;
+  filePatterns?: string[];
+  options?: Record<string, unknown>;
+}
+
+export interface ExtensionManifest {
+  name: string;
+  version: string;
+  type: ExtensionType;
+  minCoreVersion?: string;
+}
+
+export interface ParserExtension {
+  manifest: ExtensionManifest;
+  parseFile(filePath: string, config: SyncConfig): Promise<ParsedTest[]>;
+}
+
+export interface RoutingPolicyExtension {
+  manifest: ExtensionManifest;
+  resolveRoute(test: ParsedTest, config: SyncConfig): Promise<string | undefined>;
 }
